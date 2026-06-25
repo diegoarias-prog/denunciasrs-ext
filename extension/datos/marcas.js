@@ -16,14 +16,15 @@ window.MARCAS_BASE = {
   "Produbanco Grupo Promerica":  { pais: "Ecuador",     correo: "diegoarias@seguridadmaxima.net", sitio: "" },
   "Banpro Grupo Promerica":      { pais: "Nicaragua",   correo: "diegoarias@seguridadmaxima.net", sitio: "" },
   "BANCO PICHINCHA":             { pais: "Ecuador",     correo: "uspc0008@pichincha.com",         sitio: "https://www.facebook.com/BancoPichinchaEcuador/" },
-  "DEUNA":                       { pais: "Ecuador",     correo: "diegoarias@seguridadmaxima.net", sitio: "" },
+  "DEUNA":                       { pais: "Ecuador",     correo: "uspc0008@pichincha.com",         sitio: "" },
   "Diners Club":                 { pais: "Ecuador",     correo: "diegoarias@seguridadmaxima.net", sitio: "" },
   "Banco Solidario":             { pais: "Ecuador",     correo: "diegoarias@seguridadmaxima.net", sitio: "" },
-  "Credix":                      { pais: "Costa Rica",  correo: "diegoarias@seguridadmaxima.net", sitio: "" },
+  "Credix":                      { pais: "Costa Rica",  correo: "protecciondemarca@credix.com",    sitio: "" },
   "Zigi":                        { pais: "Costa Rica",  correo: "diegoarias@seguridadmaxima.net", sitio: "" },
   "FRCL":                        { pais: "Guatemala",   correo: "diegoarias@seguridadmaxima.net", sitio: "" },
   "Alerta Medica":               { pais: "Guatemala",   correo: "diegoarias@seguridadmaxima.net", sitio: "" },
-  "La Paz":                      { pais: "Honduras",    correo: "diegoarias@seguridadmaxima.net", sitio: "" }
+  "La Paz":                      { pais: "Honduras",    correo: "diegoarias@seguridadmaxima.net", sitio: "" },
+  "Banco GyT Continental":       { pais: "Guatemala",   correo: "protecciondemarca@gtc.com.gt",   sitio: "" }
 };
 
 // Correo de la persona: cuando una marca usa este correo, en LinkedIn Derechos de
