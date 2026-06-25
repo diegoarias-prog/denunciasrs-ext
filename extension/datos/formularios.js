@@ -465,9 +465,7 @@
         var cuerpo =
           "Hello,\n\n" +
           quienes + "\n\n" +
-          "We request that you delete or classify the following email address(es) as malicious (phishing / brand impersonation):\n" +
-          "[ Paste here the email address(es) you are reporting ]\n\n" +
-          "For the following reasons:\n\n" +
+          "We request that you delete or classify the reported email address(es) below as malicious (phishing / brand impersonation), for the following reasons:\n\n" +
           "- They are using our brand without consent and impersonating our name, " + marca + ".\n" +
           "- They are using the " + marca + " name and logo to request confidential information from our clients (phishing).\n" +
           "- This email address does NOT belong to " + marca + " and is impersonating it in order to defraud users.\n" +
@@ -476,6 +474,8 @@
           "This is a clear case of phishing and brand impersonation that puts our clients at risk of fraud and theft of confidential data. " +
           "We respectfully and URGENTLY request that you delete or block this account/content, which is confusing and endangering " + marca + "'s clients.\n\n" +
           "We appreciate your help in keeping the internet free of accounts that put users at risk.\n\n" +
+          "Reported email address(es):\n" +
+          "[ Paste here the email address(es) you are reporting ]\n\n" +
           "Sincerely,\n" +
           firma +
           (d.correo ? "\nContact: " + d.correo : "");
@@ -499,11 +499,11 @@
           "Hello,\n\n" +
           apertura + "\n\n" +
           "We have detected that confidential information belonging to " + marca + " is being shared on your platform without authorization.\n\n" +
-          "- This is a violation of intellectual property rights and a serious breach of the privacy and security of " + marca + "'s customers. As an organization, " + marca + " considers the confidentiality of its customers' data a top priority, and any unauthorized use of this information is unacceptable.\n" +
-          "- We have identified the following document(s)/link(s) on your platform containing confidential information of " + marca + ":\n" +
-          "[ Paste here the Scribd link(s) you are reporting, e.g. https://www.scribd.com/document/... ]\n\n" +
-          "We strongly and URGENTLY request that you immediately remove the above link(s) and any other documents that include " + marca + "'s information without authorization, including any content disseminated through your platform.\n\n" +
+          "- This is a violation of intellectual property rights and a serious breach of the privacy and security of " + marca + "'s customers. As an organization, " + marca + " considers the confidentiality of its customers' data a top priority, and any unauthorized use of this information is unacceptable.\n\n" +
+          "We strongly and URGENTLY request that you immediately remove the document(s)/link(s) below and any other content that includes " + marca + "'s information without authorization, including any content disseminated through your platform.\n\n" +
           "We trust that you will take the necessary steps to address this situation and prevent any future violations. We would like to resolve this matter quickly and efficiently.\n\n" +
+          "Reported document(s)/link(s):\n" +
+          "[ Paste here the Scribd link(s) you are reporting, e.g. https://www.scribd.com/document/... ]\n\n" +
           "Sincerely,\n" +
           firma +
           (d.correo ? "\nContact: " + d.correo : "");
