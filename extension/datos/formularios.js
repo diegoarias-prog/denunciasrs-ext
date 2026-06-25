@@ -399,9 +399,9 @@
         var cuerpo =
           "Estimado equipo de Telegram (abuse@telegram.org):\n\n" +
           ctx.justif +
-          "\n\nEnlaces del contenido / canal / usuario a denunciar:\n[Pega aquí los enlaces t.me/... ]\n\n" +
-          "Marca afectada: " + marca + (d.pais ? " (" + d.pais + ")" : "") + "\n" +
+          "\n\nMarca afectada: " + marca + (d.pais ? " (" + d.pais + ")" : "") + "\n" +
           "Correo de contacto: " + (d.correo || "") + "\n\n" +
+          "Enlaces del contenido / canal / usuario a denunciar:\n[Pega aquí los enlaces t.me/... ]\n\n" +
           "Agradecemos su pronta gestión.\n" + marca;
         return { to: this.destino, asunto: asunto, cuerpo: cuerpo };
       }
@@ -534,6 +534,30 @@
       destino: "copyright@tiktok.com, ip-reports@tiktok.com, ip_reports@tiktok.com",
       manual: "Donde dice [ ... ] pega el/los enlace(s) de TikTok a denunciar, revisa y envía.",
       construirEmail: function (ctx) { return emailIP(ctx, "TikTok", this.destino); }
+    },
+    // ============= Studocu (NO tiene form web: es por CORREO, en español) =============
+    studocu_reporte: {
+      red: "Studocu", nombre: "Eliminación de información (por correo)", cat: "studocu", tipo: "email",
+      destino: "privacy@studocu.com, support@studocu.com",
+      manual: "Donde dice [ ... ] pega el/los enlace(s) de Studocu a denunciar, revisa y envía.",
+      construirEmail: function (ctx) {
+        var marca = ctx.marca, d = ctx.datos;
+        var repres = /seguridadmaxima\.net/i.test(d.correo || "");
+        var quienes = repres
+          ? "Somos Seguridad Máxima en Redes Informáticas, representantes de " + marca + "."
+          : "Somos " + marca + ".";
+        var firma = repres ? "Seguridad Máxima en Redes Informáticas" : marca;
+        var asunto = "Solicitud de eliminación de información de " + marca;
+        var cuerpo =
+          "Hola,\n\n" +
+          quienes + "\n\n" +
+          "Solicitamos muy amable y respetuosamente que se elimine la información de " + marca + " que aparece en el/los siguiente(s) documento(s) de su plataforma. " + marca + " no autoriza el uso de su nombre ni de su información en dicho contenido, y su difusión vulnera los derechos de marca y la privacidad de sus clientes.\n\n" +
+          "Documento(s) / enlace(s) a denunciar:\n" +
+          "[ Pega aquí el/los enlace(s) de Studocu, ej. https://www.studocu.com/... ]\n\n" +
+          "Quedamos atentos a sus comentarios.\n\n" +
+          "Saludos,\n" + firma + (d.correo ? "\nContacto: " + d.correo : "");
+        return { to: this.destino, asunto: asunto, cuerpo: cuerpo };
+      }
     }
   };
 })();
