@@ -1,3 +1,12 @@
-# Denuncias RS - hosting de auto-actualizacion
+# Denuncias RS - Extension
 
-Este repo SOLO aloja el archivo de la extension (.crx) y el update.xml para que Chrome/Edge se actualicen solos. El codigo fuente esta en otro repo privado.
+Auto-llenado de formularios de denuncia (Facebook, Instagram, WhatsApp, LinkedIn, X, TikTok, Telegram, YouTube).
+
+## Instalar / actualizar en una PC (sencillo)
+1. Descarga **DENUNCIAS_RS.bat** (boton verde **Code -> Download ZIP**, o pide el archivo).
+2. Doble clic en **DENUNCIAS_RS.bat**. Baja la ultima version a una carpeta fija.
+3. **Primera vez:** en `chrome://extensions` -> Modo de desarrollador -> "Cargar descomprimida"
+   -> elige la carpeta `%LOCALAPPDATA%\DenunciasRS\extension`.
+4. **Actualizar:** vuelve a correr el .bat y reinicia Chrome.
+
+Este repositorio SOLO contiene la extension distribuible; el codigo de desarrollo esta en un repo privado.

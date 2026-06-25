@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Marcas · Denuncias RS</title>
+<style>
+  body { font-family: "Segoe UI", Arial, sans-serif; max-width: 760px; margin: 24px auto; color: #1f2937; padding: 0 16px; }
+  h1 { font-size: 18px; }
+  p.sub { color: #6b7280; font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 14px; }
+  th, td { border: 1px solid #e5e7eb; padding: 6px 8px; font-size: 13px; text-align: left; }
+  th { background: #f8fafc; }
+  input { width: 100%; box-sizing: border-box; padding: 5px; border: 1px solid #cbd5e1; border-radius: 5px; font-size: 13px; }
+  td.acc { width: 80px; text-align: center; }
+  .boton { padding: 8px 14px; border: 0; border-radius: 7px; background: #1d4ed8; color: #fff; font-weight: 600; cursor: pointer; font-size: 13px; }
+  .boton.sec { background: #e5e7eb; color: #111827; }
+  .boton.del { background: #ef4444; padding: 4px 8px; }
+  .barra { margin-top: 16px; display: flex; gap: 10px; align-items: center; }
+  #aviso { margin-left: auto; color: #065f46; font-size: 13px; }
+</style>
+</head>
+<body>
+  <h1>Marcas</h1>
+  <p class="sub">Edita el país, el correo y el sitio de cada marca. El resto de los datos (leyes, códigos, justificación) se genera solo. Lo que cambies se guarda en este navegador.</p>
+  <table>
+    <thead><tr><th>Marca</th><th>País</th><th>Correo</th><th>Sitio (opcional)</th><th class="acc">Acción</th></tr></thead>
+    <tbody id="cuerpo"></tbody>
+  </table>
+  <div class="barra">
+    <button class="boton sec" id="agregar">+ Agregar marca</button>
+    <button class="boton" id="guardar">Guardar cambios</button>
+    <span id="aviso"></span>
+  </div>
+  <script src="datos/marcas.js"></script>
+  <script src="opciones.js"></script>
+</body>
+</html>
