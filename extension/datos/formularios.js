@@ -414,6 +414,35 @@
           { tipo: "check", name: "identify_complaint_one", texto: "business name|business_name|nombre de la empresa" }
         ] };
       }
+    },
+    // ============= Outlook / Hotmail (NO tiene form web: es por CORREO) =============
+    outlook_phish: {
+      red: "Outlook / Hotmail", nombre: "Phishing / suplantación (por correo)", cat: "outlook", tipo: "email",
+      destino: "phish@office365.microsoft.com, abuse@hotmail.com, junk@office365.microsoft.com, report_spam@hotmail.com",
+      manual: "Donde dice [ ... ] pega la(s) dirección(es) de correo @outlook/@hotmail a denunciar, revisa y envía.",
+      construirEmail: function (ctx) {
+        var marca = ctx.marca, d = ctx.datos;
+        var dominio = (d.sitio || "").replace(/^https?:\/\//i, "").replace(/\/.*$/, "");
+        var asunto = "Phishing and brand impersonation report - urgent request for removal";
+        var cuerpo =
+          "Hello,\n\n" +
+          "We are Security Maximum in Computer Networks, representing " + marca + ".\n\n" +
+          "We request that you delete or classify the following email address(es) as malicious (phishing / brand impersonation):\n" +
+          "[ Paste here the email address(es) you are reporting ]\n\n" +
+          "For the following reasons:\n\n" +
+          "- They are using our brand without consent and impersonating our name, " + marca + ".\n" +
+          "- They are using the " + marca + " name and logo to request confidential information from our clients (phishing).\n" +
+          "- This email address does NOT belong to " + marca + " and is impersonating it in order to defraud users.\n" +
+          "- Official " + marca + " communications come only from its official domain" + (dominio ? " (" + dominio + ")" : "") + ".\n" +
+          "- This email address has NO business or legal relationship with " + marca + ".\n\n" +
+          "This is a clear case of phishing and brand impersonation that puts our clients at risk of fraud and theft of confidential data. " +
+          "We respectfully and URGENTLY request that you delete or block this account/content, which is confusing and endangering " + marca + "'s clients.\n\n" +
+          "We appreciate your help in keeping the internet free of accounts that put users at risk.\n\n" +
+          "Sincerely,\n" +
+          "Security Maximum in Computer Networks" +
+          (d.correo ? "\nContact: " + d.correo : "");
+        return { to: this.destino, asunto: asunto, cuerpo: cuerpo };
+      }
     }
   };
 })();
