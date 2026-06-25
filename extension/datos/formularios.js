@@ -45,14 +45,14 @@
       "Hello,\n\n" +
       quienes + "\n\n" +
       "We are reporting content on " + redNombre + " that infringes the intellectual property and brand rights of " + marca + ".\n\n" +
-      "Reported content (profile / page / post URL):\n" +
-      "[ Paste here the " + redNombre + " link(s) you are reporting ]\n\n" +
       "Reasons this content must be removed:\n" +
       "- It uses the name, logo and brand identity of " + marca + " without authorization, impersonating it.\n" +
       "- It misleads and confuses " + marca + "'s customers and may be used to request confidential information or to defraud them.\n" +
       "- It has no business or legal relationship with " + marca + " and infringes its trademark and intellectual property rights." +
       polTxt + "\n\n" +
-      "We respectfully and URGENTLY request the immediate removal of this content.\n\n" +
+      "We respectfully and URGENTLY request the immediate removal of the following content:\n\n" +
+      "Reported content (profile / page / post URL):\n" +
+      "[ Paste here the " + redNombre + " link(s) you are reporting ]\n\n" +
       "Sincerely,\n" + firma + (d.correo ? "\nContact: " + d.correo : "");
     return { to: destino, asunto: asunto, cuerpo: cuerpo };
   }
