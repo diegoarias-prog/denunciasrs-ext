@@ -423,10 +423,16 @@
       construirEmail: function (ctx) {
         var marca = ctx.marca, d = ctx.datos;
         var dominio = (d.sitio || "").replace(/^https?:\/\//i, "").replace(/\/.*$/, "");
+        // Si la marca tiene su PROPIO correo (no @seguridadmaxima.net), denuncia como ella misma.
+        var repres = /seguridadmaxima\.net/i.test(d.correo || "");
+        var quienes = repres
+          ? "We are Security Maximum in Computer Networks, representing " + marca + "."
+          : "We are " + marca + ".";
+        var firma = repres ? "Security Maximum in Computer Networks" : marca;
         var asunto = "Phishing and brand impersonation report - urgent request for removal";
         var cuerpo =
           "Hello,\n\n" +
-          "We are Security Maximum in Computer Networks, representing " + marca + ".\n\n" +
+          quienes + "\n\n" +
           "We request that you delete or classify the following email address(es) as malicious (phishing / brand impersonation):\n" +
           "[ Paste here the email address(es) you are reporting ]\n\n" +
           "For the following reasons:\n\n" +
@@ -439,7 +445,7 @@
           "We respectfully and URGENTLY request that you delete or block this account/content, which is confusing and endangering " + marca + "'s clients.\n\n" +
           "We appreciate your help in keeping the internet free of accounts that put users at risk.\n\n" +
           "Sincerely,\n" +
-          "Security Maximum in Computer Networks" +
+          firma +
           (d.correo ? "\nContact: " + d.correo : "");
         return { to: this.destino, asunto: asunto, cuerpo: cuerpo };
       }
