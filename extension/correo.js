@@ -40,6 +40,8 @@ function copiar(texto, msg) {
     document.body.removeChild(ta);
   });
 }
+$("copiar_para").addEventListener("click", () => copiar($("para").value, "✓ Correos copiados"));
+$("copiar_asunto").addEventListener("click", () => copiar($("asunto").value, "✓ Asunto copiado"));
 $("copiar").addEventListener("click", () => copiar($("cuerpo").value, "✓ Cuerpo copiado"));
 $("copiar_todo").addEventListener("click", () =>
   copiar("Para: " + $("para").value + "\nAsunto: " + $("asunto").value + "\n\n" + $("cuerpo").value, "✓ Todo copiado"));
