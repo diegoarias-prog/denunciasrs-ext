@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<style>
+  body { font-family: "Segoe UI", Arial, sans-serif; width: 320px; margin: 0; padding: 14px; color: #1f2937; }
+  h1 { font-size: 15px; margin: 0 0 2px; }
+  .sub { font-size: 11px; color: #6b7280; margin: 0 0 12px; }
+  label { display: block; font-size: 12px; font-weight: 600; margin: 10px 0 3px; }
+  select { width: 100%; padding: 7px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px; background: #fff; }
+  .boton { width: 100%; margin-top: 14px; padding: 10px; border: 0; border-radius: 8px; background: #1d4ed8; color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; }
+  .boton:hover { background: #1741b6; }
+  .boton:disabled { background: #9ca3af; cursor: default; }
+  .estado { margin-top: 12px; font-size: 12px; border-radius: 6px; padding: 8px 10px; display: none; }
+  .estado.ok { display: block; background: #ecfdf5; color: #065f46; border-left: 3px solid #10b981; }
+  .estado.aviso { display: block; background: #fffbeb; color: #92400e; border-left: 3px solid #f59e0b; }
+  .estado.error { display: block; background: #fef2f2; color: #991b1b; border-left: 3px solid #ef4444; }
+  .pie { margin-top: 12px; font-size: 11px; text-align: center; }
+  .pie a { color: #1d4ed8; text-decoration: none; }
+</style>
+</head>
+<body>
+  <h1>Denuncias RS · Autollenado</h1>
+  <p class="sub">Abre el formulario en esta pestaña, elige marca y pulsa Rellenar.</p>
+
+  <label for="sel_red">Red social</label>
+  <select id="sel_red"></select>
+
+  <label for="sel_form">Formulario</label>
+  <select id="sel_form"></select>
+
+  <label for="sel_marca">Marca</label>
+  <select id="sel_marca"></select>
+
+  <button class="boton" id="boton_rellenar">Rellenar formulario</button>
+
+  <div class="estado" id="estado"></div>
+
+  <p class="pie"><a href="#" id="abrir_politicas">📋 Políticas</a> &nbsp;·&nbsp; <a href="#" id="abrir_plantilla">📝 Plantillas</a> &nbsp;·&nbsp; <a href="#" id="abrir_opciones">⚙ Marcas</a></p>
+
+  <script src="datos/marcas.js"></script>
+  <script src="datos/justificaciones.js"></script>
+  <script src="datos/formularios.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Plantillas · Denuncias RS</title>
+<style>
+  body { font-family: "Segoe UI", Arial, sans-serif; max-width: 760px; margin: 24px auto; color: #1f2937; padding: 0 16px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  p.sub { color: #6b7280; font-size: 13px; margin: 0 0 16px; }
+  label { display: block; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .3px; color: #374151; margin: 12px 0 4px; }
+  input, textarea { width: 100%; box-sizing: border-box; border: 1px solid #cbd5e1; border-radius: 7px; padding: 8px 10px; font-size: 13px; font-family: inherit; }
+  textarea { min-height: 130px; line-height: 1.5; }
+  .barra { margin-top: 12px; display: flex; gap: 10px; align-items: center; }
+  .boton { padding: 8px 14px; border: 0; border-radius: 7px; background: #1d4ed8; color: #fff; font-weight: 600; cursor: pointer; font-size: 13px; }
+  .boton.sec { background: #e5e7eb; color: #111827; }
+  .boton.del { background: #ef4444; padding: 4px 10px; }
+  .boton.mini { padding: 4px 10px; font-size: 12px; }
+  #aviso { color: #065f46; font-size: 13px; margin-left: auto; }
+  h2 { font-size: 14px; margin: 22px 0 8px; border-bottom: 2px solid #1d4ed8; padding-bottom: 4px; }
+  .item { border: 1px solid #e5e7eb; border-radius: 9px; padding: 10px 12px; margin-bottom: 10px; }
+  .item .tit { font-weight: 700; color: #111827; }
+  .item .txt { white-space: pre-wrap; font-size: 13px; color: #374151; margin: 6px 0; max-height: 120px; overflow: auto; background: #f8fafc; padding: 8px; border-radius: 6px; }
+  .item .acc { display: flex; gap: 8px; }
+  .vacio { color: #6b7280; font-size: 13px; }
+</style>
+</head>
+<body>
+  <h1>Plantillas</h1>
+  <p class="sub">Crea y guarda textos que reutilizas en las denuncias (datos, descripciones, motivos…). Se guardan en este navegador.</p>
+
+  <label for="nombre">Nombre de la plantilla</label>
+  <input id="nombre" placeholder="Ej. Motivo estándar de suplantación">
+
+  <label for="texto">Información de la plantilla</label>
+  <textarea id="texto" placeholder="Escribe aquí el texto que quieras reutilizar…"></textarea>
+
+  <div class="barra">
+    <button class="boton" id="guardar">Guardar plantilla</button>
+    <button class="boton sec" id="limpiar">Limpiar</button>
+    <span id="aviso"></span>
+  </div>
+
+  <h2>Plantillas guardadas</h2>
+  <div id="lista"></div>
+
+  <script src="plantilla.js"></script>
+</body>
+</html>

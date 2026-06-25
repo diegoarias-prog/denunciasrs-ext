@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Reporte por correo · Telegram</title>
+<style>
+  body { font-family: "Segoe UI", Arial, sans-serif; max-width: 760px; margin: 24px auto; color: #1f2937; padding: 0 16px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  p.sub { color: #6b7280; font-size: 13px; margin: 0 0 16px; }
+  label { display: block; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .3px; color: #374151; margin: 12px 0 4px; }
+  input, textarea { width: 100%; box-sizing: border-box; border: 1px solid #cbd5e1; border-radius: 7px; padding: 8px 10px; font-size: 13px; font-family: inherit; }
+  textarea { min-height: 220px; line-height: 1.5; }
+  .barra { margin-top: 14px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .boton { padding: 9px 14px; border: 0; border-radius: 8px; background: #1d4ed8; color: #fff; font-weight: 600; cursor: pointer; font-size: 13px; }
+  .boton.sec { background: #e5e7eb; color: #111827; }
+  .boton.gm { background: #ea4335; }
+  #aviso { color: #065f46; font-size: 13px; }
+  .nota { margin-top: 10px; font-size: 12px; color: #6b7280; }
+</style>
+</head>
+<body>
+  <h1>Reporte de abuso a Telegram (por correo)</h1>
+  <p class="sub">Telegram no tiene formulario web: se reporta por correo. Revisa el mensaje, <b>pega los enlaces (t.me/…)</b> a denunciar y envíalo desde tu correo.</p>
+
+  <label for="para">Para</label>
+  <input id="para" readonly>
+
+  <label for="asunto">Asunto</label>
+  <input id="asunto">
+
+  <label for="cuerpo">Cuerpo del correo</label>
+  <textarea id="cuerpo"></textarea>
+
+  <div class="barra">
+    <button class="boton" id="mailto">✉ Abrir en mi correo</button>
+    <button class="boton gm" id="gmail">Abrir en Gmail</button>
+    <button class="boton sec" id="copiar">Copiar cuerpo</button>
+    <button class="boton sec" id="copiar_todo">Copiar todo</button>
+    <span id="aviso"></span>
+  </div>
+  <p class="nota">Si "Abrir en mi correo" abre el correo sin el texto completo, usa "Copiar cuerpo" y pégalo a mano (algunos programas de correo recortan los mensajes largos).</p>
+
+  <script src="correo.js"></script>
+</body>
+</html>
