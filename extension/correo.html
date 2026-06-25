@@ -2,47 +2,60 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<title>Reporte por correo · Telegram</title>
+<title>Reporte por correo</title>
 <style>
-  body { font-family: "Segoe UI", Arial, sans-serif; max-width: 760px; margin: 24px auto; color: #1f2937; padding: 0 16px; }
+  body { font-family: "Segoe UI", Arial, sans-serif; max-width: 780px; margin: 24px auto; color: #1f2937; padding: 0 16px; }
   h1 { font-size: 18px; margin: 0 0 4px; }
-  p.sub { color: #6b7280; font-size: 13px; margin: 0 0 16px; }
-  label { display: block; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .3px; color: #374151; margin: 12px 0 4px; }
+  h2 { font-size: 14px; margin: 22px 0 8px; border-bottom: 2px solid #1d4ed8; padding-bottom: 4px; }
+  p.sub { color: #6b7280; font-size: 13px; margin: 0 0 14px; }
+  label { display: block; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .3px; color: #374151; margin: 10px 0 4px; }
   input, textarea { width: 100%; box-sizing: border-box; border: 1px solid #cbd5e1; border-radius: 7px; padding: 8px 10px; font-size: 13px; font-family: inherit; }
-  textarea { min-height: 220px; line-height: 1.5; }
-  .barra { margin-top: 14px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  textarea { min-height: 200px; line-height: 1.5; }
+  .ref textarea, .ref input { background: #f8fafc; }
+  .barra { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .boton { padding: 9px 14px; border: 0; border-radius: 8px; background: #1d4ed8; color: #fff; font-weight: 600; cursor: pointer; font-size: 13px; }
   .boton.sec { background: #e5e7eb; color: #111827; }
   .boton.gm { background: #ea4335; }
-  #aviso { color: #065f46; font-size: 13px; }
-  .nota { margin-top: 10px; font-size: 12px; color: #6b7280; }
+  #aviso { color: #065f46; font-size: 13px; margin-left: auto; }
+  .nota { margin-top: 12px; font-size: 12px; color: #6b7280; }
 </style>
 </head>
 <body>
-  <h1>Reporte de abuso a Telegram (por correo)</h1>
-  <p class="sub">Telegram no tiene formulario web: se reporta por correo. Revisa el mensaje, <b>pega los enlaces (t.me/…)</b> a denunciar y envíalo desde tu correo.</p>
+  <h1>Reporte por correo</h1>
+  <p class="sub">Lo que se <b>ENVÍA es la versión en inglés</b>. La versión en español es solo para que verifiques el contenido.</p>
 
   <label for="para">Para</label>
   <input id="para" readonly>
-
-  <label for="asunto">Asunto</label>
-  <input id="asunto">
-
-  <label for="cuerpo">Cuerpo del correo</label>
-  <textarea id="cuerpo"></textarea>
-
   <div class="barra">
-    <button class="boton" id="mailto">✉ Abrir en mi correo</button>
-    <button class="boton gm" id="gmail">Abrir en Gmail</button>
+    <button class="boton" id="mailto">✉ Abrir en mi correo (inglés)</button>
+    <button class="boton gm" id="gmail">Abrir en Gmail (inglés)</button>
+    <button class="boton sec" id="copiar_para">📋 Copiar correos</button>
     <span id="aviso"></span>
   </div>
+
+  <h2>🇬🇧 Inglés — esto es lo que se envía</h2>
+  <label for="asunto_en">Asunto</label>
+  <input id="asunto_en">
+  <label for="cuerpo_en">Cuerpo</label>
+  <textarea id="cuerpo_en"></textarea>
   <div class="barra">
-    <button class="boton sec" id="copiar_para">📋 Copiar correos</button>
-    <button class="boton sec" id="copiar_asunto">📋 Copiar asunto</button>
-    <button class="boton sec" id="copiar">📋 Copiar cuerpo</button>
-    <button class="boton sec" id="copiar_todo">📋 Copiar todo</button>
+    <button class="boton sec" id="copiar_en">📋 Copiar cuerpo (inglés)</button>
+    <button class="boton sec" id="copiar_en_todo">📋 Copiar todo (inglés)</button>
   </div>
-  <p class="nota">Si "Abrir en mi correo" abre el correo sin el texto completo, usa "Copiar cuerpo" y pégalo a mano (algunos programas de correo recortan los mensajes largos).</p>
+
+  <h2>🇪🇸 Español — solo referencia</h2>
+  <div class="ref">
+    <label for="asunto_es">Asunto</label>
+    <input id="asunto_es">
+    <label for="cuerpo_es">Cuerpo</label>
+    <textarea id="cuerpo_es"></textarea>
+  </div>
+  <div class="barra">
+    <button class="boton sec" id="copiar_es">📋 Copiar cuerpo (español)</button>
+    <button class="boton sec" id="copiar_es_todo">📋 Copiar todo (español)</button>
+  </div>
+
+  <p class="nota">Recuerda pegar el/los enlace(s) a denunciar donde dice <b>[ ... ]</b> antes de enviar. Si "Abrir en mi correo" recorta el texto, usa "Copiar cuerpo (inglés)" y pégalo a mano.</p>
 
   <script src="correo.js"></script>
 </body>

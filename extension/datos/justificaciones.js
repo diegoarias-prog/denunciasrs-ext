@@ -1,8 +1,8 @@
 // ============================================================================
-//  Generador de justificaciones por país y tipo de formulario.
-//  Port fiel de la skill agregar_marca.py (función justificacion + tablas).
-//  Así la extensión genera el texto correcto para cualquier marca/país sin
-//  depender de los Excel.
+//  Generador de justificaciones por país y tipo de formulario, EN ESPAÑOL e INGLÉS.
+//  justificacion(cat, red, nombre, pais, lang) -> lang "es" (def.) o "en".
+//  Los formularios web se llenan con la versión EN; el español queda para mostrar
+//  como referencia en los correos.
 // ============================================================================
 (function () {
   function norm(s) {
@@ -13,6 +13,7 @@
     guatemala: "01001", panama: "0801", "el salvador": "01101" };
   const CODIGO = { honduras: "+504", ecuador: "+593", nicaragua: "+505", "costa rica": "+506",
     guatemala: "+502", panama: "+507", "el salvador": "+503" };
+
   const LEY_PENAL = {
     honduras: "el Código Penal de Honduras en sus disposiciones sobre delitos contra el honor (calumnia, injuria y difamación)",
     ecuador: "el Código Orgánico Integral Penal (COIP) del Ecuador, art. 182 (calumnia) y normas sobre injuria",
@@ -40,6 +41,34 @@
   const POL = { fb: "las Normas Comunitarias de Facebook", ig: "las Normas Comunitarias de Instagram",
     tk: "las Normas de la Comunidad de TikTok" };
 
+  // ---- Inglés ----
+  const LEY_PENAL_EN = {
+    honduras: "the Penal Code of Honduras regarding crimes against honor (slander, libel and defamation)",
+    ecuador: "the Comprehensive Organic Penal Code (COIP) of Ecuador, art. 182 (slander) and rules on libel",
+    nicaragua: "the Penal Code of Nicaragua regarding libel and slander (crimes against honor)",
+    "el salvador": "the Penal Code of El Salvador, arts. 177 to 179 (slander, defamation and libel)",
+    guatemala: "the Penal Code of Guatemala, arts. 159 to 165 (slander, libel and defamation)",
+    panama: "the Penal Code of Panama regarding crimes against honor (slander and libel)",
+    "costa rica": "the Penal Code of Costa Rica, arts. 145 to 152 (libel, slander and defamation)" };
+  const LEY_AUTOR_EN = {
+    honduras: "the Copyright and Related Rights Law of Honduras",
+    ecuador: "the Organic Code of the Social Economy of Knowledge of Ecuador",
+    nicaragua: "the Copyright and Related Rights Law of Nicaragua",
+    "costa rica": "the Copyright and Related Rights Law of Costa Rica",
+    guatemala: "the Copyright and Related Rights Law of Guatemala",
+    panama: "the Copyright Law of Panama",
+    "el salvador": "the Law for the Promotion and Protection of Intellectual Property of El Salvador" };
+  const LEY_MARCA_EN = {
+    honduras: "the Industrial Property Law of Honduras",
+    ecuador: "the Organic Code of the Social Economy of Knowledge of Ecuador",
+    nicaragua: "the Law on Trademarks and Other Distinctive Signs of Nicaragua",
+    "costa rica": "the Law on Trademarks and Other Distinctive Signs of Costa Rica",
+    guatemala: "the Industrial Property Law of Guatemala",
+    panama: "the Industrial Property Law of Panama",
+    "el salvador": "the Law on Trademarks and Other Distinctive Signs of El Salvador" };
+  const POL_EN = { fb: "Facebook's Community Standards", ig: "Instagram's Community Guidelines",
+    tk: "TikTok's Community Guidelines" };
+
   // Política concreta infringida + enlace, por clave de formulario.
   const POLITICAS = {
     fb_da:        ["Políticas de propiedad intelectual de Facebook e Instagram", "https://www.facebook.com/help/1020633957973118 | https://help.instagram.com/535503073130320"],
@@ -66,8 +95,7 @@
     yt_marca:     ["Política de marcas registradas de YouTube", "https://support.google.com/youtube/answer/6154218"]
   };
 
-  // cat: autor|marca|difam|fals|x_acoso|x_privado|x_supl|x_falsif|li_difam|li_marca|li_copy
-  function justificacion(cat, red, nombre, pais) {
+  function justifES(cat, red, nombre, pais) {
     const pn = norm(pais);
     const en = pais ? (" (en " + pais + ")") : "";
     const M = (t, d) => (t[pn] || d);
@@ -115,15 +143,72 @@
       const ley = M(LEY_MARCA, "la legislación de propiedad industrial y marcas aplicable");
       return "El canal, grupo o usuario reportado utiliza sin autorización el nombre, la marca y la identidad de " + nombre + " para suplantar a la entidad, difundir información falsa y promover fraudes o estafas en perjuicio de sus clientes. Esto infringe las Condiciones del Servicio de Telegram (que prohíben la suplantación de identidad, el spam y las estafas) y vulnera los derechos de marca de " + nombre + " conforme a " + ley + " y al Convenio de París. Solicitamos la eliminación inmediata del contenido y del canal o usuario infractor.";
     }
-    // marca (por defecto)
     const ley = M(LEY_MARCA, "la legislación de propiedad industrial y marcas aplicable");
     return "El contenido reportado utiliza sin autorización la marca " + nombre + " (nombre, logotipo y signos distintivos) para hacerse pasar por la entidad e inducir a engaño a los usuarios, con riesgo de confusión y daño a su reputación. Infringe los derechos de marca de " + nombre + " y las políticas de propiedad intelectual de la plataforma. Conforme a " + ley + " y al Convenio de París, solicitamos su eliminación inmediata.";
   }
 
-  // Agrega la línea "Política infringida: … — URL" según la clave de formulario.
-  function conPolitica(texto, formKey) {
+  function justifEN(cat, red, nombre, pais) {
+    const pn = norm(pais);
+    const inc = pais ? (" (in " + pais + ")") : "";
+    const M = (t, d) => (t[pn] || d);
+    if (cat === "x_acoso") {
+      const ley = M(LEY_PENAL_EN, "the applicable criminal law on crimes against honor (slander, libel and defamation)");
+      return "The reported account harasses and defames " + nombre + ", impersonating the entity and posting false information that damages its reputation and confuses its customers. It violates X's Rules on abusive behavior and harassment. Furthermore, these acts constitute crimes against honor (slander, libel and defamation) under " + ley + ". We request the suspension of the account and the removal of the content.";
+    }
+    if (cat === "x_privado") {
+      const ley = M(LEY_PENAL_EN, "the applicable criminal and data protection law");
+      return "The reported account publishes, without authorization, private and financial information related to " + nombre + " and impersonates the entity, to the detriment of its customers. It violates X's Rules on posting private information. Furthermore, it infringes the data protection and the right to honor of " + nombre + " under " + ley + ". We request the removal of the content and the suspension of the account.";
+    }
+    if (cat === "x_supl") {
+      const ley = M(LEY_PENAL_EN, "the applicable criminal law on crimes against honor and identity theft");
+      return "The reported account impersonates the identity of " + nombre + ", posing as the official entity to deceive its customers and facilitate fraud. It violates the Impersonation Policy of X's Rules. Furthermore, it constitutes identity theft and crimes against honor under " + ley + ". We request the immediate suspension of the account.";
+    }
+    if (cat === "x_falsif") {
+      const ley = M(LEY_MARCA_EN, "the applicable industrial property and trademark law");
+      return "The reported account uses the " + nombre + " trademark without authorization and offers counterfeit products or services while impersonating the entity, to the detriment of consumers. It violates X's Counterfeit Goods Policy and the trademark rights of " + nombre + ". Under " + ley + " and the Paris Convention, we request the removal of the content and the suspension of the account.";
+    }
+    if (cat === "li_difam") {
+      const ley = M(LEY_PENAL_EN, "the applicable criminal law on crimes against honor");
+      return "The reported profile or content defames " + nombre + " and spreads false information that damages its reputation, impersonating the entity or attacking it. It violates LinkedIn's Professional Community Policies. Furthermore, it constitutes crimes against honor (slander, libel and defamation) under " + ley + ". We request the removal of the content and the suspension of the account.";
+    }
+    if (cat === "li_marca") {
+      const ley = M(LEY_MARCA_EN, "the applicable industrial property law");
+      return "The reported profile or content uses the " + nombre + " trademark (name, logo and distinctive signs) without authorization, creating a likelihood of confusion and impersonating the entity. It violates LinkedIn's intellectual property policies. Under " + ley + " and the Paris Convention, we request its removal.";
+    }
+    if (cat === "li_copy") {
+      const ley = M(LEY_AUTOR_EN, "the applicable copyright law");
+      return "The reported content reproduces and uses, without authorization, works protected by " + nombre + "'s copyright (logos, images and materials). It violates LinkedIn's Copyright Policy. Under " + ley + " and the Berne Convention, we request its immediate removal.";
+    }
+    if (cat === "difam") {
+      const ley = M(LEY_PENAL_EN, "the applicable criminal law on crimes against honor (slander, libel and defamation)");
+      return "We request the immediate removal of this post because it uses the name, trademark and/or image of " + nombre + " without authorization to spread false and defamatory information, impersonating the entity and misleading users. This content damages " + nombre + "'s reputation, confuses its customers and may facilitate fraud against them.\n\nThe post violates " + (POL_EN[red] || "the platform's policies") + ", in particular its rules on impersonation, false and misleading information, and harassment and bullying.\n\nFurthermore, these acts constitute crimes against honor (slander, libel and defamation) under " + ley + inc + ". We request its immediate removal.";
+    }
+    if (cat === "autor") {
+      const ley = M(LEY_AUTOR_EN, "the applicable copyright law");
+      return "The reported content reproduces and uses, without authorization, works protected by " + nombre + "'s copyright (logos, images, name and brand identity), impersonating the entity. It infringes " + nombre + "'s copyright and the platform's intellectual property policies. Under " + ley + " and the Berne Convention, we request its immediate removal.";
+    }
+    if (cat === "fals") {
+      const ley = M(LEY_MARCA_EN, "the applicable industrial property and trademark law");
+      return "The reported content or channel impersonates " + nombre + " and promotes counterfeit and fraudulent products or services using its trademark, logo and identity without authorization, to the detriment of consumers. It constitutes trademark counterfeiting and infringes " + nombre + "'s rights. Under " + ley + " and the Paris Convention, we request its immediate removal.";
+    }
+    if (cat === "telegram") {
+      const ley = M(LEY_MARCA_EN, "the applicable industrial property and trademark law");
+      return "The reported channel, group or user uses the name, trademark and identity of " + nombre + " without authorization to impersonate the entity, spread false information and promote fraud or scams against its customers. This violates Telegram's Terms of Service (which prohibit impersonation, spam and scams) and infringes " + nombre + "'s trademark rights under " + ley + " and the Paris Convention. We request the immediate removal of the content and of the infringing channel or user.";
+    }
+    const ley = M(LEY_MARCA_EN, "the applicable industrial property and trademark law");
+    return "The reported content uses the " + nombre + " trademark (name, logo and distinctive signs) without authorization to impersonate the entity and mislead users, with a risk of confusion and damage to its reputation. It infringes " + nombre + "'s trademark rights and the platform's intellectual property policies. Under " + ley + " and the Paris Convention, we request its immediate removal.";
+  }
+
+  function justificacion(cat, red, nombre, pais, lang) {
+    return (lang === "en") ? justifEN(cat, red, nombre, pais) : justifES(cat, red, nombre, pais);
+  }
+
+  // Agrega la línea de política infringida según la clave de formulario (es/en).
+  function conPolitica(texto, formKey, lang) {
     const p = POLITICAS[formKey];
-    return p ? (texto + "\n\nPolítica infringida: " + p[0] + " — " + p[1]) : texto;
+    if (!p) return texto;
+    const etq = (lang === "en") ? "Infringed policy: " : "Política infringida: ";
+    return texto + "\n\n" + etq + p[0] + " — " + p[1];
   }
 
   window.JUSTIF = {
