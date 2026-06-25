@@ -449,6 +449,34 @@
           (d.correo ? "\nContact: " + d.correo : "");
         return { to: this.destino, asunto: asunto, cuerpo: cuerpo };
       }
+    },
+    // ============= Scribd (NO tiene form web: es por CORREO) =============
+    scribd_reporte: {
+      red: "Scribd", nombre: "Información confidencial / copyright (por correo)", cat: "scribd", tipo: "email",
+      destino: "copyright@scribd.com, support@scribd.com, legal@scribd.com, privacy@scribd.com",
+      manual: "Donde dice [ ... ] pega el/los enlace(s) de Scribd a denunciar, revisa y envía.",
+      construirEmail: function (ctx) {
+        var marca = ctx.marca, d = ctx.datos;
+        var repres = /seguridadmaxima\.net/i.test(d.correo || "");
+        var apertura = repres
+          ? "We are Security Maximum in Computer Networks, writing on behalf of " + marca + " regarding an important matter related to the unauthorized use of its information."
+          : "We are " + marca + ", writing regarding an important matter related to the unauthorized use of our information.";
+        var firma = repres ? "Security Maximum in Computer Networks" : marca;
+        var asunto = "Unauthorized use of confidential information - urgent removal request";
+        var cuerpo =
+          "Hello,\n\n" +
+          apertura + "\n\n" +
+          "We have detected that confidential information belonging to " + marca + " is being shared on your platform without authorization.\n\n" +
+          "- This is a violation of intellectual property rights and a serious breach of the privacy and security of " + marca + "'s customers. As an organization, " + marca + " considers the confidentiality of its customers' data a top priority, and any unauthorized use of this information is unacceptable.\n" +
+          "- We have identified the following document(s)/link(s) on your platform containing confidential information of " + marca + ":\n" +
+          "[ Paste here the Scribd link(s) you are reporting, e.g. https://www.scribd.com/document/... ]\n\n" +
+          "We strongly and URGENTLY request that you immediately remove the above link(s) and any other documents that include " + marca + "'s information without authorization, including any content disseminated through your platform.\n\n" +
+          "We trust that you will take the necessary steps to address this situation and prevent any future violations. We would like to resolve this matter quickly and efficiently.\n\n" +
+          "Sincerely,\n" +
+          firma +
+          (d.correo ? "\nContact: " + d.correo : "");
+        return { to: this.destino, asunto: asunto, cuerpo: cuerpo };
+      }
     }
   };
 })();
