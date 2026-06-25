@@ -25,25 +25,51 @@
     return { nom: p[0] || marca, ape: p.length > 1 ? p.slice(1).join(" ") : "" };
   }
 
-  // Correo de denuncia (propiedad intelectual / suplantación) para una red social.
-  // Misma lógica que Outlook/Scribd: correo propio -> "We are [marca]"; si usa el de
-  // Seguridad Máxima -> "representing". Cita las normas comunitarias de esa red.
-  function emailIP(ctx, redNombre, destino) {
+  // Une la versión inglesa (la que se envía) y la española (referencia) de un correo.
+  function bilingue(en, es) {
+    return { to: en.to, asunto: en.asunto, asunto_es: es.asunto, cuerpo: en.cuerpo, cuerpo_es: es.cuerpo };
+  }
+
+  // Correo de denuncia (propiedad intelectual / suplantación) para una red social,
+  // en inglés (lang "en") o español (lang "es"). Correo propio -> "We are [marca]";
+  // si usa el de Seguridad Máxima -> "representing". Cita las normas de esa red.
+  function emailIP(ctx, redNombre, destino, lang) {
     var marca = ctx.marca, d = ctx.datos;
     var repres = /seguridadmaxima\.net/i.test(d.correo || "");
+    var pols = (window.POLITICAS_GENERALES && window.POLITICAS_GENERALES[redNombre]) || [];
+    if (lang === "es") {
+      var quienesE = repres
+        ? "Somos Seguridad Máxima en Redes Informáticas, en representación de " + marca + "."
+        : "Somos " + marca + ".";
+      var firmaE = repres ? "Seguridad Máxima en Redes Informáticas" : marca;
+      var polTxtE = pols.length
+        ? "\n\nEste contenido infringe las políticas y normas comunitarias de " + redNombre + ", incluyendo:\n" +
+          pols.map(function (p) { return "- " + p.t + ": " + p.u; }).join("\n")
+        : "";
+      var cuerpoE =
+        "Hola,\n\n" + quienesE + "\n\n" +
+        "Reportamos contenido en " + redNombre + " que infringe la propiedad intelectual y los derechos de marca de " + marca + ".\n\n" +
+        "Motivos por los que debe eliminarse:\n" +
+        "- Usa el nombre, el logotipo y la identidad de marca de " + marca + " sin autorización, suplantándola.\n" +
+        "- Engaña y confunde a los clientes de " + marca + " y puede usarse para solicitar información confidencial o defraudarlos.\n" +
+        "- No tiene ninguna relación comercial ni legal con " + marca + " e infringe sus derechos de marca y propiedad intelectual." +
+        polTxtE + "\n\n" +
+        "Solicitamos respetuosa y URGENTEMENTE la eliminación inmediata del siguiente contenido:\n\n" +
+        "Contenido a denunciar (URL del perfil / página / publicación):\n" +
+        "[ Pega aquí el/los enlace(s) de " + redNombre + " a denunciar ]\n\n" +
+        "Saludos,\n" + firmaE + (d.correo ? "\nContacto: " + d.correo : "");
+      return { to: destino, asunto: "Suplantación de marca / infracción de PI en " + redNombre + " - solicitud urgente de eliminación", cuerpo: cuerpoE };
+    }
     var quienes = repres
       ? "We are Security Maximum in Computer Networks, writing on behalf of " + marca + "."
       : "We are " + marca + ".";
     var firma = repres ? "Security Maximum in Computer Networks" : marca;
-    var pols = (window.POLITICAS_GENERALES && window.POLITICAS_GENERALES[redNombre]) || [];
     var polTxt = pols.length
       ? "\n\nThis content violates " + redNombre + "'s policies and community standards, including:\n" +
         pols.map(function (p) { return "- " + p.t + ": " + p.u; }).join("\n")
       : "";
-    var asunto = "Brand impersonation / IP infringement on " + redNombre + " - urgent removal request";
     var cuerpo =
-      "Hello,\n\n" +
-      quienes + "\n\n" +
+      "Hello,\n\n" + quienes + "\n\n" +
       "We are reporting content on " + redNombre + " that infringes the intellectual property and brand rights of " + marca + ".\n\n" +
       "Reasons this content must be removed:\n" +
       "- It uses the name, logo and brand identity of " + marca + " without authorization, impersonating it.\n" +
@@ -54,7 +80,7 @@
       "Reported content (profile / page / post URL):\n" +
       "[ Paste here the " + redNombre + " link(s) you are reporting ]\n\n" +
       "Sincerely,\n" + firma + (d.correo ? "\nContact: " + d.correo : "");
-    return { to: destino, asunto: asunto, cuerpo: cuerpo };
+    return { to: destino, asunto: "Brand impersonation / IP infringement on " + redNombre + " - urgent removal request", cuerpo: cuerpo };
   }
 
   function postalDe(pais) {
@@ -394,16 +420,25 @@
       destino: "abuse@telegram.org",
       manual: "Pega los enlaces (t.me/...) de los mensajes, canal o usuario a denunciar, revisa y envía el correo.",
       construirEmail: function (ctx) {
-        var marca = ctx.marca, d = ctx.datos;
-        var asunto = "Solicitud de eliminación de contenido / Reporte de abuso — " + marca;
-        var cuerpo =
-          "Estimado equipo de Telegram (abuse@telegram.org):\n\n" +
-          ctx.justif +
-          "\n\nMarca afectada: " + marca + (d.pais ? " (" + d.pais + ")" : "") + "\n" +
-          "Correo de contacto: " + (d.correo || "") + "\n\n" +
-          "Enlaces del contenido / canal / usuario a denunciar:\n[Pega aquí los enlaces t.me/... ]\n\n" +
-          "Agradecemos su pronta gestión.\n" + marca;
-        return { to: this.destino, asunto: asunto, cuerpo: cuerpo };
+        var marca = ctx.marca, d = ctx.datos, dest = this.destino;
+        var pais = d.pais ? " (" + d.pais + ")" : "";
+        var en = { to: dest,
+          asunto: "Content removal request / abuse report — " + marca,
+          cuerpo:
+            "Dear Telegram team (abuse@telegram.org),\n\n" + ctx.justif +
+            "\n\nAffected brand: " + marca + pais + "\n" +
+            "Contact email: " + (d.correo || "") + "\n\n" +
+            "Content / channel / user to report:\n[ Paste here the t.me/... link(s) ]\n\n" +
+            "We appreciate your prompt action.\n" + marca };
+        var es = {
+          asunto: "Solicitud de eliminación de contenido / Reporte de abuso — " + marca,
+          cuerpo:
+            "Estimado equipo de Telegram (abuse@telegram.org):\n\n" + (ctx.justif_es || ctx.justif) +
+            "\n\nMarca afectada: " + marca + pais + "\n" +
+            "Correo de contacto: " + (d.correo || "") + "\n\n" +
+            "Enlaces del contenido / canal / usuario a denunciar:\n[ Pega aquí los enlaces t.me/... ]\n\n" +
+            "Agradecemos su pronta gestión.\n" + marca };
+        return bilingue(en, es);
       }
     },
     // ================= YouTube (formularios de soporte de Google, sin login) =================
@@ -453,33 +488,41 @@
       destino: "phish@office365.microsoft.com, abuse@hotmail.com, junk@office365.microsoft.com, report_spam@hotmail.com",
       manual: "Donde dice [ ... ] pega la(s) dirección(es) de correo @outlook/@hotmail a denunciar, revisa y envía.",
       construirEmail: function (ctx) {
-        var marca = ctx.marca, d = ctx.datos;
+        var marca = ctx.marca, d = ctx.datos, dest = this.destino;
         var dominio = (d.sitio || "").replace(/^https?:\/\//i, "").replace(/\/.*$/, "");
-        // Si la marca tiene su PROPIO correo (no @seguridadmaxima.net), denuncia como ella misma.
         var repres = /seguridadmaxima\.net/i.test(d.correo || "");
-        var quienes = repres
-          ? "We are Security Maximum in Computer Networks, representing " + marca + "."
-          : "We are " + marca + ".";
-        var firma = repres ? "Security Maximum in Computer Networks" : marca;
-        var asunto = "Phishing and brand impersonation report - urgent request for removal";
-        var cuerpo =
-          "Hello,\n\n" +
-          quienes + "\n\n" +
-          "We request that you delete or classify the reported email address(es) below as malicious (phishing / brand impersonation), for the following reasons:\n\n" +
-          "- They are using our brand without consent and impersonating our name, " + marca + ".\n" +
-          "- They are using the " + marca + " name and logo to request confidential information from our clients (phishing).\n" +
-          "- This email address does NOT belong to " + marca + " and is impersonating it in order to defraud users.\n" +
-          "- Official " + marca + " communications come only from its official domain" + (dominio ? " (" + dominio + ")" : "") + ".\n" +
-          "- This email address has NO business or legal relationship with " + marca + ".\n\n" +
-          "This is a clear case of phishing and brand impersonation that puts our clients at risk of fraud and theft of confidential data. " +
-          "We respectfully and URGENTLY request that you delete or block this account/content, which is confusing and endangering " + marca + "'s clients.\n\n" +
-          "We appreciate your help in keeping the internet free of accounts that put users at risk.\n\n" +
-          "Reported email address(es):\n" +
-          "[ Paste here the email address(es) you are reporting ]\n\n" +
-          "Sincerely,\n" +
-          firma +
-          (d.correo ? "\nContact: " + d.correo : "");
-        return { to: this.destino, asunto: asunto, cuerpo: cuerpo };
+        var dom = dominio ? " (" + dominio + ")" : "";
+        var en = { to: dest,
+          asunto: "Phishing and brand impersonation report - urgent request for removal",
+          cuerpo:
+            "Hello,\n\n" +
+            (repres ? "We are Security Maximum in Computer Networks, representing " + marca + "." : "We are " + marca + ".") + "\n\n" +
+            "We request that you delete or classify the reported email address(es) below as malicious (phishing / brand impersonation), for the following reasons:\n\n" +
+            "- They are using our brand without consent and impersonating our name, " + marca + ".\n" +
+            "- They are using the " + marca + " name and logo to request confidential information from our clients (phishing).\n" +
+            "- This email address does NOT belong to " + marca + " and is impersonating it in order to defraud users.\n" +
+            "- Official " + marca + " communications come only from its official domain" + dom + ".\n" +
+            "- This email address has NO business or legal relationship with " + marca + ".\n\n" +
+            "This is a clear case of phishing and brand impersonation that puts our clients at risk of fraud and theft of confidential data. We respectfully and URGENTLY request that you delete or block this account/content, which is confusing and endangering " + marca + "'s clients.\n\n" +
+            "We appreciate your help in keeping the internet free of accounts that put users at risk.\n\n" +
+            "Reported email address(es):\n[ Paste here the email address(es) you are reporting ]\n\n" +
+            "Sincerely,\n" + (repres ? "Security Maximum in Computer Networks" : marca) + (d.correo ? "\nContact: " + d.correo : "") };
+        var es = {
+          asunto: "Reporte de phishing y suplantación de marca - solicitud urgente de eliminación",
+          cuerpo:
+            "Hola,\n\n" +
+            (repres ? "Somos Seguridad Máxima en Redes Informáticas, en representación de " + marca + "." : "Somos " + marca + ".") + "\n\n" +
+            "Solicitamos que eliminen o clasifiquen como maliciosa(s) la(s) dirección(es) de correo reportada(s) abajo (phishing / suplantación de marca), por los siguientes motivos:\n\n" +
+            "- Están usando nuestra marca sin consentimiento y suplantando nuestro nombre, " + marca + ".\n" +
+            "- Usan el nombre y el logotipo de " + marca + " para solicitar información confidencial a nuestros clientes (phishing).\n" +
+            "- Esta dirección de correo NO pertenece a " + marca + " y la está suplantando para defraudar a los usuarios.\n" +
+            "- Las comunicaciones oficiales de " + marca + " provienen únicamente de su dominio oficial" + dom + ".\n" +
+            "- Esta dirección de correo NO tiene ninguna relación comercial ni legal con " + marca + ".\n\n" +
+            "Este es un caso claro de phishing y suplantación de marca que pone a los clientes en riesgo de fraude y robo de datos confidenciales. Solicitamos respetuosa y URGENTEMENTE que eliminen o bloqueen esta cuenta/contenido, que confunde y pone en peligro a los clientes de " + marca + ".\n\n" +
+            "Agradecemos su ayuda para mantener internet libre de cuentas que ponen en riesgo a los usuarios.\n\n" +
+            "Dirección(es) de correo a denunciar:\n[ Pega aquí la(s) dirección(es) de correo a denunciar ]\n\n" +
+            "Saludos,\n" + (repres ? "Seguridad Máxima en Redes Informáticas" : marca) + (d.correo ? "\nContacto: " + d.correo : "") };
+        return bilingue(en, es);
       }
     },
     // ============= Scribd (NO tiene form web: es por CORREO) =============
@@ -488,26 +531,35 @@
       destino: "copyright@scribd.com, support@scribd.com, legal@scribd.com, privacy@scribd.com",
       manual: "Donde dice [ ... ] pega el/los enlace(s) de Scribd a denunciar, revisa y envía.",
       construirEmail: function (ctx) {
-        var marca = ctx.marca, d = ctx.datos;
+        var marca = ctx.marca, d = ctx.datos, dest = this.destino;
         var repres = /seguridadmaxima\.net/i.test(d.correo || "");
-        var apertura = repres
-          ? "We are Security Maximum in Computer Networks, writing on behalf of " + marca + " regarding an important matter related to the unauthorized use of its information."
-          : "We are " + marca + ", writing regarding an important matter related to the unauthorized use of our information.";
-        var firma = repres ? "Security Maximum in Computer Networks" : marca;
-        var asunto = "Unauthorized use of confidential information - urgent removal request";
-        var cuerpo =
-          "Hello,\n\n" +
-          apertura + "\n\n" +
-          "We have detected that confidential information belonging to " + marca + " is being shared on your platform without authorization.\n\n" +
-          "- This is a violation of intellectual property rights and a serious breach of the privacy and security of " + marca + "'s customers. As an organization, " + marca + " considers the confidentiality of its customers' data a top priority, and any unauthorized use of this information is unacceptable.\n\n" +
-          "We strongly and URGENTLY request that you immediately remove the document(s)/link(s) below and any other content that includes " + marca + "'s information without authorization, including any content disseminated through your platform.\n\n" +
-          "We trust that you will take the necessary steps to address this situation and prevent any future violations. We would like to resolve this matter quickly and efficiently.\n\n" +
-          "Reported document(s)/link(s):\n" +
-          "[ Paste here the Scribd link(s) you are reporting, e.g. https://www.scribd.com/document/... ]\n\n" +
-          "Sincerely,\n" +
-          firma +
-          (d.correo ? "\nContact: " + d.correo : "");
-        return { to: this.destino, asunto: asunto, cuerpo: cuerpo };
+        var en = { to: dest,
+          asunto: "Unauthorized use of confidential information - urgent removal request",
+          cuerpo:
+            "Hello,\n\n" +
+            (repres
+              ? "We are Security Maximum in Computer Networks, writing on behalf of " + marca + " regarding an important matter related to the unauthorized use of its information."
+              : "We are " + marca + ", writing regarding an important matter related to the unauthorized use of our information.") + "\n\n" +
+            "We have detected that confidential information belonging to " + marca + " is being shared on your platform without authorization.\n\n" +
+            "- This is a violation of intellectual property rights and a serious breach of the privacy and security of " + marca + "'s customers. As an organization, " + marca + " considers the confidentiality of its customers' data a top priority, and any unauthorized use of this information is unacceptable.\n\n" +
+            "We strongly and URGENTLY request that you immediately remove the document(s)/link(s) below and any other content that includes " + marca + "'s information without authorization, including any content disseminated through your platform.\n\n" +
+            "We trust that you will take the necessary steps to address this situation and prevent any future violations. We would like to resolve this matter quickly and efficiently.\n\n" +
+            "Reported document(s)/link(s):\n[ Paste here the Scribd link(s) you are reporting, e.g. https://www.scribd.com/document/... ]\n\n" +
+            "Sincerely,\n" + (repres ? "Security Maximum in Computer Networks" : marca) + (d.correo ? "\nContact: " + d.correo : "") };
+        var es = {
+          asunto: "Uso no autorizado de información confidencial - solicitud urgente de eliminación",
+          cuerpo:
+            "Hola,\n\n" +
+            (repres
+              ? "Somos Seguridad Máxima en Redes Informáticas, en representación de " + marca + ", en relación con un asunto importante sobre el uso no autorizado de su información."
+              : "Somos " + marca + ", en relación con un asunto importante sobre el uso no autorizado de nuestra información.") + "\n\n" +
+            "Hemos detectado que información confidencial perteneciente a " + marca + " se está compartiendo en su plataforma sin autorización.\n\n" +
+            "- Esto constituye una violación de los derechos de propiedad intelectual y una grave vulneración de la privacidad y la seguridad de los clientes de " + marca + ". Como organización, " + marca + " considera la confidencialidad de los datos de sus clientes una prioridad absoluta, y cualquier uso no autorizado de esta información es inaceptable.\n\n" +
+            "Solicitamos firme y URGENTEMENTE que eliminen de inmediato el/los documento(s)/enlace(s) indicados abajo y cualquier otro contenido que incluya información de " + marca + " sin autorización, incluido cualquier contenido difundido a través de su plataforma.\n\n" +
+            "Confiamos en que tomarán las medidas necesarias para resolver esta situación y prevenir futuras infracciones. Deseamos resolver este asunto de forma rápida y eficaz.\n\n" +
+            "Documento(s) / enlace(s) a denunciar:\n[ Pega aquí el/los enlace(s) de Scribd, ej. https://www.scribd.com/document/... ]\n\n" +
+            "Saludos,\n" + (repres ? "Seguridad Máxima en Redes Informáticas" : marca) + (d.correo ? "\nContacto: " + d.correo : "") };
+        return bilingue(en, es);
       }
     },
     // ===== "Por correo" dentro del cintillo de cada red (propiedad intelectual) =====
@@ -515,25 +567,25 @@
       red: "Facebook", nombre: "Por correo (propiedad intelectual)", cat: "ip", tipo: "email",
       destino: "ip@fb.com",
       manual: "Donde dice [ ... ] pega el/los enlace(s) de Facebook a denunciar, revisa y envía.",
-      construirEmail: function (ctx) { return emailIP(ctx, "Facebook", this.destino); }
+      construirEmail: function (ctx) { return bilingue(emailIP(ctx, "Facebook", this.destino, "en"), emailIP(ctx, "Facebook", this.destino, "es")); }
     },
     ig_correo: {
       red: "Instagram", nombre: "Por correo (propiedad intelectual)", cat: "ip", tipo: "email",
       destino: "ip@instagram.com",
       manual: "Donde dice [ ... ] pega el/los enlace(s) de Instagram a denunciar, revisa y envía.",
-      construirEmail: function (ctx) { return emailIP(ctx, "Instagram", this.destino); }
+      construirEmail: function (ctx) { return bilingue(emailIP(ctx, "Instagram", this.destino, "en"), emailIP(ctx, "Instagram", this.destino, "es")); }
     },
     wa_correo: {
       red: "WhatsApp", nombre: "Por correo (propiedad intelectual)", cat: "ip", tipo: "email",
       destino: "ip@whatsapp.com",
       manual: "Donde dice [ ... ] pega el/los datos o enlace(s) a denunciar, revisa y envía.",
-      construirEmail: function (ctx) { return emailIP(ctx, "WhatsApp", this.destino); }
+      construirEmail: function (ctx) { return bilingue(emailIP(ctx, "WhatsApp", this.destino, "en"), emailIP(ctx, "WhatsApp", this.destino, "es")); }
     },
     tk_correo: {
       red: "TikTok", nombre: "Por correo (propiedad intelectual)", cat: "ip", tipo: "email",
       destino: "copyright@tiktok.com, ip-reports@tiktok.com, ip_reports@tiktok.com",
       manual: "Donde dice [ ... ] pega el/los enlace(s) de TikTok a denunciar, revisa y envía.",
-      construirEmail: function (ctx) { return emailIP(ctx, "TikTok", this.destino); }
+      construirEmail: function (ctx) { return bilingue(emailIP(ctx, "TikTok", this.destino, "en"), emailIP(ctx, "TikTok", this.destino, "es")); }
     },
     // ============= Studocu (NO tiene form web: es por CORREO, en español) =============
     studocu_reporte: {
@@ -541,22 +593,27 @@
       destino: "privacy@studocu.com, support@studocu.com",
       manual: "Donde dice [ ... ] pega el/los enlace(s) de Studocu a denunciar, revisa y envía.",
       construirEmail: function (ctx) {
-        var marca = ctx.marca, d = ctx.datos;
+        var marca = ctx.marca, d = ctx.datos, dest = this.destino;
         var repres = /seguridadmaxima\.net/i.test(d.correo || "");
-        var quienes = repres
-          ? "Somos Seguridad Máxima en Redes Informáticas, representantes de " + marca + "."
-          : "Somos " + marca + ".";
-        var firma = repres ? "Seguridad Máxima en Redes Informáticas" : marca;
-        var asunto = "Solicitud de eliminación de información de " + marca;
-        var cuerpo =
-          "Hola,\n\n" +
-          quienes + "\n\n" +
-          "Solicitamos muy amable y respetuosamente que se elimine la información de " + marca + " que aparece en el/los siguiente(s) documento(s) de su plataforma. " + marca + " no autoriza el uso de su nombre ni de su información en dicho contenido, y su difusión vulnera los derechos de marca y la privacidad de sus clientes.\n\n" +
-          "Documento(s) / enlace(s) a denunciar:\n" +
-          "[ Pega aquí el/los enlace(s) de Studocu, ej. https://www.studocu.com/... ]\n\n" +
-          "Quedamos atentos a sus comentarios.\n\n" +
-          "Saludos,\n" + firma + (d.correo ? "\nContacto: " + d.correo : "");
-        return { to: this.destino, asunto: asunto, cuerpo: cuerpo };
+        var en = { to: dest,
+          asunto: "Request to remove " + marca + "'s information",
+          cuerpo:
+            "Hello,\n\n" +
+            (repres ? "We are Security Maximum in Computer Networks, on behalf of " + marca + "." : "We are " + marca + ".") + "\n\n" +
+            "We kindly and respectfully request the removal of " + marca + "'s information that appears in the following document(s) on your platform. " + marca + " does not authorize the use of its name or information in this content, and its dissemination infringes its trademark rights and the privacy of its customers.\n\n" +
+            "Document(s) / link(s) to report:\n[ Paste here the Studocu link(s) you are reporting, e.g. https://www.studocu.com/... ]\n\n" +
+            "We look forward to your response.\n\n" +
+            "Sincerely,\n" + (repres ? "Security Maximum in Computer Networks" : marca) + (d.correo ? "\nContact: " + d.correo : "") };
+        var es = {
+          asunto: "Solicitud de eliminación de información de " + marca,
+          cuerpo:
+            "Hola,\n\n" +
+            (repres ? "Somos Seguridad Máxima en Redes Informáticas, representantes de " + marca + "." : "Somos " + marca + ".") + "\n\n" +
+            "Solicitamos muy amable y respetuosamente que se elimine la información de " + marca + " que aparece en el/los siguiente(s) documento(s) de su plataforma. " + marca + " no autoriza el uso de su nombre ni de su información en dicho contenido, y su difusión vulnera los derechos de marca y la privacidad de sus clientes.\n\n" +
+            "Documento(s) / enlace(s) a denunciar:\n[ Pega aquí el/los enlace(s) de Studocu, ej. https://www.studocu.com/... ]\n\n" +
+            "Quedamos atentos a sus comentarios.\n\n" +
+            "Saludos,\n" + (repres ? "Seguridad Máxima en Redes Informáticas" : marca) + (d.correo ? "\nContacto: " + d.correo : "") };
+        return bilingue(en, es);
       }
     }
   };

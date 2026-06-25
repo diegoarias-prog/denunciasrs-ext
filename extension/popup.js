@@ -90,10 +90,12 @@ async function rellenar() {
   const datos = MARCAS[marca] || {};
   // Código de red para la justificación de difamación (fb/ig/tk).
   const redCode = { Facebook: "fb", Instagram: "ig", TikTok: "tk" }[form.red] || "";
-  const justifBase = window.JUSTIF.justificacion(form.cat, redCode, marca, datos.pais || "");
-  const justif = window.JUSTIF.conPolitica(justifBase, formKey);
+  const pais = datos.pais || "";
+  // Formularios web: justificación en INGLÉS. Para los correos también la versión española.
+  const justif = window.JUSTIF.conPolitica(window.JUSTIF.justificacion(form.cat, redCode, marca, pais, "en"), formKey, "en");
+  const justif_es = window.JUSTIF.conPolitica(window.JUSTIF.justificacion(form.cat, redCode, marca, pais, "es"), formKey, "es");
 
-  const ctx = { marca: marca, datos: datos, justif: justif, correoPersona: window.CORREO_PERSONA };
+  const ctx = { marca: marca, datos: datos, justif: justif, justif_es: justif_es, correoPersona: window.CORREO_PERSONA };
 
   // Redes SIN formulario web (Telegram): se genera un CORREO en una pestaña aparte.
   if (form.tipo === "email") {
