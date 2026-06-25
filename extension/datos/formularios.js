@@ -25,6 +25,38 @@
     return { nom: p[0] || marca, ape: p.length > 1 ? p.slice(1).join(" ") : "" };
   }
 
+  // Correo de denuncia (propiedad intelectual / suplantación) para una red social.
+  // Misma lógica que Outlook/Scribd: correo propio -> "We are [marca]"; si usa el de
+  // Seguridad Máxima -> "representing". Cita las normas comunitarias de esa red.
+  function emailIP(ctx, redNombre, destino) {
+    var marca = ctx.marca, d = ctx.datos;
+    var repres = /seguridadmaxima\.net/i.test(d.correo || "");
+    var quienes = repres
+      ? "We are Security Maximum in Computer Networks, writing on behalf of " + marca + "."
+      : "We are " + marca + ".";
+    var firma = repres ? "Security Maximum in Computer Networks" : marca;
+    var pols = (window.POLITICAS_GENERALES && window.POLITICAS_GENERALES[redNombre]) || [];
+    var polTxt = pols.length
+      ? "\n\nThis content violates " + redNombre + "'s policies and community standards, including:\n" +
+        pols.map(function (p) { return "- " + p.t + ": " + p.u; }).join("\n")
+      : "";
+    var asunto = "Brand impersonation / IP infringement on " + redNombre + " - urgent removal request";
+    var cuerpo =
+      "Hello,\n\n" +
+      quienes + "\n\n" +
+      "We are reporting content on " + redNombre + " that infringes the intellectual property and brand rights of " + marca + ".\n\n" +
+      "Reported content (profile / page / post URL):\n" +
+      "[ Paste here the " + redNombre + " link(s) you are reporting ]\n\n" +
+      "Reasons this content must be removed:\n" +
+      "- It uses the name, logo and brand identity of " + marca + " without authorization, impersonating it.\n" +
+      "- It misleads and confuses " + marca + "'s customers and may be used to request confidential information or to defraud them.\n" +
+      "- It has no business or legal relationship with " + marca + " and infringes its trademark and intellectual property rights." +
+      polTxt + "\n\n" +
+      "We respectfully and URGENTLY request the immediate removal of this content.\n\n" +
+      "Sincerely,\n" + firma + (d.correo ? "\nContact: " + d.correo : "");
+    return { to: destino, asunto: asunto, cuerpo: cuerpo };
+  }
+
   function postalDe(pais) {
     try { return window.JUSTIF.POSTAL[window.JUSTIF.norm(pais)] || ""; } catch (e) { return ""; }
   }
@@ -477,6 +509,31 @@
           (d.correo ? "\nContact: " + d.correo : "");
         return { to: this.destino, asunto: asunto, cuerpo: cuerpo };
       }
+    },
+    // ===== "Por correo" dentro del cintillo de cada red (propiedad intelectual) =====
+    fb_correo: {
+      red: "Facebook", nombre: "Por correo (propiedad intelectual)", cat: "ip", tipo: "email",
+      destino: "ip@fb.com",
+      manual: "Donde dice [ ... ] pega el/los enlace(s) de Facebook a denunciar, revisa y envía.",
+      construirEmail: function (ctx) { return emailIP(ctx, "Facebook", this.destino); }
+    },
+    ig_correo: {
+      red: "Instagram", nombre: "Por correo (propiedad intelectual)", cat: "ip", tipo: "email",
+      destino: "ip@instagram.com",
+      manual: "Donde dice [ ... ] pega el/los enlace(s) de Instagram a denunciar, revisa y envía.",
+      construirEmail: function (ctx) { return emailIP(ctx, "Instagram", this.destino); }
+    },
+    wa_correo: {
+      red: "WhatsApp", nombre: "Por correo (propiedad intelectual)", cat: "ip", tipo: "email",
+      destino: "ip@whatsapp.com",
+      manual: "Donde dice [ ... ] pega el/los datos o enlace(s) a denunciar, revisa y envía.",
+      construirEmail: function (ctx) { return emailIP(ctx, "WhatsApp", this.destino); }
+    },
+    tk_correo: {
+      red: "TikTok", nombre: "Por correo (propiedad intelectual)", cat: "ip", tipo: "email",
+      destino: "copyright@tiktok.com, ip-reports@tiktok.com, ip_reports@tiktok.com",
+      manual: "Donde dice [ ... ] pega el/los enlace(s) de TikTok a denunciar, revisa y envía.",
+      construirEmail: function (ctx) { return emailIP(ctx, "TikTok", this.destino); }
     }
   };
 })();
