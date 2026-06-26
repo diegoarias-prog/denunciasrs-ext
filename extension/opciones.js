@@ -26,7 +26,12 @@ async function cargar() {
     chrome.storage.local.get(["marcas_usuario", "marcas_eliminadas"], (x) => res(x)));
   const guardadas = d.marcas_usuario || {};
   const eliminadas = d.marcas_eliminadas || [];
-  const todas = Object.assign({}, window.MARCAS_BASE, guardadas);
+  // Combina POR CAMPO (igual que el popup): los nuevos campos play/appstore/dominio
+  // de la base no se pierden aunque exista una copia guardada vieja de la marca.
+  const todas = Object.assign({}, window.MARCAS_BASE);
+  Object.keys(guardadas).forEach((m) => {
+    todas[m] = Object.assign({}, window.MARCAS_BASE[m] || {}, guardadas[m]);
+  });
   eliminadas.forEach((n) => delete todas[n]);
   cuerpo.innerHTML = "";
   Object.keys(todas).sort().forEach((m) => cuerpo.appendChild(fila(m, todas[m])));
