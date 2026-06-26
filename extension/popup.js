@@ -10,7 +10,13 @@ async function obtener_marcas() {
     chrome.storage.local.get(["marcas_usuario", "marcas_eliminadas"], (x) => res(x)));
   const guardadas = d.marcas_usuario || {};
   const eliminadas = d.marcas_eliminadas || [];
-  const todas = Object.assign({}, window.MARCAS_BASE, guardadas);
+  // Combina POR CAMPO: lo guardado por el usuario pisa a la base, pero los campos
+  // que la copia guardada no tenga (ej. play/appstore/dominio agregados después)
+  // se heredan de MARCAS_BASE en vez de perderse.
+  const todas = Object.assign({}, window.MARCAS_BASE);
+  Object.keys(guardadas).forEach((m) => {
+    todas[m] = Object.assign({}, window.MARCAS_BASE[m] || {}, guardadas[m]);
+  });
   eliminadas.forEach((n) => delete todas[n]);
   return todas;
 }
