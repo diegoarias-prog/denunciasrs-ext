@@ -704,6 +704,57 @@
             "Saludos,\n" + (repres ? "Seguridad Máxima en Redes Informáticas" : marca) + (d.correo ? "\nContacto: " + d.correo : "") };
         return bilingue(en, es);
       }
+    },
+    // ===== GitHub (red propia, NO tiene form web: es por CORREO) =====
+    // Reporta a Trust & Safety / DMCA un repositorio que aloja un kit de phishing o
+    // suplanta a la marca. Argumento basado en las Acceptable Use Policies de GitHub.
+    github_repo: {
+      red: "GitHub", nombre: "Repositorio malicioso / phishing (por correo)", cat: "github", tipo: "email",
+      destino: "support@github.com, abuse@github.com, security@github.com, dmca@github.com",
+      manual: "Pega la URL del repositorio donde dice [ ... ] y, en el bloque de indicadores, los datos concretos del caso (archivos, qué roba cada uno, despliegue activo). Revisa y envía.",
+      construirEmail: function (ctx) {
+        var marca = ctx.marca, d = ctx.datos, dest = this.destino;
+        var repres = /seguridadmaxima\.net/i.test(d.correo || "");
+        var en = { to: dest,
+          asunto: "Active phishing kit impersonating " + marca + " hosted on GitHub - urgent removal request",
+          cuerpo:
+            "Hello GitHub Trust & Safety team,\n\n" +
+            (repres ? "We are Security Maximum in Computer Networks, writing on behalf of " + marca + "." : "We are " + marca + ".") + "\n\n" +
+            "I am reporting the following public repository because it appears to host an active phishing kit impersonating " + marca + ":\n\n" +
+            "Repository:\n[ Paste here the GitHub repository URL, e.g. https://github.com/<user>/<repo> ]\n\n" +
+            "Observed indicators:\n" +
+            "- The repository is publicly accessible and contains files used as a phishing flow that impersonates " + marca + ".\n" +
+            "- It reproduces " + marca + "'s name, logo, branding and services without authorization, impersonating it.\n" +
+            "- It is designed to harvest personal data, credentials and/or sensitive information (and in some cases biometric data) from victims and exfiltrate it to an external destination.\n" +
+            "[ Add here the specific indicators of this case, for example:\n" +
+            "  - Links to an active deployment: <url>\n" +
+            "  - <file>.html collects <data> and sends it to <destination, e.g. a Discord webhook / external server>\n" +
+            "  - <file>.html requests camera access and captures a selfie/photo of the victim ]\n\n" +
+            "This content is not security research. It is an active phishing kit used for credential / PII / biometric data theft and brand impersonation.\n\n" +
+            "This repository violates GitHub's Acceptable Use Policies, including the prohibitions on phishing, active malware or exploits, impersonation, and posting other people's private and sensitive information. It puts " + marca + "'s customers at direct risk of fraud and identity theft.\n\n" +
+            "Please review and remove or restrict the repository and the related account/organization as appropriate.\n\n" +
+            "Thank you,\n" + (repres ? "Security Maximum in Computer Networks" : marca) + (d.correo ? "\nContact: " + d.correo : "") };
+        var es = {
+          asunto: "Kit de phishing activo que suplanta a " + marca + " alojado en GitHub - solicitud urgente de eliminación",
+          cuerpo:
+            "Estimado equipo de Trust & Safety de GitHub,\n\n" +
+            (repres ? "Somos Seguridad Máxima en Redes Informáticas, en representación de " + marca + "." : "Somos " + marca + ".") + "\n\n" +
+            "Reporto el siguiente repositorio público porque parece alojar un kit de phishing activo que suplanta a " + marca + ":\n\n" +
+            "Repositorio:\n[ Pega aquí la URL del repositorio de GitHub, ej. https://github.com/<usuario>/<repo> ]\n\n" +
+            "Indicadores observados:\n" +
+            "- El repositorio es de acceso público y contiene archivos usados como flujo de phishing que suplanta a " + marca + ".\n" +
+            "- Reproduce el nombre, el logotipo, la identidad y los servicios de " + marca + " sin autorización, suplantándola.\n" +
+            "- Está diseñado para robar datos personales, credenciales y/o información sensible (y en algunos casos datos biométricos) de las víctimas y enviarlos a un destino externo.\n" +
+            "[ Agrega aquí los indicadores específicos de este caso, por ejemplo:\n" +
+            "  - Enlaza a un despliegue activo: <url>\n" +
+            "  - <archivo>.html recopila <dato> y lo envía a <destino, ej. un webhook de Discord / servidor externo>\n" +
+            "  - <archivo>.html solicita acceso a la cámara y captura una selfie/foto de la víctima ]\n\n" +
+            "Este contenido no es investigación de seguridad. Es un kit de phishing activo usado para el robo de credenciales / datos personales / datos biométricos y la suplantación de marca.\n\n" +
+            "Este repositorio infringe las Políticas de Uso Aceptable de GitHub, incluidas las prohibiciones de phishing, malware o exploits activos, suplantación y publicación de información privada y sensible de terceros. Pone a los clientes de " + marca + " en riesgo directo de fraude y robo de identidad.\n\n" +
+            "Por favor, revisen y eliminen o restrinjan el repositorio y la cuenta/organización relacionada según corresponda.\n\n" +
+            "Gracias,\n" + (repres ? "Seguridad Máxima en Redes Informáticas" : marca) + (d.correo ? "\nContacto: " + d.correo : "") };
+        return bilingue(en, es);
+      }
     }
   };
 })();
