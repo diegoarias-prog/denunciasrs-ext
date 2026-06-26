@@ -103,7 +103,7 @@ async function rellenar() {
     chrome.storage.local.set({ email_reporte: em }, () => {
       chrome.tabs.create({ url: chrome.runtime.getURL("correo.html") });
     });
-    mostrar_estado("ok", "Correo de Telegram generado: revisa la pestaña, pega los enlaces t.me/… y envíalo.");
+    mostrar_estado("ok", "Correo de " + form.red + " generado: revisa la pestaña, pega el/los enlace(s) y envíalo.");
     return;
   }
 

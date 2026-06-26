@@ -615,6 +615,95 @@
             "Saludos,\n" + (repres ? "Seguridad Máxima en Redes Informáticas" : marca) + (d.correo ? "\nContacto: " + d.correo : "") };
         return bilingue(en, es);
       }
+    },
+    // ===== Apps maliciosas (red propia, NO tiene form web: es por CORREO) =====
+    // Denuncia ante el SITIO que aloja una app falsa que esa app NO es oficial,
+    // citando la app OFICIAL de la marca en Google Play y Apple App Store.
+    apps_maliciosas: {
+      red: "Apps maliciosas", nombre: "App no oficial / falsa (por correo)", cat: "apps_maliciosas", tipo: "email",
+      destino: "",
+      manual: "El 'Para' va vacío: escribe el correo de abuso/contacto del SITIO que aloja la app falsa. Donde dice [ ... ] pega el/los enlace(s) del sitio o de la app no autorizada a denunciar, revisa y envía.",
+      construirEmail: function (ctx) {
+        var marca = ctx.marca, d = ctx.datos, dest = this.destino;
+        var repres = /seguridadmaxima\.net/i.test(d.correo || "");
+        var pais = d.pais ? " (" + d.pais + ")" : "";
+        var valPlay = (d.play || "").trim();
+        var valApp = (d.appstore || "").trim();
+        var playEn = valPlay || "[ Paste here the official Google Play Store link ]";
+        var appEn = valApp || "[ Paste here the official Apple App Store link ]";
+        var playEs = valPlay || "[ Pega aquí el enlace oficial de Google Play Store ]";
+        var appEs = valApp || "[ Pega aquí el enlace oficial de Apple App Store ]";
+        var en = { to: dest,
+          asunto: "Unauthorized / fake mobile app impersonating " + marca + " - urgent removal request",
+          cuerpo:
+            "Hi,\n\n" +
+            (repres ? "We are Security Maximum in Computer Networks, on behalf of " + marca + "." : "We are " + marca + ".") + "\n\n" +
+            marca + " informs you that the application(s) published on this website are NOT authorized or approved by the brand.\n\n" +
+            "The only official applications are available exclusively on the official stores:\n" +
+            "- Google Play Store: " + playEn + "\n" +
+            "- Apple App Store: " + appEn + "\n\n" +
+            marca + " requests the immediate removal of the application(s) published on unauthorized sites, as they pose security risks, intellectual property violations, and undermine user confidence.\n\n" +
+            "Please remove all information related to " + marca + pais + ".\n\n" +
+            "Reported link(s) (unauthorized site / app):\n[ Paste here the link(s) you are reporting ]\n\n" +
+            "Sincerely,\n" + (repres ? "Security Maximum in Computer Networks" : marca) + (d.correo ? "\nContact: " + d.correo : "") };
+        var es = {
+          asunto: "App móvil no autorizada / falsa que suplanta a " + marca + " - solicitud urgente de eliminación",
+          cuerpo:
+            "Hola,\n\n" +
+            (repres ? "Somos Seguridad Máxima en Redes Informáticas, en representación de " + marca + "." : "Somos " + marca + ".") + "\n\n" +
+            marca + " informa que la(s) aplicación(es) publicada(s) en este sitio web NO están autorizadas ni aprobadas por la marca.\n\n" +
+            "Las únicas aplicaciones oficiales están disponibles exclusivamente en las tiendas oficiales:\n" +
+            "- Google Play Store: " + playEs + "\n" +
+            "- Apple App Store: " + appEs + "\n\n" +
+            marca + " solicita la eliminación inmediata de la(s) aplicación(es) publicada(s) en sitios no autorizados, ya que suponen riesgos de seguridad, infracciones de propiedad intelectual y minan la confianza de los usuarios.\n\n" +
+            "Por favor, eliminen toda la información relacionada con " + marca + pais + ".\n\n" +
+            "Enlace(s) a denunciar (sitio / app no autorizada):\n[ Pega aquí el/los enlace(s) a denunciar ]\n\n" +
+            "Saludos,\n" + (repres ? "Seguridad Máxima en Redes Informáticas" : marca) + (d.correo ? "\nContacto: " + d.correo : "") };
+        return bilingue(en, es);
+      }
+    },
+    // ===== Delisting (red propia, NO tiene form web: es por CORREO) =====
+    // Pide a una lista negra / antispam que QUITE de su base un dominio LEGÍTIMO
+    // de la marca marcado por error (falso positivo). Adjunta el reporte de VirusTotal.
+    delisting: {
+      red: "Delisting", nombre: "Quitar dominio de lista negra (por correo)", cat: "delisting", tipo: "email",
+      destino: "",
+      manual: "El 'Para' va vacío: escribe el correo de delisting / falsos positivos del servicio o lista negra que marcó tu dominio. Abre el enlace de VirusTotal del cuerpo para ver qué motores lo marcan y a quién escribir; toma una captura y adjúntala como prueba.",
+      construirEmail: function (ctx) {
+        var marca = ctx.marca, d = ctx.datos, dest = this.destino;
+        var repres = /seguridadmaxima\.net/i.test(d.correo || "");
+        var pais = d.pais ? " " + d.pais : "";
+        var dom = (d.dominio || "").trim();
+        var dominioEn = dom || "[ your domain, e.g. credix.com ]";
+        var vtEn = dom ? "https://www.virustotal.com/gui/domain/" + dom : "[ Paste here the VirusTotal report link for the domain ]";
+        var dominioEs = dom || "[ tu dominio, ej. credix.com ]";
+        var vtEs = dom ? "https://www.virustotal.com/gui/domain/" + dom : "[ Pega aquí el enlace del reporte de VirusTotal del dominio ]";
+        var en = { to: dest,
+          asunto: "Delisting request: remove " + (dom || "our domain") + " from your spam/blacklist database",
+          cuerpo:
+            "Hello,\n\n" +
+            (repres ? "We are Security Maximum in Computer Networks, on behalf of " + marca + pais + "." : "We are " + marca + pais + ".") + "\n\n" +
+            "Our domain is: " + dominioEn + "\n\n" +
+            "We kindly ask for your help to remove the " + dominioEn + " website, which is currently listed as spam/malicious in your database. This is a legitimate domain used for the brand's own and internal email and websites; it has been flagged by mistake (false positive) and has no malicious activity.\n\n" +
+            "As supporting evidence, please review the VirusTotal report for this domain:\n" +
+            vtEn + "\n" +
+            "[ Paste here any additional VirusTotal report / evidence link, e.g. a specific URL analysis ]\n\n" +
+            "We look forward to your comments and appreciate your prompt action to delist it.\n\n" +
+            "Sincerely,\n" + (repres ? "Security Maximum in Computer Networks" : marca) + (d.correo ? "\nContact: " + d.correo : "") };
+        var es = {
+          asunto: "Solicitud de delisting: quitar " + (dom || "nuestro dominio") + " de su base de datos de spam/lista negra",
+          cuerpo:
+            "Hola,\n\n" +
+            (repres ? "Somos Seguridad Máxima en Redes Informáticas, en representación de " + marca + pais + "." : "Somos " + marca + pais + ".") + "\n\n" +
+            "Nuestro dominio es: " + dominioEs + "\n\n" +
+            "Solicitamos amablemente su ayuda para quitar el sitio web " + dominioEs + ", que actualmente figura como spam/malicioso en su base de datos. Es un dominio legítimo usado para el correo y los sitios web propios e internos de la marca; fue marcado por error (falso positivo) y no tiene ninguna actividad maliciosa.\n\n" +
+            "Como prueba de respaldo, revisen el reporte de VirusTotal de este dominio:\n" +
+            vtEs + "\n" +
+            "[ Pega aquí cualquier reporte / enlace de prueba adicional de VirusTotal, ej. un análisis de URL específico ]\n\n" +
+            "Quedamos atentos a sus comentarios y agradecemos su pronta gestión para quitarlo de la lista.\n\n" +
+            "Saludos,\n" + (repres ? "Seguridad Máxima en Redes Informáticas" : marca) + (d.correo ? "\nContacto: " + d.correo : "") };
+        return bilingue(en, es);
+      }
     }
   };
 })();
