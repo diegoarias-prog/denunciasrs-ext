@@ -80,6 +80,99 @@ $("abrir_plantilla").addEventListener("click", (e) => { e.preventDefault(); chro
 $("abrir_registro").addEventListener("click", (e) => { e.preventDefault(); chrome.tabs.create({ url: chrome.runtime.getURL("registro.html") }); });
 
 $("boton_rellenar").addEventListener("click", rellenar);
+$("boton_capturar").addEventListener("click", capturar_pantalla);
+
+// Habilita el botón de captura si ya hay una denuncia en curso de una sesión previa.
+chrome.storage.local.get(["ultima_denuncia_registro"], (x) => {
+  if (x.ultima_denuncia_registro) $("boton_capturar").disabled = false;
+});
+
+// ===========================================================================
+//  Registro automático de la denuncia (para no cargarla a mano)
+// ===========================================================================
+// Crea —o reutiliza— una entrada "pendiente" en `denuncias_registro` al iniciar
+// la denuncia. Anti-duplicado: si ya existe una pendiente con la misma
+// marca+plataforma+categoria, la reutiliza (pulsar Rellenar varias veces para la
+// misma denuncia NO llena el registro). Devuelve el id de la entrada y guarda
+// `ultima_denuncia_registro` para que la captura sepa a cuál adjuntar.
+async function registrar_denuncia_auto(marca, form) {
+  const CLAVE = "denuncias_registro";
+  const lista = await new Promise((res) =>
+    chrome.storage.local.get([CLAVE], (x) => res(Array.isArray(x[CLAVE]) ? x[CLAVE] : [])));
+  const plataforma = form.red;
+  const tipo = form.tipo === "email" ? "correo" : "formulario";
+  const categoria = form.nombre;
+
+  const existente = lista.find((d) =>
+    d.estado === "pendiente" && d.marca === marca &&
+    d.plataforma === plataforma && d.categoria === categoria);
+  if (existente) {
+    await new Promise((res) => chrome.storage.local.set({ ultima_denuncia_registro: existente.id }, res));
+    return existente.id;
+  }
+
+  // Consecutivo correlativo POR MARCA (máximo existente + 1), igual que registro.js.
+  const consecutivo = lista.filter((d) => d.marca === marca)
+    .reduce((m, d) => Math.max(m, parseInt(d.consecutivo, 10) || 0), 0) + 1;
+  const id = Date.now() + "_" + Math.random().toString(36).slice(2, 8);
+  lista.push({
+    id: id, marca: marca, plataforma: plataforma, tipo: tipo, categoria: categoria,
+    url_denunciada: "", numero_caso: "", estado: "pendiente", consecutivo: consecutivo,
+    notas: "", fecha: new Date().toISOString()
+  });
+  await new Promise((res) =>
+    chrome.storage.local.set({ [CLAVE]: lista, ultima_denuncia_registro: id }, res));
+  return id;
+}
+
+// Redimensiona un dataURL (img) a 'maxAncho' px de ancho y lo recomprime a JPEG
+// 'calidad' (~0.7), para no llenar el storage con capturas enormes.
+function redimensionar_imagen(dataUrl, maxAncho, calidad) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = function () {
+      let w = img.naturalWidth, h = img.naturalHeight;
+      if (w > maxAncho) { h = Math.round(h * (maxAncho / w)); w = maxAncho; }
+      const cv = document.createElement("canvas");
+      cv.width = w; cv.height = h;
+      cv.getContext("2d").drawImage(img, 0, 0, w, h);
+      resolve(cv.toDataURL("image/jpeg", calidad));
+    };
+    img.onerror = function () { reject(new Error("imagen inválida")); };
+    img.src = dataUrl;
+  });
+}
+
+// Captura la pestaña visible y la adjunta (campo `comprobante_img`) a la denuncia
+// apuntada por `ultima_denuncia_registro`.
+async function capturar_pantalla() {
+  const d = await new Promise((res) =>
+    chrome.storage.local.get(["ultima_denuncia_registro"], (x) => res(x)));
+  const idDest = d.ultima_denuncia_registro;
+  if (!idDest) {
+    mostrar_estado("aviso", "Primero inicia una denuncia (Rellenar) para asociarle la captura.");
+    return;
+  }
+  $("boton_capturar").disabled = true;
+  try {
+    const dataUrl = await new Promise((res, rej) =>
+      chrome.tabs.captureVisibleTab(null, { format: "jpeg", quality: 70 }, (u) =>
+        chrome.runtime.lastError ? rej(new Error(chrome.runtime.lastError.message)) : res(u)));
+    const reducida = await redimensionar_imagen(dataUrl, 1280, 0.7);
+    const CLAVE = "denuncias_registro";
+    const lista = await new Promise((res) =>
+      chrome.storage.local.get([CLAVE], (x) => res(Array.isArray(x[CLAVE]) ? x[CLAVE] : [])));
+    const ent = lista.find((x) => x.id === idDest);
+    if (!ent) { mostrar_estado("aviso", "No encuentro la denuncia para adjuntar la captura."); return; }
+    ent.comprobante_img = reducida;
+    await new Promise((res) => chrome.storage.local.set({ [CLAVE]: lista }, res));
+    mostrar_estado("ok", "✓ Captura guardada en el comprobante.");
+  } catch (e) {
+    mostrar_estado("error", "No se pudo capturar esta página: " + e.message);
+  } finally {
+    $("boton_capturar").disabled = false;
+  }
+}
 
 // Espera a que la pestaña termine de cargar (o 15 s como tope).
 function esperar_carga(tabId) {
@@ -111,10 +204,13 @@ async function rellenar() {
   // Redes SIN formulario web (Telegram): se genera un CORREO en una pestaña aparte.
   if (form.tipo === "email") {
     const em = form.construirEmail(ctx);
+    await registrar_denuncia_auto(marca, form);
+    $("boton_capturar").disabled = false;
     chrome.storage.local.set({ email_reporte: em }, () => {
       chrome.tabs.create({ url: chrome.runtime.getURL("correo.html") });
     });
-    mostrar_estado("ok", "Correo de " + form.red + " generado: revisa la pestaña, pega el/los enlace(s) y envíalo.");
+    mostrar_estado("ok", "Correo de " + form.red + " generado: revisa la pestaña, pega el/los enlace(s) y envíalo." +
+      "<br><br>📓 Registrada como pendiente — agrega el N.º de caso en Registro.");
     return;
   }
 
@@ -122,6 +218,10 @@ async function rellenar() {
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab || !tab.id) { mostrar_estado("error", "No encuentro la pestaña activa."); return; }
+
+  // La acción procede: registramos la denuncia como pendiente (anti-duplicado).
+  await registrar_denuncia_auto(marca, form);
+  $("boton_capturar").disabled = false;
 
   // ¿Estamos en el formulario correcto? Si no, lo abrimos, esperamos a que cargue
   // y rellenamos solo (sin tener que pulsar dos veces).
@@ -151,6 +251,7 @@ async function rellenar() {
     let html = "✓ <b>" + r.ok + "</b> campo(s) rellenado(s).";
     if (form.manual) html += "<br><br>📌 " + form.manual;
     if (r.faltan && r.faltan.length) html += "<br><br>No se encontraron (revisa a mano): " + r.faltan.join(", ");
+    html += "<br><br>📓 Registrada como pendiente — agrega el N.º de caso en Registro.";
     mostrar_estado(r.ok > 0 ? "ok" : "aviso", html);
   } catch (e) {
     mostrar_estado("error", "Error al rellenar: " + e.message + "<br>¿La pestaña es el formulario y está cargado?");

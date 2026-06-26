@@ -46,7 +46,8 @@
   td.celda_accion { white-space: nowrap; text-align: center; }
   .celda_accion .boton { margin: 0 1px; }
   .etiqueta_estado { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; }
-  .etiqueta_estado.borrador { background: #fef3c7; color: #92400e; }
+  .etiqueta_estado.pendiente { background: #fef3c7; color: #92400e; }
+  .etiqueta_estado.borrador { background: #f3f4f6; color: #374151; }
   .etiqueta_estado.enviada { background: #dbeafe; color: #1e40af; }
   .etiqueta_estado.resuelta { background: #d1fae5; color: #065f46; }
   .vacio_tabla { color: #6b7280; font-size: 13px; padding: 16px 4px; }
@@ -107,7 +108,7 @@
       <div class="campo_alta">
         <label for="campo_estado">Estado</label>
         <select id="campo_estado">
-          <option value="borrador">Borrador</option>
+          <option value="pendiente">Pendiente</option>
           <option value="enviada" selected>Enviada</option>
           <option value="resuelta">Resuelta</option>
         </select>
@@ -123,6 +124,14 @@
       <div class="campo_alta ancho_total">
         <label for="campo_notas">Notas</label>
         <textarea id="campo_notas" placeholder="Observaciones, seguimiento, etc."></textarea>
+      </div>
+      <div class="campo_alta ancho_total">
+        <label for="campo_comprobante_img">Adjuntar comprobante (imagen)</label>
+        <input type="file" id="campo_comprobante_img" accept="image/*">
+        <div id="previsualizacion_comprobante" style="display:none; margin-top:8px;">
+          <img id="img_previsualizacion_comprobante" alt="Vista previa del comprobante" style="max-width:100%; max-height:200px; border:1px solid #e5e7eb; border-radius:7px; display:block;">
+          <button type="button" class="boton sec mini" id="boton_quitar_comprobante" style="margin-top:6px;">Quitar imagen</button>
+        </div>
       </div>
     </div>
     <div class="barra">
@@ -159,7 +168,7 @@
       <label for="filtro_estado">Estado</label>
       <select id="filtro_estado">
         <option value="">Todos</option>
-        <option value="borrador">Borrador</option>
+        <option value="pendiente">Pendiente</option>
         <option value="enviada">Enviada</option>
         <option value="resuelta">Resuelta</option>
       </select>
@@ -172,7 +181,7 @@
       <thead>
         <tr>
           <th>#</th><th>Fecha</th><th>Marca</th><th>Plataforma</th><th>Tipo</th>
-          <th>Categoría</th><th>N.º de caso</th><th>Estado</th><th class="celda_accion">Acción</th>
+          <th>Categoría</th><th>N.º de caso</th><th>Estado</th><th title="Comprobante adjunto">📎</th><th class="celda_accion">Acción</th>
         </tr>
       </thead>
       <tbody id="cuerpo_registro"></tbody>
@@ -189,6 +198,12 @@
         <div class="sub_compro" id="compro_sub"></div>
       </div>
       <div class="lista_datos_comprobante" id="compro_cuerpo"></div>
+      <div class="bloque_imagen_comprobante" id="bloque_imagen_comprobante" style="display:none; margin-top:14px;">
+        <img id="img_comprobante" alt="Captura del comprobante" style="max-width:100%; border:1px solid #e5e7eb; border-radius:7px; display:block;">
+        <div class="barra no_imprimir">
+          <button class="boton sec mini" id="boton_quitar_imagen_comprobante">Quitar imagen del comprobante</button>
+        </div>
+      </div>
       <div class="barra no_imprimir">
         <button class="boton" id="boton_imprimir_comprobante">Imprimir</button>
         <button class="boton sec" id="boton_cerrar_comprobante">Cerrar</button>
