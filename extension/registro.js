@@ -16,12 +16,15 @@ const PLATAFORMAS_REGISTRO = [
   "Scribd", "Studocu"
 ];
 
-const ESTADOS_REGISTRO = { borrador: "Borrador", enviada: "Enviada", resuelta: "Resuelta" };
+// "borrador" se conserva por compatibilidad con registros antiguos; el alta usa
+// pendiente / enviada / resuelta.
+const ESTADOS_REGISTRO = { pendiente: "Pendiente", borrador: "Borrador", enviada: "Enviada", resuelta: "Resuelta" };
 const TIPOS_REGISTRO = { formulario: "Formulario", correo: "Correo" };
 
 const $ = (id) => document.getElementById(id);
 
 let DENUNCIAS = [];   // arreglo en memoria, espejo de chrome.storage
+let comprobante_img_actual = "";  // imagen en edición en el formulario de alta (dataURL)
 
 // --- Escape de TODO valor del usuario antes de meterlo al DOM (anti-XSS) ---
 function escapar_html(s) {
@@ -143,6 +146,7 @@ function pintar_tabla() {
       '<td>' + escapar_html(d.categoria) + '</td>' +
       '<td>' + escapar_html(d.numero_caso) + '</td>' +
       '<td><span class="etiqueta_estado ' + escapar_html(clase_estado) + '">' + escapar_html(ESTADOS_REGISTRO[d.estado] || d.estado || "") + '</span></td>' +
+      '<td style="text-align:center;" title="' + (d.comprobante_img ? "Tiene captura adjunta" : "Sin captura") + '">' + (d.comprobante_img ? "📎" : "") + '</td>' +
       '<td class="celda_accion">' +
         '<button class="boton sec mini" data-accion="ver" title="Ver comprobante">👁</button>' +
         '<button class="boton sec mini" data-accion="editar" title="Editar">✏️</button>' +
@@ -173,9 +177,69 @@ function limpiar_formulario() {
   $("campo_numero_caso").value = "";
   $("campo_url_denunciada").value = "";
   $("campo_notas").value = "";
+  comprobante_img_actual = "";
+  $("campo_comprobante_img").value = "";
+  mostrar_previsualizacion_comprobante();
   $("titulo_formulario").textContent = "Agregar denuncia";
   $("boton_guardar_denuncia").textContent = "Guardar denuncia";
   $("boton_cancelar_edicion").style.display = "none";
+}
+
+// ----------------------------------------------------------------------------
+//  Imagen de comprobante en el formulario de alta/edición
+// ----------------------------------------------------------------------------
+// Lee un File de imagen, lo redimensiona a 1280px de ancho y lo recomprime a
+// JPEG ~0.7 (igual que el botón de captura del popup), y devuelve el dataURL.
+function leer_y_redimensionar(file, maxAncho, calidad) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = function () {
+      const img = new Image();
+      img.onload = function () {
+        let w = img.naturalWidth, h = img.naturalHeight;
+        if (w > maxAncho) { h = Math.round(h * (maxAncho / w)); w = maxAncho; }
+        const cv = document.createElement("canvas");
+        cv.width = w; cv.height = h;
+        cv.getContext("2d").drawImage(img, 0, 0, w, h);
+        resolve(cv.toDataURL("image/jpeg", calidad));
+      };
+      img.onerror = function () { reject(new Error("imagen inválida")); };
+      img.src = fr.result;
+    };
+    fr.onerror = function () { reject(new Error("no se pudo leer el archivo")); };
+    fr.readAsDataURL(file);
+  });
+}
+
+function mostrar_previsualizacion_comprobante() {
+  const cont = $("previsualizacion_comprobante");
+  const img = $("img_previsualizacion_comprobante");
+  if (comprobante_img_actual) {
+    img.src = comprobante_img_actual;          // por propiedad, no innerHTML (anti-XSS)
+    cont.style.display = "block";
+  } else {
+    img.removeAttribute("src");
+    cont.style.display = "none";
+  }
+}
+
+async function al_elegir_comprobante(e) {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  try {
+    comprobante_img_actual = await leer_y_redimensionar(file, 1280, 0.7);
+    mostrar_previsualizacion_comprobante();
+    mostrar_aviso("✓ Imagen lista. Guarda la denuncia para conservarla.");
+  } catch (err) {
+    mostrar_aviso("No se pudo procesar la imagen.");
+  }
+  e.target.value = ""; // permite volver a elegir el mismo archivo
+}
+
+function quitar_comprobante_formulario() {
+  comprobante_img_actual = "";
+  $("campo_comprobante_img").value = "";
+  mostrar_previsualizacion_comprobante();
 }
 
 function cargar_para_editar(id) {
@@ -190,6 +254,9 @@ function cargar_para_editar(id) {
   $("campo_numero_caso").value = d.numero_caso || "";
   $("campo_url_denunciada").value = d.url_denunciada || "";
   $("campo_notas").value = d.notas || "";
+  comprobante_img_actual = d.comprobante_img || "";
+  $("campo_comprobante_img").value = "";
+  mostrar_previsualizacion_comprobante();
   $("titulo_formulario").textContent = "Editar denuncia";
   $("boton_guardar_denuncia").textContent = "Guardar cambios";
   $("boton_cancelar_edicion").style.display = "inline-block";
@@ -211,7 +278,8 @@ async function guardar_denuncia() {
     url_denunciada: $("campo_url_denunciada").value.trim(),
     numero_caso: $("campo_numero_caso").value.trim(),
     estado: $("campo_estado").value,
-    notas: $("campo_notas").value.trim()
+    notas: $("campo_notas").value.trim(),
+    comprobante_img: comprobante_img_actual || ""
   };
 
   if (id_edicion) {
@@ -273,11 +341,37 @@ function abrir_comprobante(id) {
     '<div class="fila_dato"><span class="clave">' + escapar_html(f[0]) + '</span>' +
     '<span class="valor">' + escapar_html(f[1]) + '</span></div>').join("");
 
+  // Imagen del comprobante: src por propiedad (no innerHTML), se imprime con el modal.
+  const bloque = $("bloque_imagen_comprobante");
+  const imgEl = $("img_comprobante");
+  if (d.comprobante_img) {
+    imgEl.src = d.comprobante_img;
+    bloque.style.display = "block";
+  } else {
+    imgEl.removeAttribute("src");
+    bloque.style.display = "none";
+  }
+  $("modal_comprobante").dataset.idActivo = d.id;
+
   $("fondo_comprobante").classList.add("abierto");
 }
 
 function cerrar_comprobante() {
   $("fondo_comprobante").classList.remove("abierto");
+}
+
+// Quita la imagen adjunta de la denuncia abierta en el modal.
+async function quitar_imagen_comprobante() {
+  const id = $("modal_comprobante").dataset.idActivo;
+  const d = DENUNCIAS.find((x) => x.id === id);
+  if (!d) return;
+  if (!confirm("¿Quitar la imagen del comprobante de la denuncia #" + d.consecutivo + "?")) return;
+  delete d.comprobante_img;
+  await guardar_registro();
+  $("bloque_imagen_comprobante").style.display = "none";
+  $("img_comprobante").removeAttribute("src");
+  refrescar_vista();
+  mostrar_aviso("Imagen del comprobante quitada.");
 }
 
 // ----------------------------------------------------------------------------
@@ -299,6 +393,9 @@ async function inicializar_registro() {
   $("boton_guardar_denuncia").addEventListener("click", guardar_denuncia);
   $("boton_limpiar_formulario").addEventListener("click", limpiar_formulario);
   $("boton_cancelar_edicion").addEventListener("click", limpiar_formulario);
+  $("campo_comprobante_img").addEventListener("change", al_elegir_comprobante);
+  $("boton_quitar_comprobante").addEventListener("click", quitar_comprobante_formulario);
+  $("boton_quitar_imagen_comprobante").addEventListener("click", quitar_imagen_comprobante);
   ["filtro_busqueda", "filtro_marca", "filtro_plataforma", "filtro_estado"].forEach((id) =>
     $(id).addEventListener("input", pintar_tabla));
   $("boton_imprimir_comprobante").addEventListener("click", () => window.print());
