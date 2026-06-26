@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Registro · Denuncias RS</title>
+<style>
+  body { font-family: "Segoe UI", Arial, sans-serif; max-width: 1200px; margin: 24px auto; color: #1f2937; padding: 0 16px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  p.sub { color: #6b7280; font-size: 13px; margin: 0 0 16px; }
+  h2 { font-size: 14px; margin: 22px 0 10px; border-bottom: 2px solid #1d4ed8; padding-bottom: 4px; }
+
+  /* --- Formulario de alta / edición --- */
+  .formulario_alta_denuncia { border: 1px solid #e5e7eb; border-radius: 9px; padding: 14px 16px; background: #f8fafc; }
+  .rejilla_campos { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px 14px; }
+  .campo_alta { display: flex; flex-direction: column; }
+  .campo_alta.ancho_total { grid-column: 1 / -1; }
+  label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .3px; color: #374151; margin: 0 0 4px; }
+  input, select, textarea { width: 100%; box-sizing: border-box; border: 1px solid #cbd5e1; border-radius: 7px; padding: 8px 10px; font-size: 13px; font-family: inherit; background: #fff; }
+  textarea { min-height: 70px; line-height: 1.5; resize: vertical; }
+
+  .barra { margin-top: 12px; display: flex; gap: 10px; align-items: center; }
+  .boton { padding: 8px 14px; border: 0; border-radius: 7px; background: #1d4ed8; color: #fff; font-weight: 600; cursor: pointer; font-size: 13px; }
+  .boton:hover { background: #1741b6; }
+  .boton.sec { background: #e5e7eb; color: #111827; }
+  .boton.sec:hover { background: #d1d5db; }
+  .boton.del { background: #ef4444; padding: 4px 8px; }
+  .boton.mini { padding: 4px 8px; font-size: 12px; }
+  #aviso { color: #065f46; font-size: 13px; margin-left: auto; }
+
+  /* --- Contadores --- */
+  .contadores_registro { display: flex; gap: 12px; margin: 16px 0 0; flex-wrap: wrap; }
+  .tarjeta_contador { flex: 1; min-width: 140px; border: 1px solid #e5e7eb; border-radius: 9px; padding: 10px 14px; background: #fff; }
+  .tarjeta_contador .numero { font-size: 22px; font-weight: 700; color: #1d4ed8; }
+  .tarjeta_contador .etiqueta { font-size: 12px; color: #6b7280; }
+
+  /* --- Filtros --- */
+  .barra_filtros_registro { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; margin-top: 8px; }
+  .barra_filtros_registro .campo_filtro { display: flex; flex-direction: column; }
+  .barra_filtros_registro input[type="search"] { min-width: 240px; }
+
+  /* --- Tabla --- */
+  .tabla_registro_scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.tabla_registro_denuncias { width: 100%; min-width: 980px; border-collapse: separate; border-spacing: 0; margin-top: 12px; }
+  table.tabla_registro_denuncias th, table.tabla_registro_denuncias td { border: 1px solid #e5e7eb; padding: 8px 10px; font-size: 13px; text-align: left; vertical-align: middle; }
+  table.tabla_registro_denuncias th { background: #f8fafc; white-space: nowrap; }
+  td.celda_accion { white-space: nowrap; text-align: center; }
+  .celda_accion .boton { margin: 0 1px; }
+  .etiqueta_estado { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+  .etiqueta_estado.borrador { background: #fef3c7; color: #92400e; }
+  .etiqueta_estado.enviada { background: #dbeafe; color: #1e40af; }
+  .etiqueta_estado.resuelta { background: #d1fae5; color: #065f46; }
+  .vacio_tabla { color: #6b7280; font-size: 13px; padding: 16px 4px; }
+
+  /* --- Modal --- */
+  .fondo_modal { display: none; position: fixed; inset: 0; background: rgba(17,24,39,.45); z-index: 50; align-items: flex-start; justify-content: center; padding: 32px 16px; overflow: auto; }
+  .fondo_modal.abierto { display: flex; }
+  .caja_modal { background: #fff; border-radius: 12px; max-width: 640px; width: 100%; padding: 22px 26px; box-shadow: 0 12px 40px rgba(0,0,0,.25); }
+
+  /* --- Comprobante --- */
+  .comprobante_encabezado { border-bottom: 2px solid #1d4ed8; padding-bottom: 10px; margin-bottom: 14px; }
+  .comprobante_encabezado h3 { margin: 0; font-size: 18px; color: #1d4ed8; }
+  .comprobante_encabezado .marca_grande { font-size: 15px; font-weight: 700; margin-top: 4px; }
+  .comprobante_encabezado .sub_compro { font-size: 12px; color: #6b7280; }
+  .lista_datos_comprobante { margin: 0; }
+  .lista_datos_comprobante .fila_dato { display: flex; gap: 10px; padding: 6px 0; border-bottom: 1px dashed #e5e7eb; font-size: 13px; }
+  .lista_datos_comprobante .fila_dato .clave { width: 150px; flex: 0 0 150px; font-weight: 700; color: #374151; }
+  .lista_datos_comprobante .fila_dato .valor { color: #1f2937; word-break: break-word; white-space: pre-wrap; }
+
+  /* --- Impresión: solo el comprobante --- */
+  @media print {
+    body * { visibility: hidden; }
+    #modal_comprobante, #modal_comprobante * { visibility: visible; }
+    .fondo_modal { position: static; background: none; display: block; padding: 0; }
+    .caja_modal { box-shadow: none; max-width: 100%; padding: 0; }
+    .no_imprimir { display: none !important; }
+  }
+</style>
+</head>
+<body>
+  <h1>Registro de denuncias</h1>
+  <p class="sub">Lleva el control de las denuncias enviadas por marca, su número de caso y un comprobante imprimible. Se guarda en este navegador.</p>
+
+  <!-- ====================== FORMULARIO DE ALTA / EDICIÓN ====================== -->
+  <h2 id="titulo_formulario">Agregar denuncia</h2>
+  <div class="formulario_alta_denuncia">
+    <input type="hidden" id="campo_id_edicion" value="">
+    <div class="rejilla_campos">
+      <div class="campo_alta">
+        <label for="campo_marca">Marca *</label>
+        <select id="campo_marca"></select>
+      </div>
+      <div class="campo_alta">
+        <label for="campo_plataforma">Plataforma *</label>
+        <select id="campo_plataforma"></select>
+      </div>
+      <div class="campo_alta">
+        <label for="campo_tipo">Tipo</label>
+        <select id="campo_tipo">
+          <option value="formulario">Formulario</option>
+          <option value="correo">Correo</option>
+        </select>
+      </div>
+      <div class="campo_alta">
+        <label for="campo_categoria">Categoría</label>
+        <input id="campo_categoria" placeholder="Ej. derechos de autor, phishing…">
+      </div>
+      <div class="campo_alta">
+        <label for="campo_estado">Estado</label>
+        <select id="campo_estado">
+          <option value="borrador">Borrador</option>
+          <option value="enviada" selected>Enviada</option>
+          <option value="resuelta">Resuelta</option>
+        </select>
+      </div>
+      <div class="campo_alta">
+        <label for="campo_numero_caso">N.º de caso</label>
+        <input id="campo_numero_caso" placeholder="Respuesta de la red (opcional)">
+      </div>
+      <div class="campo_alta ancho_total">
+        <label for="campo_url_denunciada">URL denunciada</label>
+        <input id="campo_url_denunciada" placeholder="https://…">
+      </div>
+      <div class="campo_alta ancho_total">
+        <label for="campo_notas">Notas</label>
+        <textarea id="campo_notas" placeholder="Observaciones, seguimiento, etc."></textarea>
+      </div>
+    </div>
+    <div class="barra">
+      <button class="boton" id="boton_guardar_denuncia">Guardar denuncia</button>
+      <button class="boton sec" id="boton_cancelar_edicion" style="display:none;">Cancelar edición</button>
+      <button class="boton sec" id="boton_limpiar_formulario">Limpiar</button>
+      <span id="aviso"></span>
+    </div>
+  </div>
+
+  <!-- ====================== CONTADORES ====================== -->
+  <div class="contadores_registro">
+    <div class="tarjeta_contador"><div class="numero" id="contador_total">0</div><div class="etiqueta">Denuncias totales</div></div>
+    <div class="tarjeta_contador"><div class="numero" id="contador_con_caso">0</div><div class="etiqueta">Con número de caso</div></div>
+    <div class="tarjeta_contador"><div class="numero" id="contador_resueltas">0</div><div class="etiqueta">Resueltas</div></div>
+  </div>
+
+  <!-- ====================== FILTROS ====================== -->
+  <h2>Denuncias registradas</h2>
+  <div class="barra_filtros_registro">
+    <div class="campo_filtro">
+      <label for="filtro_busqueda">Buscar</label>
+      <input type="search" id="filtro_busqueda" placeholder="N.º de caso, marca o URL…">
+    </div>
+    <div class="campo_filtro">
+      <label for="filtro_marca">Marca</label>
+      <select id="filtro_marca"><option value="">Todas</option></select>
+    </div>
+    <div class="campo_filtro">
+      <label for="filtro_plataforma">Plataforma</label>
+      <select id="filtro_plataforma"><option value="">Todas</option></select>
+    </div>
+    <div class="campo_filtro">
+      <label for="filtro_estado">Estado</label>
+      <select id="filtro_estado">
+        <option value="">Todos</option>
+        <option value="borrador">Borrador</option>
+        <option value="enviada">Enviada</option>
+        <option value="resuelta">Resuelta</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- ====================== TABLA ====================== -->
+  <div class="tabla_registro_scroll">
+    <table class="tabla_registro_denuncias">
+      <thead>
+        <tr>
+          <th>#</th><th>Fecha</th><th>Marca</th><th>Plataforma</th><th>Tipo</th>
+          <th>Categoría</th><th>N.º de caso</th><th>Estado</th><th class="celda_accion">Acción</th>
+        </tr>
+      </thead>
+      <tbody id="cuerpo_registro"></tbody>
+    </table>
+  </div>
+  <div class="vacio_tabla" id="mensaje_vacio" style="display:none;">No hay denuncias que coincidan con la búsqueda.</div>
+
+  <!-- ====================== MODAL COMPROBANTE ====================== -->
+  <div class="fondo_modal" id="fondo_comprobante">
+    <div class="caja_modal" id="modal_comprobante">
+      <div class="comprobante_encabezado">
+        <h3>Comprobante de denuncia</h3>
+        <div class="marca_grande" id="compro_marca"></div>
+        <div class="sub_compro" id="compro_sub"></div>
+      </div>
+      <div class="lista_datos_comprobante" id="compro_cuerpo"></div>
+      <div class="barra no_imprimir">
+        <button class="boton" id="boton_imprimir_comprobante">Imprimir</button>
+        <button class="boton sec" id="boton_cerrar_comprobante">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="datos/marcas.js"></script>
+  <script src="registro.js"></script>
+</body>
+</html>
