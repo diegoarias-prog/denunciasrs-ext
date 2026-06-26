@@ -15,7 +15,11 @@ async function obtener_marcas() {
   // se heredan de MARCAS_BASE en vez de perderse.
   const todas = Object.assign({}, window.MARCAS_BASE);
   Object.keys(guardadas).forEach((m) => {
-    todas[m] = Object.assign({}, window.MARCAS_BASE[m] || {}, guardadas[m]);
+    const base = window.MARCAS_BASE[m] || {}, g = guardadas[m] || {}, o = Object.assign({}, base);
+    // Lo guardado pisa a la base, PERO si el usuario lo dejó vacío se conserva la base
+    // (así no se pierde el teléfono/links/etc. agregados después en una copia vieja).
+    Object.keys(g).forEach((k) => { if (g[k] !== "" && g[k] != null) o[k] = g[k]; else if (!(k in o)) o[k] = g[k]; });
+    todas[m] = o;
   });
   eliminadas.forEach((n) => delete todas[n]);
   return todas;
@@ -322,13 +326,19 @@ async function APLICAR(pasos) {
         if (p.valor != null && p.valor !== "") {
           const kws = (p.label || "").split("|").map(norm).filter(Boolean);
           const els = Array.prototype.slice.call(
-            document.querySelectorAll('textarea,input[type=text],input[type=email],input[type=url],input:not([type])'));
+            document.querySelectorAll('textarea,input[type=text],input[type=email],input[type=url],input[type=tel],input[type=number],input:not([type])'));
           let hit = null;
           for (const e of els) {
             const r = e.getBoundingClientRect();
             if (r.width < 2 || r.height < 2 || e.value) continue;
             let ctx = " " + (e.placeholder || "") + " " + (e.getAttribute("aria-label") || "") + " ";
             if (e.id) { const lf = document.querySelector('label[for="' + e.id.replace(/"/g, '\\"') + '"]'); if (lf) ctx += " " + (lf.innerText || ""); }
+            // GitHub asocia el rótulo por aria-labelledby (referencia por id), no por label[for].
+            const lblby = e.getAttribute("aria-labelledby");
+            if (lblby) lblby.split(/\s+/).forEach(function (idr) { const le = document.getElementById(idr); if (le) ctx += " " + (le.innerText || ""); });
+            // El rótulo suele ser un hermano ANTERIOR directo del campo (formularios de GitHub).
+            let prevE = e.previousElementSibling, je = 0;
+            while (prevE && je < 4) { ctx += " " + (prevE.innerText || ""); prevE = prevE.previousElementSibling; je++; }
             // En TikTok el título del campo suele ser el hermano ANTERIOR de un ancestro.
             let par = e.parentElement, k = 0;
             while (par && k < 6) {
@@ -341,6 +351,40 @@ async function APLICAR(pasos) {
           }
           if (hit) { setNative(hit, p.valor); ok++; } else faltan.push("etiqueta:" + p.label);
         }
+      } else if (p.tipo === "selectLabel") {
+        // Como fillLabel pero para <select> nativos: encuentra el menú por su etiqueta
+        // cercana (placeholder/aria-label/label-for/hermano anterior/ancestro) y elige
+        // la opción cuyo texto contenga 'opcion'. Para formularios GitHub (sin name).
+        const kws = (p.label || "").split("|").map(norm).filter(Boolean);
+        const sels = Array.prototype.slice.call(document.querySelectorAll("select"));
+        let hit = null;
+        for (const s of sels) {
+          const r = s.getBoundingClientRect();
+          if (r.width < 2 || r.height < 2) continue;
+          let ctx = " " + (s.getAttribute("aria-label") || "") + " ";
+          if (s.id) { const lf = document.querySelector('label[for="' + s.id.replace(/"/g, '\\"') + '"]'); if (lf) ctx += " " + (lf.innerText || ""); }
+          const lblbyS = s.getAttribute("aria-labelledby");
+          if (lblbyS) lblbyS.split(/\s+/).forEach(function (idr) { const le = document.getElementById(idr); if (le) ctx += " " + (le.innerText || ""); });
+          let prevS = s.previousElementSibling, js = 0;
+          while (prevS && js < 4) { ctx += " " + (prevS.innerText || ""); prevS = prevS.previousElementSibling; js++; }
+          let par = s.parentElement, k = 0;
+          while (par && k < 6) { const ps = par.previousElementSibling; if (ps) ctx += " " + (ps.innerText || ""); par = par.parentElement; k++; }
+          if (kws.some((kw) => norm(ctx).indexOf(kw) >= 0)) { hit = s; break; }
+        }
+        if (hit) {
+          const t = norm(p.opcion);
+          let done = false;
+          if (t) for (let i = 0; i < hit.options.length; i++) {
+            if (norm(hit.options[i].text).indexOf(t) >= 0) {
+              hit.selectedIndex = i;
+              hit.dispatchEvent(new Event("input", { bubbles: true }));
+              hit.dispatchEvent(new Event("change", { bubbles: true }));
+              done = true; break;
+            }
+          }
+          if (done) ok++; else faltan.push("opcion:" + p.opcion);
+        } else faltan.push("selectLabel:" + p.label);
+        if (p.esperaMs) await dur(p.esperaMs);
       } else if (p.tipo === "clickOpcion") {
         // Hace clic en la OPCIÓN VISIBLE cuyo texto coincide (como un humano). Útil
         // para casillas/radios con widget no estándar (TikTok). Reintenta por React.
@@ -379,6 +423,24 @@ async function APLICAR(pasos) {
           }
         }
         if (n === 0) faltan.push("checkVarios:" + p.etiquetas);
+      } else if (p.tipo === "checkLabel") {
+        // Marca UNA casilla por su etiqueta cercana (sin name): usa el rótulo AJUSTADO
+        // (aria-label / aria-labelledby / label-for / padre corto / hermano) para no
+        // confundirse con casillas vecinas que comparten contenedor (formularios GitHub).
+        const kws = (p.texto || "").split("|").map(norm).filter(Boolean);
+        const cbs = Array.prototype.slice.call(document.querySelectorAll('input[type=checkbox]'));
+        let el = null;
+        for (const c of cbs) {
+          if (c.checked) continue;
+          let lab = " " + (c.getAttribute("aria-label") || "") + " ";
+          const lb = c.getAttribute("aria-labelledby");
+          if (lb) lb.split(/\s+/).forEach(function (idr) { const le = document.getElementById(idr); if (le) lab += " " + (le.innerText || ""); });
+          if (c.id) { const lf = document.querySelector('label[for="' + c.id.replace(/"/g, '\\"') + '"]'); if (lf) lab += " " + (lf.innerText || ""); }
+          if (c.parentElement && (c.parentElement.innerText || "").length < 240) lab += " " + (c.parentElement.innerText || "");
+          if (c.nextElementSibling) lab += " " + (c.nextElementSibling.innerText || "");
+          if (kws.some((kw) => norm(lab).indexOf(kw) >= 0)) { el = c; break; }
+        }
+        if (el) { marcarRadioEl(el); marcarParaClicReal(el); ok++; } else faltan.push("checkLabel:" + p.texto);
       } else if (p.tipo === "clickBoton") {
         // Pulsa un botón por su texto (p. ej. "Siguiente"/"Next"). Evita Enviar/Submit.
         const kws = norm(p.texto).split("|").filter(Boolean);

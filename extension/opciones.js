@@ -14,6 +14,7 @@ function fila(marca, datos) {
     '<td><input data-campo="play" value="' + escAttr(datos.play || "") + '"></td>' +
     '<td><input data-campo="appstore" value="' + escAttr(datos.appstore || "") + '"></td>' +
     '<td><input data-campo="dominio" value="' + escAttr(datos.dominio || "") + '"></td>' +
+    '<td><input data-campo="telefono" value="' + escAttr(datos.telefono || "") + '"></td>' +
     '<td class="acc"><button class="boton del">Quitar</button></td>';
   tr.querySelector(".del").addEventListener("click", () => tr.remove());
   return tr;
@@ -30,7 +31,9 @@ async function cargar() {
   // de la base no se pierden aunque exista una copia guardada vieja de la marca.
   const todas = Object.assign({}, window.MARCAS_BASE);
   Object.keys(guardadas).forEach((m) => {
-    todas[m] = Object.assign({}, window.MARCAS_BASE[m] || {}, guardadas[m]);
+    const base = window.MARCAS_BASE[m] || {}, g = guardadas[m] || {}, o = Object.assign({}, base);
+    Object.keys(g).forEach((k) => { if (g[k] !== "" && g[k] != null) o[k] = g[k]; else if (!(k in o)) o[k] = g[k]; });
+    todas[m] = o;
   });
   eliminadas.forEach((n) => delete todas[n]);
   cuerpo.innerHTML = "";
@@ -38,7 +41,7 @@ async function cargar() {
 }
 
 document.getElementById("agregar").addEventListener("click", () => {
-  cuerpo.appendChild(fila("", { pais: "", correo: "", sitio: "", play: "", appstore: "", dominio: "" }));
+  cuerpo.appendChild(fila("", { pais: "", correo: "", sitio: "", play: "", appstore: "", dominio: "", telefono: "" }));
 });
 
 document.getElementById("guardar").addEventListener("click", () => {
@@ -47,7 +50,7 @@ document.getElementById("guardar").addEventListener("click", () => {
     const v = (c) => tr.querySelector('[data-campo="' + c + '"]').value.trim();
     const nombre = v("marca");
     if (!nombre) return;
-    marcas[nombre] = { pais: v("pais"), correo: v("correo"), sitio: v("sitio"), play: v("play"), appstore: v("appstore"), dominio: v("dominio") };
+    marcas[nombre] = { pais: v("pais"), correo: v("correo"), sitio: v("sitio"), play: v("play"), appstore: v("appstore"), dominio: v("dominio"), telefono: v("telefono") };
   });
   // Marcas BASE que el usuario quitó de la tabla = eliminadas (para que no reaparezcan).
   const eliminadas = Object.keys(window.MARCAS_BASE).filter((n) => !(n in marcas));
