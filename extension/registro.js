@@ -1,0 +1,309 @@
+// ============================================================================
+//  Registro de denuncias enviadas (por marca). Guarda en chrome.storage.local
+//  bajo la clave `denuncias_registro` un arreglo de objetos con la forma:
+//  { id, marca, plataforma, tipo, categoria, url_denunciada, numero_caso,
+//    estado, consecutivo, notas, fecha }
+//  El diseño espeja la futura BD (Marcas / Plataformas / Denuncias) para migrar
+//  limpio. No hace llamados remotos: todo offline.
+// ============================================================================
+
+const CLAVE_REGISTRO = "denuncias_registro";
+
+// Lista FIJA de plataformas (espeja la tabla Plataformas de la futura BD).
+const PLATAFORMAS_REGISTRO = [
+  "Facebook", "Instagram", "WhatsApp", "TikTok", "X", "LinkedIn", "YouTube",
+  "Telegram", "GitHub", "Apps maliciosas", "Delisting", "Outlook / Hotmail",
+  "Scribd", "Studocu"
+];
+
+const ESTADOS_REGISTRO = { borrador: "Borrador", enviada: "Enviada", resuelta: "Resuelta" };
+const TIPOS_REGISTRO = { formulario: "Formulario", correo: "Correo" };
+
+const $ = (id) => document.getElementById(id);
+
+let DENUNCIAS = [];   // arreglo en memoria, espejo de chrome.storage
+
+// --- Escape de TODO valor del usuario antes de meterlo al DOM (anti-XSS) ---
+function escapar_html(s) {
+  return String(s == null ? "" : s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+// ----------------------------------------------------------------------------
+//  Marcas: base + las editadas/agregadas en Opciones − las eliminadas.
+//  MISMA lógica que obtener_marcas() del popup (combina POR CAMPO).
+// ----------------------------------------------------------------------------
+async function obtener_marcas_registro() {
+  const d = await new Promise((res) =>
+    chrome.storage.local.get(["marcas_usuario", "marcas_eliminadas"], (x) => res(x)));
+  const guardadas = d.marcas_usuario || {};
+  const eliminadas = d.marcas_eliminadas || [];
+  const base = window.MARCAS_BASE || {};
+  const todas = Object.assign({}, base);
+  Object.keys(guardadas).forEach((m) => {
+    const b = base[m] || {}, g = guardadas[m] || {}, o = Object.assign({}, b);
+    Object.keys(g).forEach((k) => { if (g[k] !== "" && g[k] != null) o[k] = g[k]; else if (!(k in o)) o[k] = g[k]; });
+    todas[m] = o;
+  });
+  eliminadas.forEach((n) => delete todas[n]);
+  return Object.keys(todas).sort();
+}
+
+// ----------------------------------------------------------------------------
+//  Persistencia
+// ----------------------------------------------------------------------------
+function leer_registro() {
+  return new Promise((res) =>
+    chrome.storage.local.get([CLAVE_REGISTRO], (x) => res(Array.isArray(x[CLAVE_REGISTRO]) ? x[CLAVE_REGISTRO] : [])));
+}
+
+function guardar_registro() {
+  return new Promise((res) => chrome.storage.local.set({ [CLAVE_REGISTRO]: DENUNCIAS }, res));
+}
+
+// ----------------------------------------------------------------------------
+//  Utilidades
+// ----------------------------------------------------------------------------
+function formatear_fecha(iso) {
+  const f = new Date(iso);
+  if (isNaN(f.getTime())) return "";
+  const p = (n) => String(n).padStart(2, "0");
+  return p(f.getDate()) + "/" + p(f.getMonth() + 1) + "/" + f.getFullYear() + " " + p(f.getHours()) + ":" + p(f.getMinutes());
+}
+
+function llenar_select(sel, items, opcion_inicial) {
+  sel.innerHTML = "";
+  if (opcion_inicial != null) {
+    const o = document.createElement("option");
+    o.value = opcion_inicial.value; o.textContent = opcion_inicial.texto;
+    sel.appendChild(o);
+  }
+  items.forEach((it) => {
+    const o = document.createElement("option");
+    if (typeof it === "string") { o.value = it; o.textContent = it; }
+    else { o.value = it.value; o.textContent = it.texto; }
+    sel.appendChild(o);
+  });
+}
+
+function mostrar_aviso(texto) {
+  const a = $("aviso");
+  a.textContent = texto;
+  setTimeout(() => (a.textContent = ""), 2500);
+}
+
+// ----------------------------------------------------------------------------
+//  Contadores
+// ----------------------------------------------------------------------------
+function refrescar_contadores() {
+  $("contador_total").textContent = DENUNCIAS.length;
+  $("contador_con_caso").textContent = DENUNCIAS.filter((d) => (d.numero_caso || "").trim() !== "").length;
+  $("contador_resueltas").textContent = DENUNCIAS.filter((d) => d.estado === "resuelta").length;
+}
+
+// ----------------------------------------------------------------------------
+//  Tabla (con buscador + filtros)
+// ----------------------------------------------------------------------------
+function denuncias_filtradas() {
+  const q = $("filtro_busqueda").value.trim().toLowerCase();
+  const fMarca = $("filtro_marca").value;
+  const fPlat = $("filtro_plataforma").value;
+  const fEstado = $("filtro_estado").value;
+  return DENUNCIAS.filter((d) => {
+    if (fMarca && d.marca !== fMarca) return false;
+    if (fPlat && d.plataforma !== fPlat) return false;
+    if (fEstado && d.estado !== fEstado) return false;
+    if (q) {
+      const heno = ((d.numero_caso || "") + " " + (d.marca || "") + " " + (d.url_denunciada || "")).toLowerCase();
+      if (heno.indexOf(q) < 0) return false;
+    }
+    return true;
+  });
+}
+
+function pintar_tabla() {
+  const cuerpo = $("cuerpo_registro");
+  const lista = denuncias_filtradas();
+  cuerpo.innerHTML = "";
+  $("mensaje_vacio").style.display = lista.length ? "none" : "block";
+
+  lista.forEach((d) => {
+    const tr = document.createElement("tr");
+    const clase_estado = (d.estado || "enviada");
+    tr.innerHTML =
+      '<td>' + escapar_html(d.consecutivo) + '</td>' +
+      '<td>' + escapar_html(formatear_fecha(d.fecha)) + '</td>' +
+      '<td>' + escapar_html(d.marca) + '</td>' +
+      '<td>' + escapar_html(d.plataforma) + '</td>' +
+      '<td>' + escapar_html(TIPOS_REGISTRO[d.tipo] || d.tipo || "") + '</td>' +
+      '<td>' + escapar_html(d.categoria) + '</td>' +
+      '<td>' + escapar_html(d.numero_caso) + '</td>' +
+      '<td><span class="etiqueta_estado ' + escapar_html(clase_estado) + '">' + escapar_html(ESTADOS_REGISTRO[d.estado] || d.estado || "") + '</span></td>' +
+      '<td class="celda_accion">' +
+        '<button class="boton sec mini" data-accion="ver" title="Ver comprobante">👁</button>' +
+        '<button class="boton sec mini" data-accion="editar" title="Editar">✏️</button>' +
+        '<button class="boton del mini" data-accion="eliminar" title="Eliminar">🗑</button>' +
+      '</td>';
+    tr.querySelector('[data-accion="ver"]').addEventListener("click", () => abrir_comprobante(d.id));
+    tr.querySelector('[data-accion="editar"]').addEventListener("click", () => cargar_para_editar(d.id));
+    tr.querySelector('[data-accion="eliminar"]').addEventListener("click", () => eliminar_denuncia(d.id));
+    cuerpo.appendChild(tr);
+  });
+}
+
+function refrescar_vista() {
+  refrescar_contadores();
+  pintar_tabla();
+}
+
+// ----------------------------------------------------------------------------
+//  Alta / edición
+// ----------------------------------------------------------------------------
+function limpiar_formulario() {
+  $("campo_id_edicion").value = "";
+  $("campo_marca").selectedIndex = 0;
+  $("campo_plataforma").selectedIndex = 0;
+  $("campo_tipo").value = "formulario";
+  $("campo_categoria").value = "";
+  $("campo_estado").value = "enviada";
+  $("campo_numero_caso").value = "";
+  $("campo_url_denunciada").value = "";
+  $("campo_notas").value = "";
+  $("titulo_formulario").textContent = "Agregar denuncia";
+  $("boton_guardar_denuncia").textContent = "Guardar denuncia";
+  $("boton_cancelar_edicion").style.display = "none";
+}
+
+function cargar_para_editar(id) {
+  const d = DENUNCIAS.find((x) => x.id === id);
+  if (!d) return;
+  $("campo_id_edicion").value = d.id;
+  $("campo_marca").value = d.marca || "";
+  $("campo_plataforma").value = d.plataforma || "";
+  $("campo_tipo").value = d.tipo || "formulario";
+  $("campo_categoria").value = d.categoria || "";
+  $("campo_estado").value = d.estado || "enviada";
+  $("campo_numero_caso").value = d.numero_caso || "";
+  $("campo_url_denunciada").value = d.url_denunciada || "";
+  $("campo_notas").value = d.notas || "";
+  $("titulo_formulario").textContent = "Editar denuncia";
+  $("boton_guardar_denuncia").textContent = "Guardar cambios";
+  $("boton_cancelar_edicion").style.display = "inline-block";
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+async function guardar_denuncia() {
+  const marca = $("campo_marca").value;
+  const plataforma = $("campo_plataforma").value;
+  if (!marca) { mostrar_aviso("Elige una marca."); return; }
+  if (!plataforma) { mostrar_aviso("Elige una plataforma."); return; }
+
+  const id_edicion = $("campo_id_edicion").value;
+  const comunes = {
+    marca: marca,
+    plataforma: plataforma,
+    tipo: $("campo_tipo").value,
+    categoria: $("campo_categoria").value.trim(),
+    url_denunciada: $("campo_url_denunciada").value.trim(),
+    numero_caso: $("campo_numero_caso").value.trim(),
+    estado: $("campo_estado").value,
+    notas: $("campo_notas").value.trim()
+  };
+
+  if (id_edicion) {
+    // Editar: conserva id, consecutivo y fecha originales.
+    const d = DENUNCIAS.find((x) => String(x.id) === String(id_edicion));
+    if (d) Object.assign(d, comunes);
+  } else {
+    // Alta: consecutivo correlativo POR MARCA (máximo existente + 1, así no se
+    // repite ni si se borró una denuncia intermedia).
+    const consecutivo = DENUNCIAS.filter((x) => x.marca === marca)
+      .reduce((m, x) => Math.max(m, parseInt(x.consecutivo, 10) || 0), 0) + 1;
+    DENUNCIAS.push(Object.assign({
+      id: Date.now() + "_" + Math.random().toString(36).slice(2, 8),
+      consecutivo: consecutivo,
+      fecha: new Date().toISOString()
+    }, comunes));
+  }
+
+  await guardar_registro();
+  limpiar_formulario();
+  refrescar_vista();
+  mostrar_aviso(id_edicion ? "✓ Denuncia actualizada." : "✓ Denuncia guardada.");
+}
+
+async function eliminar_denuncia(id) {
+  const d = DENUNCIAS.find((x) => x.id === id);
+  if (!d) return;
+  if (!confirm("¿Eliminar la denuncia #" + d.consecutivo + " de " + d.marca + "? Esta acción no se puede deshacer.")) return;
+  DENUNCIAS = DENUNCIAS.filter((x) => x.id !== id);
+  await guardar_registro();
+  // Si se estaba editando esa denuncia, limpia el formulario.
+  if ($("campo_id_edicion").value && String($("campo_id_edicion").value) === String(id)) limpiar_formulario();
+  refrescar_vista();
+  mostrar_aviso("Denuncia eliminada.");
+}
+
+// ----------------------------------------------------------------------------
+//  Comprobante (modal + impresión)
+// ----------------------------------------------------------------------------
+function abrir_comprobante(id) {
+  const d = DENUNCIAS.find((x) => x.id === id);
+  if (!d) return;
+  $("compro_marca").textContent = d.marca + " · Denuncia #" + d.consecutivo;
+  $("compro_sub").textContent = "Registrada el " + formatear_fecha(d.fecha);
+
+  const filas = [
+    ["Marca", d.marca],
+    ["N.º consecutivo", d.consecutivo],
+    ["Fecha", formatear_fecha(d.fecha)],
+    ["Plataforma", d.plataforma],
+    ["Tipo", TIPOS_REGISTRO[d.tipo] || d.tipo],
+    ["Categoría", d.categoria || "—"],
+    ["URL denunciada", d.url_denunciada || "—"],
+    ["N.º de caso", d.numero_caso || "—"],
+    ["Estado", ESTADOS_REGISTRO[d.estado] || d.estado],
+    ["Notas", d.notas || "—"]
+  ];
+  $("compro_cuerpo").innerHTML = filas.map((f) =>
+    '<div class="fila_dato"><span class="clave">' + escapar_html(f[0]) + '</span>' +
+    '<span class="valor">' + escapar_html(f[1]) + '</span></div>').join("");
+
+  $("fondo_comprobante").classList.add("abierto");
+}
+
+function cerrar_comprobante() {
+  $("fondo_comprobante").classList.remove("abierto");
+}
+
+// ----------------------------------------------------------------------------
+//  Arranque
+// ----------------------------------------------------------------------------
+async function inicializar_registro() {
+  const marcas = await obtener_marcas_registro();
+  // Selects del formulario de alta.
+  llenar_select($("campo_marca"), marcas, { value: "", texto: "— Elige marca —" });
+  llenar_select($("campo_plataforma"), PLATAFORMAS_REGISTRO, { value: "", texto: "— Elige plataforma —" });
+  // Selects de filtros.
+  llenar_select($("filtro_marca"), marcas, { value: "", texto: "Todas" });
+  llenar_select($("filtro_plataforma"), PLATAFORMAS_REGISTRO, { value: "", texto: "Todas" });
+
+  DENUNCIAS = await leer_registro();
+  refrescar_vista();
+
+  // Eventos.
+  $("boton_guardar_denuncia").addEventListener("click", guardar_denuncia);
+  $("boton_limpiar_formulario").addEventListener("click", limpiar_formulario);
+  $("boton_cancelar_edicion").addEventListener("click", limpiar_formulario);
+  ["filtro_busqueda", "filtro_marca", "filtro_plataforma", "filtro_estado"].forEach((id) =>
+    $(id).addEventListener("input", pintar_tabla));
+  $("boton_imprimir_comprobante").addEventListener("click", () => window.print());
+  $("boton_cerrar_comprobante").addEventListener("click", cerrar_comprobante);
+  $("fondo_comprobante").addEventListener("click", (e) => { if (e.target === $("fondo_comprobante")) cerrar_comprobante(); });
+}
+
+inicializar_registro();
