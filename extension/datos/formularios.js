@@ -715,6 +715,9 @@
       construirEmail: function (ctx) {
         var marca = ctx.marca, d = ctx.datos, dest = this.destino;
         var repres = /seguridadmaxima\.net/i.test(d.correo || "");
+        var pols = (window.POLITICAS_GENERALES && window.POLITICAS_GENERALES["GitHub"]) || [];
+        var polEn = pols.length ? "\n\nGitHub policies being violated (please review):\n" + pols.map(function (p) { return "- " + p.t + ": " + p.u; }).join("\n") : "";
+        var polEs = pols.length ? "\n\nPolíticas de GitHub que se están infringiendo (para su revisión):\n" + pols.map(function (p) { return "- " + p.t + ": " + p.u; }).join("\n") : "";
         var en = { to: dest,
           asunto: "Active phishing kit impersonating " + marca + " hosted on GitHub - urgent removal request",
           cuerpo:
@@ -731,7 +734,7 @@
             "  - <file>.html collects <data> and sends it to <destination, e.g. a Discord webhook / external server>\n" +
             "  - <file>.html requests camera access and captures a selfie/photo of the victim ]\n\n" +
             "This content is not security research. It is an active phishing kit used for credential / PII / biometric data theft and brand impersonation.\n\n" +
-            "This repository violates GitHub's Acceptable Use Policies, including the prohibitions on phishing, active malware or exploits, impersonation, and posting other people's private and sensitive information. It puts " + marca + "'s customers at direct risk of fraud and identity theft.\n\n" +
+            "This repository violates GitHub's Acceptable Use Policies, including the prohibitions on phishing, active malware or exploits, impersonation, and posting other people's private and sensitive information. It puts " + marca + "'s customers at direct risk of fraud and identity theft." + polEn + "\n\n" +
             "Please review and remove or restrict the repository and the related account/organization as appropriate.\n\n" +
             "Thank you,\n" + (repres ? "Security Maximum in Computer Networks" : marca) + (d.correo ? "\nContact: " + d.correo : "") };
         var es = {
@@ -750,7 +753,7 @@
             "  - <archivo>.html recopila <dato> y lo envía a <destino, ej. un webhook de Discord / servidor externo>\n" +
             "  - <archivo>.html solicita acceso a la cámara y captura una selfie/foto de la víctima ]\n\n" +
             "Este contenido no es investigación de seguridad. Es un kit de phishing activo usado para el robo de credenciales / datos personales / datos biométricos y la suplantación de marca.\n\n" +
-            "Este repositorio infringe las Políticas de Uso Aceptable de GitHub, incluidas las prohibiciones de phishing, malware o exploits activos, suplantación y publicación de información privada y sensible de terceros. Pone a los clientes de " + marca + " en riesgo directo de fraude y robo de identidad.\n\n" +
+            "Este repositorio infringe las Políticas de Uso Aceptable de GitHub, incluidas las prohibiciones de phishing, malware o exploits activos, suplantación y publicación de información privada y sensible de terceros. Pone a los clientes de " + marca + " en riesgo directo de fraude y robo de identidad." + polEs + "\n\n" +
             "Por favor, revisen y eliminen o restrinjan el repositorio y la cuenta/organización relacionada según corresponda.\n\n" +
             "Gracias,\n" + (repres ? "Seguridad Máxima en Redes Informáticas" : marca) + (d.correo ? "\nContacto: " + d.correo : "") };
         return bilingue(en, es);
