@@ -7,7 +7,7 @@ const cuerpo = document.getElementById("cuerpo");
 function fila(marca, datos) {
   const tr = document.createElement("tr");
   tr.innerHTML =
-    '<td><input data-campo="marca" value="' + escAttr(marca) + '"></td>' +
+    '<td class="col_marca"><input data-campo="marca" value="' + escAttr(marca) + '"></td>' +
     '<td><input data-campo="pais" value="' + escAttr(datos.pais || "") + '"></td>' +
     '<td><input data-campo="correo" value="' + escAttr(datos.correo || "") + '"></td>' +
     '<td><input data-campo="sitio" value="' + escAttr(datos.sitio || "") + '"></td>' +
