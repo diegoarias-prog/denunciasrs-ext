@@ -715,7 +715,7 @@
       construirEmail: function (ctx) {
         var marca = ctx.marca, d = ctx.datos, dest = this.destino;
         var repres = /seguridadmaxima\.net/i.test(d.correo || "");
-        var pols = (window.POLITICAS_GENERALES && window.POLITICAS_GENERALES["GitHub"]) || [];
+        var pols = ((window.POLITICAS_GENERALES && window.POLITICAS_GENERALES["GitHub"]) || []).slice(0, 2);
         var polEn = pols.length ? "\n\nGitHub policies being violated (please review):\n" + pols.map(function (p) { return "- " + p.t + ": " + p.u; }).join("\n") : "";
         var polEs = pols.length ? "\n\nPolíticas de GitHub que se están infringiendo (para su revisión):\n" + pols.map(function (p) { return "- " + p.t + ": " + p.u; }).join("\n") : "";
         var en = { to: dest,
@@ -757,6 +757,92 @@
             "Por favor, revisen y eliminen o restrinjan el repositorio y la cuenta/organización relacionada según corresponda.\n\n" +
             "Gracias,\n" + (repres ? "Seguridad Máxima en Redes Informáticas" : marca) + (d.correo ? "\nContacto: " + d.correo : "") };
         return bilingue(en, es);
+      }
+    },
+    // ===== GitHub: FORMULARIOS web de soporte (autollenado parcial por etiqueta) =====
+    // Solo se rellenan los campos de TEXTO/textarea brand-aware; desplegables, casillas
+    // juradas, firma y captcha los hace el usuario (ver 'manual'). Igual que TikTok (tk_*),
+    // se usa el patrón 'fillLabel' porque no tenemos los nombres internos de los campos.
+    gh_abuso: {
+      red: "GitHub", nombre: "Denunciar abuso o spam (formulario)", cat: "github",
+      url: "https://support.github.com/contact/report-abuse?category=report-abuse&report=other&report_type=unspecified",
+      manual: "Elige TÚ la categoría (ej. Phishing), pega el usuario/repo/URL a denunciar, resuelve el captcha y revisa antes de enviar. El cuadro '¿De qué quieres informar?' se rellena solo.",
+      construirPlan: function (ctx) {
+        var d = ctx.datos, marca = ctx.marca;
+        var repres = /seguridadmaxima\.net/i.test(d.correo || "");
+        var pols = ((window.POLITICAS_GENERALES && window.POLITICAS_GENERALES["GitHub"]) || []).slice(0, 2);
+        var polLista = pols.map(function (p) { return "- " + p.t + ": " + p.u; }).join("\n");
+        var desc =
+          "This GitHub repository hosts an active phishing kit that impersonates " + marca + ". " +
+          "It reproduces " + marca + "'s name, logo, branding and services without authorization, and it is designed to steal personal data, credentials and/or biometric information from the victims, putting " + marca + "'s customers at direct risk of fraud and identity theft.\n\n" +
+          (repres ? "We are Security Maximum in Computer Networks, on behalf of " + marca + "." : "We are " + marca + ".") + "\n\n" +
+          "This is not security research; it is an active phishing kit used for credential / PII / biometric data theft and brand impersonation." +
+          (pols.length ? "\n\nGitHub policies being violated (please review):\n" + polLista : "") + "\n\n" +
+          "[ Paste here the repository URL and the specific indicators: files, what each one steals, active deployment, Discord webhook, etc. ]";
+        return { url: this.url, manual: this.manual, pasos: [
+          { tipo: "fillLabel", label: "mayor nivel de detalles|comportamiento que estas denunciando|ejemplos especificos en forma de url|de que quieres informar|de qué quieres informar|que quieres reportar|what would you like to report|what do you want to report|provide as much detail|report", valor: desc }
+        ] };
+      }
+    },
+    gh_dmca: {
+      red: "GitHub", nombre: "Aviso DMCA / derechos de autor (formulario)", cat: "github",
+      url: "https://support.github.com/contact/dmca-takedown",
+      manual: "Se rellenan los desplegables, las descripciones (en inglés, es lo que se explica a GitHub) y las 4 casillas juradas del final. ELIGE TÚ: el desplegable 'teléfono o dirección' y complétalo, pega la URL del repositorio infractor, y revisa la FIRMA con tu nombre legal completo (GitHub no acepta nombre de empresa). Revisa todo antes de enviar.",
+      construirPlan: function (ctx) {
+        var d = ctx.datos, marca = ctx.marca;
+        var repres = /seguridadmaxima\.net/i.test(d.correo || "");
+        var pols = ((window.POLITICAS_GENERALES && window.POLITICAS_GENERALES["GitHub"]) || []).slice(0, 2);
+        var polLista = pols.map(function (p) { return "- " + p.t + ": " + p.u; }).join("\n");
+        var titular = repres
+          ? "We are Security Maximum in Computer Networks, acting as the authorized agent of " + marca + " and duly authorized to act on behalf of the rights owner to submit this notice."
+          : "We are the brand protection team of " + marca + ", duly authorized to act on behalf of " + marca + " (the owner of the intellectual property and brand rights described in this notice).";
+        var obra =
+          "The original protected work is the official brand identity of " + marca + ": its registered name, its logo, its official website and its original published content. " +
+          "The infringing repository copies and reproduces this material without authorization in order to impersonate " + marca + " and mislead its customers." +
+          (pols.length ? "\n\nGitHub policies being violated (please review):\n" + polLista : "");
+        var urlObra = (d.sitio || "[ paste here the URL of the brand's official content ]");
+        var firma = repres ? "Diego Arias" : marca;
+        var codTel = "";
+        try { codTel = (window.JUSTIF && window.JUSTIF.CODIGO[window.JUSTIF.norm(d.pais || "")]) || ""; } catch (e) {}
+        var telNum = (d.telefono || "").replace(/\s+/g, "") || "[ phone number ]";
+        var codNum = (codTel || "").replace(/[^0-9]/g, "");
+        return { url: this.url, manual: this.manual, pasos: [
+          // Desplegables (por etiqueta en inglés)
+          { tipo: "selectLabel", label: "are you the copyright holder or authorized", opcion: "authorized to act on the copyright owner", esperaMs: 250 },
+          { tipo: "selectLabel", label: "submitting a revised dmca notice", opcion: "no", esperaMs: 250 },
+          { tipo: "selectLabel", label: "does your claim involve content on github or npm", opcion: "github", esperaMs: 250 },
+          { tipo: "selectLabel", label: "based on the above, i confirm", opcion: "entire repository is infringing", esperaMs: 250 },
+          { tipo: "selectLabel", label: "technological measures in place to control access", opcion: "no", esperaMs: 250 },
+          { tipo: "selectLabel", label: "licensed under an open source license", opcion: "no", esperaMs: 250 },
+          { tipo: "selectLabel", label: "what would be the best solution for the alleged infringement|best solution for the alleged infringement", opcion: "content must be removed", esperaMs: 250 },
+          { tipo: "selectLabel", label: "provide either your telephone number or physical address|get back to you|telephone number or physical address", opcion: "telephone", esperaMs: 600 },
+          { tipo: "selectLabel", label: "country code|codigo de pais|codigo del pais|country", opcion: codNum, esperaMs: 300 },
+          // Descripciones (por etiqueta en inglés) -> contenido en inglés (se explica a GitHub)
+          { tipo: "fillLabel", label: "describe the nature of your copyright ownership|nature of your copyright ownership or authorization", valor: titular },
+          { tipo: "fillLabel", label: "detailed description of the original copyrighted work|original copyrighted work that has allegedly been infringed", valor: obra },
+          { tipo: "fillLabel", label: "if the original work referenced above is available online|original work referenced above is available online", valor: urlObra },
+          { tipo: "fillLabel", label: "identify the full repository url that is infringing|full repository url that is infringing", valor: "[ Paste here the full infringing repository URL ]" },
+          { tipo: "fillLabel", label: "phone number|enter your phone|your phone number|numero de telefono", valor: telNum },
+          // Casillas finales juradas (cada una por su propio rótulo, sin confundirse entre sí)
+          { tipo: "checkLabel", texto: "good faith belief that use of the copyrighted" },
+          { tipo: "checkLabel", texto: "penalty of perjury" },
+          { tipo: "checkLabel", texto: "taken fair use into consideration" },
+          { tipo: "checkLabel", texto: "read and understand github" },
+          // Firma (nombre legal)
+          { tipo: "fillLabel", label: "type your full name for your signature|full name for your signature", valor: firma }
+        ] };
+      }
+    },
+    gh_priv: {
+      red: "GitHub", nombre: "Eliminación de información privada (formulario)", cat: "github",
+      url: "https://support.github.com/contact/private-information",
+      manual: "Se rellenan los desplegables y un enlace de EJEMPLO para poder avanzar al siguiente paso. REEMPLAZA el enlace de ejemplo por el real (Gist/Pages/issue/PR/Discussion/archivo) a denunciar antes de enviar.",
+      construirPlan: function (ctx) {
+        return { url: this.url, manual: this.manual, pasos: [
+          { tipo: "selectLabel", label: "cuenta de empresa de github|cuenta de empresa|github enterprise account|enterprise account", opcion: "no aplicable", esperaMs: 250 },
+          { tipo: "selectLabel", label: "trabajo protegido por derechos de autor que te pertenece|derechos de autor que te pertenece|copyrighted work that you own|content you are reporting a copyrighted", opcion: "no", esperaMs: 250 },
+          { tipo: "fillLabel", label: "enlace de gist|sitio de pages|archivo especifico en el repositorio|discussion o un archivo|link to the gist|pages site|specific file in the repository", valor: "https://github.com/usuario-ejemplo/repositorio-a-denunciar" }
+        ] };
       }
     }
   };
