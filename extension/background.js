@@ -71,9 +71,45 @@ async function hacerClics(tabId, selectores) {
   return { ok };
 }
 
+// Captura la PÁGINA COMPLETA (no solo el viewport) de la pestaña indicada, usando
+// el permiso `debugger` que la extensión ya tiene. Devuelve { dataUrl } o { error }.
+async function capturarCompleta(tabId) {
+  let attached = false;
+  try {
+    await attach(tabId);
+    attached = true;
+    await cmd(tabId, "Page.enable").catch(() => {});
+    // Tamaño total del contenido de la página (no solo lo visible).
+    const m = await cmd(tabId, "Page.getLayoutMetrics");
+    const size = (m && (m.cssContentSize || m.contentSize)) || null;
+    let clip;
+    if (size && size.width > 0 && size.height > 0) {
+      const width = Math.ceil(size.width);
+      // Limita la altura para páginas larguísimas (evita capturas gigantes).
+      const height = Math.min(Math.ceil(size.height), 20000);
+      clip = { x: 0, y: 0, width, height, scale: 1 };
+    }
+    const params = { format: "jpeg", quality: 70, captureBeyondViewport: true };
+    if (clip) params.clip = clip; // si no hay tamaño válido, captura sin clip
+    const shot = await cmd(tabId, "Page.captureScreenshot", params);
+    return { dataUrl: "data:image/jpeg;base64," + shot.data };
+  } catch (e) {
+    return { error: String((e && e.message) || e) };
+  } finally {
+    if (attached) await detach(tabId);
+  }
+}
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // Solo aceptamos mensajes de los propios contextos de la extensión (popup/options),
+  // nunca de páginas o extensiones externas (blindaje ante futuros cambios de config).
+  if (!sender || sender.id !== chrome.runtime.id) return;
   if (msg && msg.accion === "clicsReales" && msg.tabId) {
     hacerClics(msg.tabId, msg.selectores || []).then(sendResponse);
+    return true; // respuesta asíncrona
+  }
+  if (msg && msg.accion === "capturaCompleta" && msg.tabId) {
+    capturarCompleta(msg.tabId).then(sendResponse);
     return true; // respuesta asíncrona
   }
 });
