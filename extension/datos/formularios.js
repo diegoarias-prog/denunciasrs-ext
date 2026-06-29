@@ -683,16 +683,14 @@
     delisting: {
       red: "Delisting", nombre: "Quitar dominio de lista negra (por correo)", cat: "delisting", tipo: "email",
       destino: "",
-      manual: "El 'Para' va vacío: escribe el correo de delisting / falsos positivos del servicio o lista negra que marcó tu dominio. Abre el enlace de VirusTotal del cuerpo para ver qué motores lo marcan y a quién escribir; toma una captura y adjúntala como prueba.",
+      manual: "El 'Para' va vacío: escribe el correo de delisting / falsos positivos del servicio o lista negra que marcó tu dominio. Carga el Excel de URLs como evidencia; revisa antes de enviar.",
       construirEmail: function (ctx) {
         var marca = ctx.marca, d = ctx.datos, dest = this.destino;
         var repres = /seguridadmaxima\.net/i.test(d.correo || "");
         var pais = d.pais ? " " + d.pais : "";
         var dom = (d.dominio || "").trim();
         var dominioEn = dom || "[ your domain, e.g. credix.com ]";
-        var vtEn = dom ? "https://www.virustotal.com/gui/domain/" + dom : "[ Paste here the VirusTotal report link for the domain ]";
         var dominioEs = dom || "[ tu dominio, ej. credix.com ]";
-        var vtEs = dom ? "https://www.virustotal.com/gui/domain/" + dom : "[ Pega aquí el enlace del reporte de VirusTotal del dominio ]";
         var en = { to: dest,
           asunto: "Delisting request: remove " + (dom || "our domain") + " from your spam/blacklist database",
           cuerpo:
@@ -700,9 +698,8 @@
             (repres ? "We are Security Maximum in Computer Networks, on behalf of " + marca + pais + "." : "We are " + marca + pais + ".") + "\n\n" +
             "Our domain is: " + dominioEn + "\n\n" +
             "We kindly ask for your help to remove the " + dominioEn + " website, which is currently listed as spam/malicious in your database. This is a legitimate domain used for the brand's own and internal email and websites; it has been flagged by mistake (false positive) and has no malicious activity.\n\n" +
-            "As supporting evidence, please review the VirusTotal report for this domain:\n" +
-            vtEn + "\n" +
-            urlsODefault(ctx, "[ Paste here any additional VirusTotal report / evidence link, e.g. a specific URL analysis ]") + "\n\n" +
+            "As supporting evidence, please review the following URL(s):\n" +
+            urlsODefault(ctx, "[ Paste here the evidence link(s) ]") + "\n\n" +
             "We look forward to your comments and appreciate your prompt action to delist it.\n\n" +
             "Sincerely,\n" + (repres ? "Security Maximum in Computer Networks" : marca) + (d.correo ? "\nContact: " + d.correo : "") };
         var es = {
@@ -712,9 +709,8 @@
             (repres ? "Somos Seguridad Máxima en Redes Informáticas, en representación de " + marca + pais + "." : "Somos " + marca + pais + ".") + "\n\n" +
             "Nuestro dominio es: " + dominioEs + "\n\n" +
             "Solicitamos amablemente su ayuda para quitar el sitio web " + dominioEs + ", que actualmente figura como spam/malicioso en su base de datos. Es un dominio legítimo usado para el correo y los sitios web propios e internos de la marca; fue marcado por error (falso positivo) y no tiene ninguna actividad maliciosa.\n\n" +
-            "Como prueba de respaldo, revisen el reporte de VirusTotal de este dominio:\n" +
-            vtEs + "\n" +
-            urlsODefault(ctx, "[ Pega aquí cualquier reporte / enlace de prueba adicional de VirusTotal, ej. un análisis de URL específico ]") + "\n\n" +
+            "Como prueba de respaldo, revisen la(s) siguiente(s) URL(s):\n" +
+            urlsODefault(ctx, "[ Pega aquí el/los enlace(s) de evidencia ]") + "\n\n" +
             "Quedamos atentos a sus comentarios y agradecemos su pronta gestión para quitarlo de la lista.\n\n" +
             "Saludos,\n" + (repres ? "Seguridad Máxima en Redes Informáticas" : marca) + (d.correo ? "\nContacto: " + d.correo : "") };
         return bilingue(en, es);
