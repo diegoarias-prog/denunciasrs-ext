@@ -19,6 +19,13 @@
   .estado.error { display: block; background: #fef2f2; color: #991b1b; border-left: 3px solid #ef4444; }
   .pie { margin-top: 12px; font-size: 11px; text-align: center; }
   .pie a { color: #1d4ed8; text-decoration: none; }
+  .bloque_urls { margin-top: 12px; padding: 9px 10px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; }
+  .bloque_urls label { margin: 0 0 5px; }
+  .bloque_urls input[type=file] { width: 100%; font-size: 11px; }
+  .fila_estado_urls { display: flex; align-items: center; justify-content: space-between; margin-top: 6px; gap: 8px; }
+  #estado_urls { font-size: 11px; color: #475569; }
+  .boton_quitar_urls { padding: 3px 9px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; color: #b91c1c; font-size: 11px; cursor: pointer; }
+  .boton_quitar_urls:hover { background: #fee2e2; }
 </style>
 </head>
 <body>
@@ -37,10 +44,20 @@
   <button class="boton" id="boton_rellenar">Rellenar formulario</button>
   <button class="boton sec" id="boton_capturar" disabled title="Adjunta una captura de esta pestaña al comprobante de la denuncia en curso">📸 Capturar pantalla</button>
 
+  <div class="bloque_urls">
+    <label for="archivo_urls">📄 Cargar lista de URLs (Excel)</label>
+    <input type="file" id="archivo_urls" accept=".xlsx">
+    <div class="fila_estado_urls">
+      <span id="estado_urls">Sin lista cargada</span>
+      <button type="button" class="boton_quitar_urls" id="quitar_urls">Quitar</button>
+    </div>
+  </div>
+
   <div class="estado" id="estado"></div>
 
   <p class="pie"><a href="#" id="abrir_politicas">📋 Políticas</a> &nbsp;·&nbsp; <a href="#" id="abrir_plantilla">📝 Plantillas</a> &nbsp;·&nbsp; <a href="#" id="abrir_registro">📓 Registro</a> &nbsp;·&nbsp; <a href="#" id="abrir_opciones">⚙ Marcas</a></p>
 
+  <script src="libs/exceljs/exceljs.min.js"></script>
   <script src="datos/marcas.js"></script>
   <script src="datos/justificaciones.js"></script>
   <script src="datos/politicas_generales.js"></script>
