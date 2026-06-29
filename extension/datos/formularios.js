@@ -37,6 +37,18 @@
     return u.length ? u.join("\n") : placeholder;
   }
 
+  // Convierte letras A-Z/a-z y dígitos 0-9 a su variante Unicode "Mathematical Bold"
+  // para resaltar en correos de TEXTO PLANO. Los acentos (áéíóú), la ñ y la puntuación
+  // NO tienen variante en negrita: se dejan tal cual.
+  function negrita(s) {
+    return (s || "").replace(/[A-Za-z0-9]/g, function (ch) {
+      var c = ch.charCodeAt(0);
+      if (c >= 65 && c <= 90) return String.fromCodePoint(0x1D400 + (c - 65));   // A-Z
+      if (c >= 97 && c <= 122) return String.fromCodePoint(0x1D41A + (c - 97));  // a-z
+      return String.fromCodePoint(0x1D7CE + (c - 48));                            // 0-9
+    });
+  }
+
   // Correo de denuncia (propiedad intelectual / suplantación) para una red social,
   // en inglés (lang "en") o español (lang "es"). Correo propio -> "We are [marca]";
   // si usa el de Seguridad Máxima -> "representing". Cita las normas de esa red.
@@ -62,7 +74,7 @@
         "- No tiene ninguna relación comercial ni legal con " + marca + " e infringe sus derechos de marca y propiedad intelectual." +
         polTxtE + "\n\n" +
         "Solicitamos respetuosa y URGENTEMENTE la eliminación inmediata del siguiente contenido:\n\n" +
-        "Contenido a denunciar (URL del perfil / página / publicación):\n" +
+        negrita("Contenido a denunciar (URL del perfil / página / publicación):") + "\n" +
         urlsODefault(ctx, "[ Pega aquí el/los enlace(s) de " + redNombre + " a denunciar ]") + "\n\n" +
         "Saludos,\n" + firmaE + (d.correo ? "\nContacto: " + d.correo : "");
       return { to: destino, asunto: "Suplantación de marca / infracción de PI en " + redNombre + " - solicitud urgente de eliminación", cuerpo: cuerpoE };
@@ -84,7 +96,7 @@
       "- It has no business or legal relationship with " + marca + " and infringes its trademark and intellectual property rights." +
       polTxt + "\n\n" +
       "We respectfully and URGENTLY request the immediate removal of the following content:\n\n" +
-      "Reported content (profile / page / post URL):\n" +
+      negrita("Reported content (profile / page / post URL):") + "\n" +
       urlsODefault(ctx, "[ Paste here the " + redNombre + " link(s) you are reporting ]") + "\n\n" +
       "Sincerely,\n" + firma + (d.correo ? "\nContact: " + d.correo : "");
     return { to: destino, asunto: "Brand impersonation / IP infringement on " + redNombre + " - urgent removal request", cuerpo: cuerpo };
@@ -443,7 +455,7 @@
             "Dear Telegram team (abuse@telegram.org),\n\n" + ctx.justif +
             "\n\nAffected brand: " + marca + pais + "\n" +
             "Contact email: " + (d.correo || "") + "\n\n" +
-            "Content / channel / user to report:\n" + urlsODefault(ctx, "[ Paste here the t.me/... link(s) ]") + "\n\n" +
+            negrita("Content / channel / user to report:") + "\n" + urlsODefault(ctx, "[ Paste here the t.me/... link(s) ]") + "\n\n" +
             "We appreciate your prompt action.\n" + marca };
         var es = {
           asunto: "Solicitud de eliminación de contenido / Reporte de abuso — " + marca,
@@ -451,7 +463,7 @@
             "Estimado equipo de Telegram (abuse@telegram.org):\n\n" + (ctx.justif_es || ctx.justif) +
             "\n\nMarca afectada: " + marca + pais + "\n" +
             "Correo de contacto: " + (d.correo || "") + "\n\n" +
-            "Enlaces del contenido / canal / usuario a denunciar:\n" + urlsODefault(ctx, "[ Pega aquí los enlaces t.me/... ]") + "\n\n" +
+            negrita("Enlaces del contenido / canal / usuario a denunciar:") + "\n" + urlsODefault(ctx, "[ Pega aquí los enlaces t.me/... ]") + "\n\n" +
             "Agradecemos su pronta gestión.\n" + marca };
         return bilingue(en, es);
       }
@@ -520,7 +532,7 @@
             "- This email address has NO business or legal relationship with " + marca + ".\n\n" +
             "This is a clear case of phishing and brand impersonation that puts our clients at risk of fraud and theft of confidential data. We respectfully and URGENTLY request that you delete or block this account/content, which is confusing and endangering " + marca + "'s clients.\n\n" +
             "We appreciate your help in keeping the internet free of accounts that put users at risk.\n\n" +
-            "Reported email address(es):\n" + urlsODefault(ctx, "[ Paste here the email address(es) you are reporting ]") + "\n\n" +
+            negrita("Reported email address(es):") + "\n" + urlsODefault(ctx, "[ Paste here the email address(es) you are reporting ]") + "\n\n" +
             "Sincerely,\n" + (repres ? "Security Maximum in Computer Networks" : marca) + (d.correo ? "\nContact: " + d.correo : "") };
         var es = {
           asunto: "Reporte de phishing y suplantación de marca - solicitud urgente de eliminación",
@@ -535,7 +547,7 @@
             "- Esta dirección de correo NO tiene ninguna relación comercial ni legal con " + marca + ".\n\n" +
             "Este es un caso claro de phishing y suplantación de marca que pone a los clientes en riesgo de fraude y robo de datos confidenciales. Solicitamos respetuosa y URGENTEMENTE que eliminen o bloqueen esta cuenta/contenido, que confunde y pone en peligro a los clientes de " + marca + ".\n\n" +
             "Agradecemos su ayuda para mantener internet libre de cuentas que ponen en riesgo a los usuarios.\n\n" +
-            "Dirección(es) de correo a denunciar:\n" + urlsODefault(ctx, "[ Pega aquí la(s) dirección(es) de correo a denunciar ]") + "\n\n" +
+            negrita("Dirección(es) de correo a denunciar:") + "\n" + urlsODefault(ctx, "[ Pega aquí la(s) dirección(es) de correo a denunciar ]") + "\n\n" +
             "Saludos,\n" + (repres ? "Seguridad Máxima en Redes Informáticas" : marca) + (d.correo ? "\nContacto: " + d.correo : "") };
         return bilingue(en, es);
       }
@@ -559,7 +571,7 @@
             "- This is a violation of intellectual property rights and a serious breach of the privacy and security of " + marca + "'s customers. As an organization, " + marca + " considers the confidentiality of its customers' data a top priority, and any unauthorized use of this information is unacceptable.\n\n" +
             "We strongly and URGENTLY request that you immediately remove the document(s)/link(s) below and any other content that includes " + marca + "'s information without authorization, including any content disseminated through your platform.\n\n" +
             "We trust that you will take the necessary steps to address this situation and prevent any future violations. We would like to resolve this matter quickly and efficiently.\n\n" +
-            "Reported document(s)/link(s):\n" + urlsODefault(ctx, "[ Paste here the Scribd link(s) you are reporting, e.g. https://www.scribd.com/document/... ]") + "\n\n" +
+            negrita("Reported document(s)/link(s):") + "\n" + urlsODefault(ctx, "[ Paste here the Scribd link(s) you are reporting, e.g. https://www.scribd.com/document/... ]") + "\n\n" +
             "Sincerely,\n" + (repres ? "Security Maximum in Computer Networks" : marca) + (d.correo ? "\nContact: " + d.correo : "") };
         var es = {
           asunto: "Uso no autorizado de información confidencial - solicitud urgente de eliminación",
@@ -572,7 +584,7 @@
             "- Esto constituye una violación de los derechos de propiedad intelectual y una grave vulneración de la privacidad y la seguridad de los clientes de " + marca + ". Como organización, " + marca + " considera la confidencialidad de los datos de sus clientes una prioridad absoluta, y cualquier uso no autorizado de esta información es inaceptable.\n\n" +
             "Solicitamos firme y URGENTEMENTE que eliminen de inmediato el/los documento(s)/enlace(s) indicados abajo y cualquier otro contenido que incluya información de " + marca + " sin autorización, incluido cualquier contenido difundido a través de su plataforma.\n\n" +
             "Confiamos en que tomarán las medidas necesarias para resolver esta situación y prevenir futuras infracciones. Deseamos resolver este asunto de forma rápida y eficaz.\n\n" +
-            "Documento(s) / enlace(s) a denunciar:\n" + urlsODefault(ctx, "[ Pega aquí el/los enlace(s) de Scribd, ej. https://www.scribd.com/document/... ]") + "\n\n" +
+            negrita("Documento(s) / enlace(s) a denunciar:") + "\n" + urlsODefault(ctx, "[ Pega aquí el/los enlace(s) de Scribd, ej. https://www.scribd.com/document/... ]") + "\n\n" +
             "Saludos,\n" + (repres ? "Seguridad Máxima en Redes Informáticas" : marca) + (d.correo ? "\nContacto: " + d.correo : "") };
         return bilingue(en, es);
       }
@@ -616,7 +628,7 @@
             "Hello,\n\n" +
             (repres ? "We are Security Maximum in Computer Networks, on behalf of " + marca + "." : "We are " + marca + ".") + "\n\n" +
             "We kindly and respectfully request the removal of " + marca + "'s information that appears in the following document(s) on your platform. " + marca + " does not authorize the use of its name or information in this content, and its dissemination infringes its trademark rights and the privacy of its customers.\n\n" +
-            "Document(s) / link(s) to report:\n" + urlsODefault(ctx, "[ Paste here the Studocu link(s) you are reporting, e.g. https://www.studocu.com/... ]") + "\n\n" +
+            negrita("Document(s) / link(s) to report:") + "\n" + urlsODefault(ctx, "[ Paste here the Studocu link(s) you are reporting, e.g. https://www.studocu.com/... ]") + "\n\n" +
             "We look forward to your response.\n\n" +
             "Sincerely,\n" + (repres ? "Security Maximum in Computer Networks" : marca) + (d.correo ? "\nContact: " + d.correo : "") };
         var es = {
@@ -625,7 +637,7 @@
             "Hola,\n\n" +
             (repres ? "Somos Seguridad Máxima en Redes Informáticas, representantes de " + marca + "." : "Somos " + marca + ".") + "\n\n" +
             "Solicitamos muy amable y respetuosamente que se elimine la información de " + marca + " que aparece en el/los siguiente(s) documento(s) de su plataforma. " + marca + " no autoriza el uso de su nombre ni de su información en dicho contenido, y su difusión vulnera los derechos de marca y la privacidad de sus clientes.\n\n" +
-            "Documento(s) / enlace(s) a denunciar:\n" + urlsODefault(ctx, "[ Pega aquí el/los enlace(s) de Studocu, ej. https://www.studocu.com/... ]") + "\n\n" +
+            negrita("Documento(s) / enlace(s) a denunciar:") + "\n" + urlsODefault(ctx, "[ Pega aquí el/los enlace(s) de Studocu, ej. https://www.studocu.com/... ]") + "\n\n" +
             "Quedamos atentos a sus comentarios.\n\n" +
             "Saludos,\n" + (repres ? "Seguridad Máxima en Redes Informáticas" : marca) + (d.correo ? "\nContacto: " + d.correo : "") };
         return bilingue(en, es);
@@ -659,7 +671,7 @@
             "- Apple App Store: " + appEn + "\n\n" +
             marca + " requests the immediate removal of the application(s) published on unauthorized sites, as they pose security risks, intellectual property violations, and undermine user confidence.\n\n" +
             "Please remove all information related to " + marca + pais + ".\n\n" +
-            "Reported link(s) (unauthorized site / app):\n" + urlsODefault(ctx, "[ Paste here the link(s) you are reporting ]") + "\n\n" +
+            negrita("Reported link(s) (unauthorized site / app):") + "\n" + urlsODefault(ctx, "[ Paste here the link(s) you are reporting ]") + "\n\n" +
             "Sincerely,\n" + (repres ? "Security Maximum in Computer Networks" : marca) + (d.correo ? "\nContact: " + d.correo : "") };
         var es = {
           asunto: "App móvil no autorizada / falsa que suplanta a " + marca + " - solicitud urgente de eliminación",
@@ -672,7 +684,7 @@
             "- Apple App Store: " + appEs + "\n\n" +
             marca + " solicita la eliminación inmediata de la(s) aplicación(es) publicada(s) en sitios no autorizados, ya que suponen riesgos de seguridad, infracciones de propiedad intelectual y minan la confianza de los usuarios.\n\n" +
             "Por favor, eliminen toda la información relacionada con " + marca + pais + ".\n\n" +
-            "Enlace(s) a denunciar (sitio / app no autorizada):\n" + urlsODefault(ctx, "[ Pega aquí el/los enlace(s) a denunciar ]") + "\n\n" +
+            negrita("Enlace(s) a denunciar (sitio / app no autorizada):") + "\n" + urlsODefault(ctx, "[ Pega aquí el/los enlace(s) a denunciar ]") + "\n\n" +
             "Saludos,\n" + (repres ? "Seguridad Máxima en Redes Informáticas" : marca) + (d.correo ? "\nContacto: " + d.correo : "") };
         return bilingue(en, es);
       }
@@ -698,7 +710,7 @@
             (repres ? "We are Security Maximum in Computer Networks, on behalf of " + marca + pais + "." : "We are " + marca + pais + ".") + "\n\n" +
             "Our domain is: " + dominioEn + "\n\n" +
             "We kindly ask for your help to remove the " + dominioEn + " website, which is currently listed as spam/malicious in your database. This is a legitimate domain used for the brand's own and internal email and websites; it has been flagged by mistake (false positive) and has no malicious activity.\n\n" +
-            "As supporting evidence, please review the following URL(s):\n" +
+            negrita("As supporting evidence, please review the following URL(s):") + "\n" +
             urlsODefault(ctx, "[ Paste here the evidence link(s) ]") + "\n\n" +
             "We look forward to your comments and appreciate your prompt action to delist it.\n\n" +
             "Sincerely,\n" + (repres ? "Security Maximum in Computer Networks" : marca) + (d.correo ? "\nContact: " + d.correo : "") };
@@ -709,7 +721,7 @@
             (repres ? "Somos Seguridad Máxima en Redes Informáticas, en representación de " + marca + pais + "." : "Somos " + marca + pais + ".") + "\n\n" +
             "Nuestro dominio es: " + dominioEs + "\n\n" +
             "Solicitamos amablemente su ayuda para quitar el sitio web " + dominioEs + ", que actualmente figura como spam/malicioso en su base de datos. Es un dominio legítimo usado para el correo y los sitios web propios e internos de la marca; fue marcado por error (falso positivo) y no tiene ninguna actividad maliciosa.\n\n" +
-            "Como prueba de respaldo, revisen la(s) siguiente(s) URL(s):\n" +
+            negrita("Como prueba de respaldo, revisen la(s) siguiente(s) URL(s):") + "\n" +
             urlsODefault(ctx, "[ Pega aquí el/los enlace(s) de evidencia ]") + "\n\n" +
             "Quedamos atentos a sus comentarios y agradecemos su pronta gestión para quitarlo de la lista.\n\n" +
             "Saludos,\n" + (repres ? "Seguridad Máxima en Redes Informáticas" : marca) + (d.correo ? "\nContacto: " + d.correo : "") };
@@ -735,7 +747,7 @@
             "Hello GitHub Trust & Safety team,\n\n" +
             (repres ? "We are Security Maximum in Computer Networks, writing on behalf of " + marca + "." : "We are " + marca + ".") + "\n\n" +
             "I am reporting the following public repository because it appears to host an active phishing kit impersonating " + marca + ":\n\n" +
-            "Repository:\n" + urlsODefault(ctx, "[ Paste here the GitHub repository URL, e.g. https://github.com/<user>/<repo> ]") + "\n\n" +
+            negrita("Repository:") + "\n" + urlsODefault(ctx, "[ Paste here the GitHub repository URL, e.g. https://github.com/<user>/<repo> ]") + "\n\n" +
             "Observed indicators:\n" +
             "- The repository is publicly accessible and contains files used as a phishing flow that impersonates " + marca + ".\n" +
             "- It reproduces " + marca + "'s name, logo, branding and services without authorization, impersonating it.\n" +
@@ -754,7 +766,7 @@
             "Estimado equipo de Trust & Safety de GitHub,\n\n" +
             (repres ? "Somos Seguridad Máxima en Redes Informáticas, en representación de " + marca + "." : "Somos " + marca + ".") + "\n\n" +
             "Reporto el siguiente repositorio público porque parece alojar un kit de phishing activo que suplanta a " + marca + ":\n\n" +
-            "Repositorio:\n" + urlsODefault(ctx, "[ Pega aquí la URL del repositorio de GitHub, ej. https://github.com/<usuario>/<repo> ]") + "\n\n" +
+            negrita("Repositorio:") + "\n" + urlsODefault(ctx, "[ Pega aquí la URL del repositorio de GitHub, ej. https://github.com/<usuario>/<repo> ]") + "\n\n" +
             "Indicadores observados:\n" +
             "- El repositorio es de acceso público y contiene archivos usados como flujo de phishing que suplanta a " + marca + ".\n" +
             "- Reproduce el nombre, el logotipo, la identidad y los servicios de " + marca + " sin autorización, suplantándola.\n" +
