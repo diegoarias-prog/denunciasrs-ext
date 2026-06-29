@@ -88,6 +88,90 @@ chrome.storage.local.get(["ultima_denuncia_registro"], (x) => {
 });
 
 // ===========================================================================
+//  Lista de URLs a denunciar (Excel) — se autollenan en las cajas "Enlace 1..30"
+// ===========================================================================
+const CLAVE_URLS = "urls_denuncia";
+
+// Muestra en #estado_urls cuántas URLs hay cargadas (o "Sin lista cargada").
+function pintar_estado_urls(n) {
+  const e = $("estado_urls");
+  if (!e) return;
+  e.textContent = (n && n > 0) ? (n + " URL" + (n === 1 ? "" : "s") + " cargada" + (n === 1 ? "" : "s")) : "Sin lista cargada";
+}
+
+// Lee las URLs guardadas en storage (array vacío si no hay).
+function obtener_urls_guardadas() {
+  return new Promise((res) =>
+    chrome.storage.local.get([CLAVE_URLS], (x) => res(Array.isArray(x[CLAVE_URLS]) ? x[CLAVE_URLS] : [])));
+}
+
+// Lee un .xlsx con ExcelJS, detecta la columna "URL" (o la 1.ª), recoge las URLs
+// válidas (no vacías, sin duplicados, que empiecen por http) y las guarda.
+async function cargar_archivo_urls(file) {
+  if (!file) return;
+  try {
+    if (typeof ExcelJS === "undefined") throw new Error("no se cargó la librería ExcelJS.");
+    const arrayBuffer = await file.arrayBuffer();
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(arrayBuffer);
+    const hoja = wb.worksheets[0];
+    if (!hoja) throw new Error("el archivo no tiene hojas.");
+
+    // Detecta la columna cuyo encabezado (fila 1) sea "URL" (insensible a may/min/espacios).
+    const norm_enc = (s) => (s == null ? "" : s.toString().trim().toLowerCase());
+    let colUrl = 0;
+    const fila1 = hoja.getRow(1);
+    fila1.eachCell({ includeEmpty: false }, (celda, col) => {
+      if (colUrl === 0 && norm_enc(celda.value) === "url") colUrl = col;
+    });
+    if (colUrl === 0) colUrl = 1; // si no la encuentra, usa la primera columna
+
+    const urls = [];
+    const vistas = {};
+    const total = hoja.actualRowCount || hoja.rowCount || 0;
+    for (let r = 2; r <= total; r++) {
+      let v = hoja.getRow(r).getCell(colUrl).value;
+      // ExcelJS puede devolver objetos para celdas con hipervínculo/texto enriquecido.
+      if (v && typeof v === "object") v = v.text || v.hyperlink || v.result || v.richText && v.richText.map((t) => t.text).join("") || "";
+      v = (v == null ? "" : v.toString()).trim();
+      if (!v) continue;
+      if (!/^https?:\/\//i.test(v)) continue;
+      const clave = v.toLowerCase();
+      if (vistas[clave]) continue;
+      vistas[clave] = true;
+      urls.push(v);
+    }
+
+    await new Promise((res) => chrome.storage.local.set({ [CLAVE_URLS]: urls }, res));
+    pintar_estado_urls(urls.length);
+    if (urls.length === 0) mostrar_estado("aviso", "No se encontraron URLs válidas (deben empezar por http) en el Excel.");
+    else mostrar_estado("ok", "✓ " + urls.length + " URL(s) cargadas. Se pondrán en las cajas Enlace 1.." + urls.length + " al Rellenar.");
+  } catch (e) {
+    // El mensaje del parser es dato NO confiable: se escapa (mostrar_estado usa innerHTML).
+    const msg = String((e && e.message) || e).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+    mostrar_estado("error", "No se pudo leer el Excel: " + msg);
+  }
+}
+
+if ($("archivo_urls")) {
+  $("archivo_urls").addEventListener("change", (ev) => {
+    const file = ev.target.files && ev.target.files[0];
+    cargar_archivo_urls(file);
+  });
+}
+if ($("quitar_urls")) {
+  $("quitar_urls").addEventListener("click", () => {
+    chrome.storage.local.remove([CLAVE_URLS], () => {
+      if ($("archivo_urls")) $("archivo_urls").value = "";
+      pintar_estado_urls(0);
+      mostrar_estado("aviso", "Lista de URLs eliminada.");
+    });
+  });
+}
+// Al abrir el popup, muestra el conteo de URLs ya cargadas.
+obtener_urls_guardadas().then((u) => pintar_estado_urls(u.length));
+
+// ===========================================================================
 //  Registro automático de la denuncia (para no cargarla a mano)
 // ===========================================================================
 // Crea —o reutiliza— una entrada "pendiente" en `denuncias_registro` al iniciar
@@ -201,7 +285,9 @@ async function rellenar() {
   const justif = window.JUSTIF.conPolitica(window.JUSTIF.justificacion(form.cat, redCode, marca, pais, "en"), formKey, "en");
   const justif_es = window.JUSTIF.conPolitica(window.JUSTIF.justificacion(form.cat, redCode, marca, pais, "es"), formKey, "es");
 
-  const ctx = { marca: marca, datos: datos, justif: justif, justif_es: justif_es, correoPersona: window.CORREO_PERSONA };
+  // Lista de URLs (Excel) a autollenar en las cajas "Enlace 1..30" (vacío si no hay).
+  const urls = await obtener_urls_guardadas();
+  const ctx = { marca: marca, datos: datos, justif: justif, justif_es: justif_es, correoPersona: window.CORREO_PERSONA, urls: urls };
 
   // Redes SIN formulario web (Telegram): se genera un CORREO en una pestaña aparte.
   if (form.tipo === "email") {
@@ -559,6 +645,57 @@ async function APLICAR(pasos) {
         });
         if (btn) { btn.click(); ok++; } else faltan.push("boton:" + p.texto);
         if (p.esperaMs) await dur(p.esperaMs);
+      } else if (p.tipo === "fillUrlList") {
+        // Autollena las cajas "Enlace 1..30" de Meta (FB/IG) con la lista de URLs del
+        // Excel. Si hay más URLs que cajas y existe el checkbox "Tengo enlaces
+        // adicionales...", lo marca para que aparezcan las cajas 11..30.
+        const urls = (p.urls || []).map((u) => (u || "").toString().trim()).filter(Boolean);
+        if (urls.length) {
+          const dom = norm(p.dominio || "");
+          // Devuelve, en orden del DOM, las cajas de URL visibles y vacías cuyo
+          // placeholder contenga el dominio (facebook.com / instagram.com).
+          const buscarCajas = () => Array.prototype.slice.call(
+            document.querySelectorAll('textarea, input[type=text], input[type=url], input:not([type])'))
+            .filter((e) => {
+              const ph = norm(e.placeholder || "");
+              if (!ph || ph.indexOf(dom) < 0) return false;
+              if (e.value) return false;
+              const r = e.getBoundingClientRect();
+              return r.width > 2 && r.height > 2;
+            });
+          let cajas = buscarCajas();
+          // ¿Faltan cajas? Marca el checkbox de "enlaces adicionales" y espera a que
+          // el formulario revele las cajas 11..30 (React las agrega de forma asíncrona).
+          if (urls.length > cajas.length && p.checkLabel) {
+            const kws = (p.checkLabel || "").split("|").map(norm).filter(Boolean);
+            const cbs = Array.prototype.slice.call(document.querySelectorAll('input[type=checkbox]'));
+            let cb = null;
+            for (const c of cbs) {
+              let lab = " " + (c.getAttribute("aria-label") || "") + " ";
+              const lb = c.getAttribute("aria-labelledby");
+              if (lb) lb.split(/\s+/).forEach(function (idr) { const le = document.getElementById(idr); if (le) lab += " " + (le.innerText || ""); });
+              if (c.id) { const lf = document.querySelector('label[for="' + c.id.replace(/"/g, '\\"') + '"]'); if (lf) lab += " " + (lf.innerText || ""); }
+              if (c.parentElement && (c.parentElement.innerText || "").length < 240) lab += " " + (c.parentElement.innerText || "");
+              if (kws.some((kw) => norm(lab).indexOf(kw) >= 0)) { cb = c; break; }
+            }
+            if (cb && !cb.checked) {
+              marcarRadioEl(cb); marcarParaClicReal(cb);
+              let previo = cajas.length;
+              for (let it = 0; it < 8; it++) {
+                await dur(400);
+                const ahora = buscarCajas();
+                if (ahora.length >= urls.length || ahora.length === previo) { cajas = ahora; if (ahora.length >= urls.length) break; }
+                previo = ahora.length; cajas = ahora;
+              }
+            }
+            cajas = buscarCajas();
+          }
+          // Rellena en orden: URL i -> caja i.
+          let puestas = 0;
+          for (let i = 0; i < urls.length && i < cajas.length; i++) { setNative(cajas[i], urls[i]); puestas++; }
+          if (puestas > 0) ok++;
+          if (puestas < urls.length) faltan.push("urls:" + puestas + "/" + urls.length + " (FB tope 30)");
+        }
       }
     } catch (e) { faltan.push((p.name || p.css || "?") + ": " + e.message); }
   }

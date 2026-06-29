@@ -104,7 +104,9 @@
       { tipo: "check", name: "Content_type[]", texto: "publicacion" },
       { tipo: "fillName", name: "why_reporting_other", valor: ctx.justif },
       { tipo: "fillName", name: "Electronic_sig", valor: marca },
-      { tipo: "radio", name: "copyright_owner", texto: "rights owner" } // re-marcar al final
+      { tipo: "radio", name: "copyright_owner", texto: "rights owner" }, // re-marcar al final
+      // Autollena las cajas "Enlace 1..30" con la lista de URLs del Excel (si la hay).
+      { tipo: "fillUrlList", dominio: (this.red === "Instagram" ? "instagram.com" : "facebook.com"), checkLabel: "Tengo enlaces adicionales que denunciar", urls: (ctx.urls || []) }
     ] };
   }
   function planMarca(ctx) {
@@ -123,7 +125,9 @@
       { tipo: "fillName", name: "why_reporting_other", valor: ctx.justif },
       { tipo: "fillName", name: "signature", valor: marca },
       { tipo: "radio", name: "continuereport", texto: "trademark" },          // re-marcar al final
-      { tipo: "radio", name: "relationship_rightsowner", texto: "rights owner" }
+      { tipo: "radio", name: "relationship_rightsowner", texto: "rights owner" },
+      // Autollena las cajas "Enlace 1..30" con la lista de URLs del Excel (si la hay).
+      { tipo: "fillUrlList", dominio: (this.red === "Instagram" ? "instagram.com" : "facebook.com"), checkLabel: "Tengo enlaces adicionales que denunciar", urls: (ctx.urls || []) }
     ] };
   }
   function planDifam(ctx) {
