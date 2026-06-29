@@ -120,6 +120,7 @@
       { tipo: "fillName", name: "reporter_name", valor: marca },
       { tipo: "fillName", name: "websiterightsholder", valor: d.sitio || "" },
       { tipo: "fillName", name: "what_is_your_trademark", valor: marca },
+      { tipo: "fillLabel", label: "numero de registro de la marca comercial|numero de registro|registration number|trademark registration number|registration number of the trademark", valor: (d.registro || "") },
       { tipo: "select", name: "rights_owner_country_routing", texto: d.pais },
       { tipo: "check", name: "content_type[]", texto: "uses the rights owner" },
       { tipo: "fillName", name: "why_reporting_other", valor: ctx.justif },
