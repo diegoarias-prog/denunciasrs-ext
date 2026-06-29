@@ -541,6 +541,35 @@ async function APLICAR(pasos) {
           }
           if (hit) { setNative(hit, p.valor); ok++; } else faltan.push("etiqueta:" + p.label);
         }
+      } else if (p.tipo === "fillUrlsUnaCaja") {
+        // TikTok: UNA sola caja para TODAS las URLs, una por línea. Se llena por partes,
+        // así que si la caja aún no está visible NO rompe (la llenará un Rellenar posterior).
+        const urls = (p.urls || []).map((u) => (u || "").toString().trim()).filter(Boolean);
+        if (!urls.length) {
+          // nada que poner
+        } else {
+          const etiquetas = (p.label || "").split("|").map(norm).filter(Boolean);
+          const placeholders = (p.placeholder || "").split("|").map(norm).filter(Boolean);
+          const campos = Array.prototype.slice.call(
+            document.querySelectorAll("textarea, input[type=text], input:not([type])"));
+          let hit = null;
+          for (const e of campos) {
+            const r = e.getBoundingClientRect();
+            if (r.width <= 2 || r.height <= 2 || e.value) continue;
+            const ph = norm(e.placeholder || "");
+            let ctx = " " + (e.placeholder || "") + " " + (e.getAttribute("aria-label") || "") + " ";
+            if (e.id) { const lf = document.querySelector('label[for="' + e.id.replace(/"/g, '\\"') + '"]'); if (lf) ctx += " " + (lf.innerText || ""); }
+            const lblby = e.getAttribute("aria-labelledby");
+            if (lblby) lblby.split(/\s+/).forEach(function (idr) { const le = document.getElementById(idr); if (le) ctx += " " + (le.innerText || ""); });
+            if (e.previousElementSibling) ctx += " " + (e.previousElementSibling.innerText || "");
+            if (e.parentElement) ctx += " " + (e.parentElement.innerText || "");
+            const c = norm(ctx);
+            const porEtiqueta = etiquetas.some((kw) => c.indexOf(kw) >= 0);
+            const porPlaceholder = placeholders.some((kw) => ph.indexOf(kw) >= 0);
+            if (porEtiqueta || porPlaceholder) { hit = e; break; }
+          }
+          if (hit) { setNative(hit, urls.join("\n")); ok++; } else faltan.push("urls_caja_tiktok");
+        }
       } else if (p.tipo === "selectLabel") {
         // Como fillLabel pero para <select> nativos: encuentra el menú por su etiqueta
         // cercana (placeholder/aria-label/label-for/hermano anterior/ancestro) y elige

@@ -378,7 +378,8 @@
           { tipo: "radioVal", name: "typeCopyRight", value: "6", esperaMs: 300 },
           { tipo: "radioVal", name: "copyrightedWorkSource", value: "3", esperaMs: 300 },
           { tipo: "checkVarios", etiquetas: "buena fe|good faith|correcta|exacta|accurate|perjurio|penalty of perjury|reconozco|acknowledge", max: 3 },
-          { tipo: "clickBoton", texto: "siguiente|next|continuar|continue", esperaMs: 1500 }
+          { tipo: "clickBoton", texto: "siguiente|next|continuar|continue", esperaMs: 1500 },
+          { tipo: "fillUrlsUnaCaja", urls: (ctx.urls || []), label: "introduce la url del contenido que quieres denunciar|introduce la url del contenido|url del contenido que quieres denunciar|url of the content you want to report|enter the url of the content", placeholder: "tiktok.com/@|e.g.https|e.g. https" }
         ] };
       }
     },
@@ -399,7 +400,8 @@
           { tipo: "fillLabel", label: "jurisdiction|jurisdiccion|jurisdiccion del registro", valor: d.pais },
           { tipo: "fillLabel", label: "describe|description|how you believe|descripcion|como crees", valor: ctx.justif },
           { tipo: "fillLabel", label: "electronic signature|sign electronically|firma electronica|firma", valor: marca },
-          { tipo: "clickBoton", texto: "siguiente|next|continuar|continue", esperaMs: 1500 }
+          { tipo: "clickBoton", texto: "siguiente|next|continuar|continue", esperaMs: 1500 },
+          { tipo: "fillUrlsUnaCaja", urls: (ctx.urls || []), label: "introduce la url del contenido que quieres denunciar|introduce la url del contenido|url del contenido que quieres denunciar|url of the content you want to report|enter the url of the content", placeholder: "tiktok.com/@|e.g.https|e.g. https" }
         ] };
       }
     },
@@ -415,7 +417,8 @@
           { tipo: "dropdown", opcion: "otros|other", esperaMs: 1800 },
           { tipo: "fillName", name: "email", valor: d.correo },
           { tipo: "fillName", name: "feedback", valor: ctx.justif },
-          { tipo: "clickBoton", texto: "continuar|continue|siguiente|next", esperaMs: 1500 }
+          { tipo: "clickBoton", texto: "continuar|continue|siguiente|next", esperaMs: 1500 },
+          { tipo: "fillUrlsUnaCaja", urls: (ctx.urls || []), label: "introduce la url del contenido que quieres denunciar|introduce la url del contenido|url del contenido que quieres denunciar|url of the content you want to report|enter the url of the content", placeholder: "tiktok.com/@|e.g.https|e.g. https" }
         ] };
       }
     },
