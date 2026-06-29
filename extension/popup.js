@@ -696,6 +696,75 @@ async function APLICAR(pasos) {
           if (puestas > 0) ok++;
           if (puestas < urls.length) faltan.push("urls:" + puestas + "/" + urls.length + " (FB tope 30)");
         }
+      } else if (p.tipo === "fillDifamUrls") {
+        // Formulario de difamación (FB/IG): primero elige en el <select> nativo
+        // "¿Cuántas URL quieres denunciar?" la cantidad N (= número de URLs del Excel),
+        // espera a que el formulario revele los N bloques, llena cada "URL n.º i" con su
+        // URL y pone el MISMO texto de difamación (ctx.justif) en cada "Motivo:".
+        const urls = (p.urls || []).map((u) => (u || "").toString().trim()).filter(Boolean);
+        const motivo = (p.motivo || "").toString();
+        const cant = Math.max(urls.length, 1);
+        // Cuenta los inputs/textarea de URL visibles (placeholder contiene "url (http").
+        const buscarUrlInputs = () => Array.prototype.slice.call(
+          document.querySelectorAll('input, textarea'))
+          .filter((e) => {
+            const ph = norm(e.placeholder || "");
+            if (!ph || ph.indexOf("url (http") < 0) return false;
+            const r = e.getBoundingClientRect();
+            return r.width > 2 && r.height > 2;
+          });
+        // a) Ubica el <select> de cantidad por su rótulo cercano.
+        const selects = Array.prototype.slice.call(document.querySelectorAll('select'));
+        let selCant = null;
+        for (const s of selects) {
+          let rot = "";
+          try { if (s.id) { const lf = document.querySelector('label[for="' + (s.id + "").replace(/"/g, '\\"') + '"]'); if (lf) rot += " " + (lf.innerText || ""); } } catch (e) {}
+          if (s.parentElement) rot += " " + (s.parentElement.innerText || "");
+          if (s.previousElementSibling) rot += " " + (s.previousElementSibling.innerText || "");
+          const nr = norm(rot);
+          if (nr.indexOf("cuantas url") >= 0 || nr.indexOf("how many url") >= 0) { selCant = s; break; }
+        }
+        // b) Elige la opción = cant (match exacto por text/value; si no, la que lo contenga).
+        if (selCant) {
+          const objetivo = String(cant);
+          let idx = -1, idxContiene = -1;
+          for (let i = 0; i < selCant.options.length; i++) {
+            const op = selCant.options[i];
+            const tx = (op.text || "").trim();
+            const vl = (op.value || "").trim();
+            if (tx === objetivo || vl === objetivo) { idx = i; break; }
+            if (idxContiene < 0 && ((tx.match(/\d+/) && tx.match(/\d+/)[0] === objetivo) || (vl.match(/\d+/) && vl.match(/\d+/)[0] === objetivo))) idxContiene = i;
+          }
+          if (idx < 0) idx = idxContiene;
+          if (idx >= 0) {
+            selCant.selectedIndex = idx;
+            selCant.dispatchEvent(new Event("change", { bubbles: true }));
+          }
+          // c) Espera (máx. 10 iteraciones) a que aparezcan los bloques de URL.
+          for (let it = 0; it < 10; it++) {
+            if (buscarUrlInputs().length >= cant) break;
+            await dur(300);
+          }
+        }
+        // d) Llena las URLs en orden: URL i -> caja i.
+        const urlInputs = buscarUrlInputs();
+        let puestasU = 0;
+        for (let i = 0; i < urls.length && i < urlInputs.length; i++) { setNative(urlInputs[i], urls[i]); puestasU++; }
+        // e) Llena los Motivos con el MISMO texto de difamación en cada uno.
+        let puestasM = 0;
+        if (motivo) {
+          const motTextareas = Array.prototype.slice.call(document.querySelectorAll('textarea'))
+            .filter((e) => {
+              const ph = norm(e.placeholder || "");
+              if (!ph || (ph.indexOf("perjudica tu reputacion") < 0 && ph.indexOf("afirmaciones concretas") < 0)) return false;
+              const r = e.getBoundingClientRect();
+              return r.width > 2 && r.height > 2;
+            });
+          for (let i = 0; i < cant && i < motTextareas.length; i++) { setNative(motTextareas[i], motivo); puestasM++; }
+        }
+        // f) Resultado.
+        if (puestasU > 0 || puestasM > 0) ok++;
+        if (urls.length > urlInputs.length) faltan.push("difam_urls:" + puestasU + "/" + urls.length);
       }
     } catch (e) { faltan.push((p.name || p.css || "?") + ": " + e.message); }
   }
