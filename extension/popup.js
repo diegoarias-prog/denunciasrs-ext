@@ -155,9 +155,11 @@ async function capturar_pantalla() {
   }
   $("boton_capturar").disabled = true;
   try {
-    const dataUrl = await new Promise((res, rej) =>
-      chrome.tabs.captureVisibleTab(null, { format: "jpeg", quality: 70 }, (u) =>
-        chrome.runtime.lastError ? rej(new Error(chrome.runtime.lastError.message)) : res(u)));
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab || !tab.id) throw new Error("no se encontró la pestaña del formulario.");
+    const resp = await chrome.runtime.sendMessage({ accion: "capturaCompleta", tabId: tab.id });
+    if (!resp || resp.error || !resp.dataUrl) throw new Error((resp && resp.error) || "no se obtuvo la imagen");
+    const dataUrl = resp.dataUrl;
     const reducida = await redimensionar_imagen(dataUrl, 1280, 0.7);
     const CLAVE = "denuncias_registro";
     const lista = await new Promise((res) =>
