@@ -142,7 +142,7 @@
       { tipo: "fillName", name: "client_name", valor: marca },
       { tipo: "fillName", name: "Address", valor: postalDe(d.pais) },
       { tipo: "fillName", name: "email", valor: d.correo },
-      { tipo: "fillAny", names: ["Please_identify_1", "Please_Identify_1"], valor: ctx.justif },
+      { tipo: "fillDifamUrls", urls: (ctx.urls || []), motivo: ctx.justif },
       { tipo: "fillName", name: "Yes_submit", valor: marca },
       { tipo: "radio", name: "reporting_party", texto: "" } // re-marcar la 1.ª opción al final
     ] };
