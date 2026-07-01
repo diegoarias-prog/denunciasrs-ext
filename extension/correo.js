@@ -5,6 +5,19 @@
 const $ = (id) => document.getElementById(id);
 function aviso(t) { $("aviso").textContent = t; setTimeout(() => ($("aviso").textContent = ""), 2500); }
 
+// Dominios de Google Workspace propios: desde estas cuentas se puede redactar el
+// correo DIRECTAMENTE en Gmail (sin copiar/pegar), abriendo el borrador en esa cuenta.
+const DOMINIOS_WORKSPACE = ["seguridadmaxima.net", "securesoft-antifraude.com"];
+let REMITENTE = "";  // correo de contacto de la marca (posible cuenta de Workspace)
+
+function dominio_de(correo) {
+  const p = (correo || "").split("@");
+  return p[1] ? p[1].trim().toLowerCase() : "";
+}
+function es_workspace(correo) {
+  return DOMINIOS_WORKSPACE.indexOf(dominio_de(correo)) >= 0;
+}
+
 chrome.storage.local.get("email_reporte", (d) => {
   const e = d.email_reporte || {};
   $("para").value = e.to || "";
@@ -12,6 +25,11 @@ chrome.storage.local.get("email_reporte", (d) => {
   $("cuerpo_en").value = e.cuerpo || "";
   $("asunto_es").value = e.asunto_es || e.asunto || "";
   $("cuerpo_es").value = e.cuerpo_es || e.cuerpo || "";
+  REMITENTE = (e.from || "").trim();
+  if (es_workspace(REMITENTE)) {
+    $("de_info").textContent = "✅ Se enviará DESDE " + REMITENTE + ": pulsa \"Abrir en Gmail\" y solo dale Enviar (abre el borrador en esa cuenta).";
+    $("de_info").style.display = "";
+  }
 });
 
 $("mailto").addEventListener("click", () => {
@@ -20,7 +38,12 @@ $("mailto").addEventListener("click", () => {
     "&body=" + encodeURIComponent($("cuerpo_en").value);
 });
 $("gmail").addEventListener("click", () => {
-  window.open("https://mail.google.com/mail/?view=cm&fs=1&tf=1" +
+  // Si el remitente es una cuenta de Workspace propia, se abre el borrador EN esa
+  // cuenta (/mail/u/<correo>/) para que salga desde ahí sin cambiar de cuenta.
+  const base = es_workspace(REMITENTE)
+    ? "https://mail.google.com/mail/u/" + encodeURIComponent(REMITENTE) + "/?view=cm&fs=1&tf=1"
+    : "https://mail.google.com/mail/?view=cm&fs=1&tf=1";
+  window.open(base +
     "&to=" + encodeURIComponent($("para").value) +
     "&su=" + encodeURIComponent($("asunto_en").value) +
     "&body=" + encodeURIComponent($("cuerpo_en").value), "_blank");

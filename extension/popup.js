@@ -294,7 +294,9 @@ async function rellenar() {
     const em = form.construirEmail(ctx);
     await registrar_denuncia_auto(marca, form);
     $("boton_capturar").disabled = false;
-    chrome.storage.local.set({ email_reporte: em }, () => {
+    // 'from' = correo de contacto de la marca; si es una cuenta de Google Workspace
+    // propia, correo.html abre el borrador de Gmail DESDE esa cuenta (envío directo).
+    chrome.storage.local.set({ email_reporte: Object.assign({}, em, { from: datos.correo || "" }) }, () => {
       chrome.tabs.create({ url: chrome.runtime.getURL("correo.html") });
     });
     mostrar_estado("ok", "Correo de " + form.red + " generado: revisa la pestaña, pega el/los enlace(s) y envíalo." +
