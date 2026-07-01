@@ -27,6 +27,7 @@
   <label for="para">Para</label>
   <input id="para" placeholder="Escribe aquí el correo del destinatario (algunos reportes, como Apps maliciosas, Delisting y Ofertas falsas de trabajo, lo dejan vacío para que lo completes)">
   <div class="barra">
+    <button class="boton" id="enviar_directo" style="display:none;background:#059669;">✅ Enviar ahora</button>
     <button class="boton" id="mailto">✉ Abrir en mi correo (inglés)</button>
     <button class="boton gm" id="gmail">Abrir en Gmail (inglés)</button>
     <button class="boton sec" id="copiar_para">📋 Copiar correos</button>
@@ -58,6 +59,7 @@
 
   <p class="nota">Recuerda pegar el/los enlace(s) a denunciar donde dice <b>[ ... ]</b> antes de enviar. Si "Abrir en mi correo" recorta el texto, usa "Copiar cuerpo (inglés)" y pégalo a mano.</p>
 
+  <script src="datos/config_gmail.js"></script>
   <script src="correo.js"></script>
 </body>
 </html>
