@@ -689,6 +689,50 @@
         return bilingue(en, es);
       }
     },
+    // ===== Ofertas falsas de trabajo (red propia, NO tiene form web: es por CORREO) =====
+    // Denuncia ante el SITIO / red / bolsa de empleo que aloja una oferta de trabajo
+    // falsa que suplanta a la marca. Mismo formato que Apps maliciosas / Studocu.
+    ofertas_falsas: {
+      red: "Ofertas falsas de trabajo", nombre: "Oferta de empleo falsa (por correo)", cat: "ofertas_falsas", tipo: "email",
+      destino: "",
+      manual: "El 'Para' va vacío: escribe el correo de abuso/contacto del SITIO, red o bolsa de empleo que aloja la oferta de trabajo falsa. Donde dice [ ... ] pega el/los enlace(s) de la oferta a denunciar, revisa y envía.",
+      construirEmail: function (ctx) {
+        var marca = ctx.marca, d = ctx.datos, dest = this.destino;
+        var repres = /seguridadmaxima\.net/i.test(d.correo || "");
+        var pais = d.pais ? " (" + d.pais + ")" : "";
+        var en = { to: dest,
+          asunto: "Fraudulent job offer impersonating " + marca + " - urgent removal request",
+          cuerpo:
+            "Hi,\n\n" +
+            (repres ? "We are Security Maximum in Computer Networks, on behalf of " + marca + "." : "We are " + marca + ".") + "\n\n" +
+            marca + " informs you that the job offer(s) published in this content are NOT authorized, published or endorsed by the brand. " + marca + " is not carrying out any recruitment process through this posting.\n\n" +
+            "We respectfully but firmly request the immediate removal of this content for the following reasons:\n" +
+            "- It uses the name, logo and corporate identity of " + marca + " without authorization, impersonating the brand.\n" +
+            "- It advertises a job that does not exist and has no connection whatsoever with " + marca + "'s official recruitment channels.\n" +
+            "- It misleads job seekers and may be used to obtain personal data, documents or payments from the victims (recruitment fraud).\n" +
+            "- It damages the reputation and the trust that " + marca + " has built with the public, and infringes its trademark and intellectual property rights.\n\n" +
+            marca + "'s official job openings are published exclusively through its official website and verified channels; any offer outside those channels is not legitimate.\n\n" +
+            "Given the direct risk of fraud to the public, we kindly ask you to remove all content related to this fake job offer associated with " + marca + pais + " as soon as possible.\n\n" +
+            negrita("Reported link(s) (fake job offer):") + "\n" + urlsODefault(ctx, "[ Paste here the link(s) you are reporting ]") + "\n\n" +
+            "Sincerely,\n" + (repres ? "Security Maximum in Computer Networks" : marca) + (d.correo ? "\nContact: " + d.correo : "") };
+        var es = {
+          asunto: "Oferta de trabajo fraudulenta que suplanta a " + marca + " - solicitud urgente de eliminación",
+          cuerpo:
+            "Hola,\n\n" +
+            (repres ? "Somos Seguridad Máxima en Redes Informáticas, en representación de " + marca + "." : "Somos " + marca + ".") + "\n\n" +
+            marca + " informa que la(s) oferta(s) de empleo publicada(s) en este contenido NO están autorizadas, publicadas ni respaldadas por la marca. " + marca + " no está llevando a cabo ningún proceso de contratación a través de esta publicación.\n\n" +
+            "Solicitamos respetuosa pero firmemente la eliminación inmediata de este contenido por las siguientes razones:\n" +
+            "- Utiliza el nombre, el logotipo y la identidad corporativa de " + marca + " sin autorización, suplantando a la marca.\n" +
+            "- Anuncia un empleo que no existe y no tiene ninguna relación con los canales oficiales de contratación de " + marca + ".\n" +
+            "- Engaña a las personas que buscan trabajo y puede usarse para obtener datos personales, documentos o pagos de las víctimas (fraude de reclutamiento).\n" +
+            "- Daña la reputación y la confianza que " + marca + " ha construido con el público, e infringe sus derechos de marca y de propiedad intelectual.\n\n" +
+            "Las vacantes oficiales de " + marca + " se publican exclusivamente a través de su sitio web oficial y sus canales verificados; cualquier oferta fuera de esos canales no es legítima.\n\n" +
+            "Ante el riesgo directo de fraude para el público, solicitamos amablemente que eliminen a la brevedad todo el contenido relacionado con esta oferta de trabajo falsa asociada a " + marca + pais + ".\n\n" +
+            negrita("Enlace(s) a denunciar (oferta de trabajo falsa):") + "\n" + urlsODefault(ctx, "[ Pega aquí el/los enlace(s) a denunciar ]") + "\n\n" +
+            "Saludos,\n" + (repres ? "Seguridad Máxima en Redes Informáticas" : marca) + (d.correo ? "\nContacto: " + d.correo : "") };
+        return bilingue(en, es);
+      }
+    },
     // ===== Delisting (red propia, NO tiene form web: es por CORREO) =====
     // Pide a una lista negra / antispam que QUITE de su base un dominio LEGÍTIMO
     // de la marca marcado por error (falso positivo). Adjunta el reporte de VirusTotal.
