@@ -12,8 +12,8 @@ const CLAVE_REGISTRO = "denuncias_registro";
 // Lista FIJA de plataformas (espeja la tabla Plataformas de la futura BD).
 const PLATAFORMAS_REGISTRO = [
   "Facebook", "Instagram", "WhatsApp", "TikTok", "X", "LinkedIn", "YouTube",
-  "Telegram", "GitHub", "Apps maliciosas", "Delisting", "Outlook / Hotmail",
-  "Scribd", "Studocu"
+  "Telegram", "GitHub", "Apps maliciosas", "Delisting", "Ofertas falsas de trabajo",
+  "Outlook / Hotmail", "Scribd", "Studocu"
 ];
 
 // "borrador" se conserva por compatibilidad con registros antiguos; el alta usa
