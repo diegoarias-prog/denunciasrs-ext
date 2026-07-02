@@ -26,11 +26,6 @@ const TEMA_POR_DEFECTO = "Banco de Guatemala";
 const SIN_TEMA = "Sin tema";
 const CLAVE_MIGRADAS = "plantillas_migradas";
 
-// Minúsculas + sin acentos, para buscar sin distinguir tildes.
-function normalizar(s) {
-  return String(s || "").toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "");
-}
-
 // Migración one-time (con bandera): SOLO la primera vez, las plantillas legacy
 // sin tema pasan a "Banco de Guatemala". Tras marcar la bandera no vuelve a
 // correr, así una plantilla nueva guardada con tema vacío queda estable en
@@ -48,37 +43,63 @@ async function migrar() {
   await new Promise((res) => chrome.storage.local.set({ [CLAVE_MIGRADAS]: true }, res));
 }
 
-// Rellena el <datalist> con los temas ya usados (para reutilizarlos al escribir).
-function llenar_datalist_temas(arr) {
-  const temas = [...new Set(arr.map((p) => (p.tema || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, "es"));
-  $("lista_temas").innerHTML = temas.map((t) => '<option value="' + esc(t) + '"></option>').join("");
+// Lista de temas existentes (únicos, no vacíos, ordenados en español).
+function temas_existentes(arr) {
+  return [...new Set(arr.map((p) => (p.tema || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, "es"));
 }
 
-function coincide_busqueda(p, q) {
-  if (!q) return true;
-  const campos = normalizar((p.tema || "") + " " + (p.etiqueta || "") + " " + (p.nombre || ""));
-  return campos.includes(q);
+// Genera el HTML de una <option> escapando value (atributo) y texto (contenido).
+function opcion(valor, texto, seleccionado) {
+  return '<option value="' + esc(valor) + '"' + (seleccionado ? " selected" : "") + ">" + esc(texto) + "</option>";
+}
+
+// Llena el <select> del formulario (Tema) y el <select> de filtro.
+// Preserva la selección actual de cada uno entre re-pintados.
+function llenar_selects_de_temas(arr) {
+  const temas = temas_existentes(arr);
+  const hay_sin_tema = arr.some((p) => !(p.tema && String(p.tema).trim()));
+
+  // Select del formulario: "Nuevo…" (value="") + un tema por opción.
+  const sel = $("tema_sel");
+  const sel_prev = sel.value;
+  let html_sel = opcion("", "➕ Escribir un tema nuevo…", sel_prev === "");
+  temas.forEach((t) => { html_sel += opcion(t, t, sel_prev === t); });
+  sel.innerHTML = html_sel;
+  if (sel.value !== sel_prev) sel.value = ""; // el tema previo ya no existe → modo nuevo
+
+  // Select de filtro: "Todos los temas" (value="") + temas + "Sin tema" si aplica.
+  const fil = $("filtro_tema");
+  const fil_prev = fil.value;
+  let html_fil = opcion("", "Todos los temas", fil_prev === "");
+  temas.forEach((t) => { html_fil += opcion(t, t, fil_prev === t); });
+  if (hay_sin_tema) html_fil += opcion(SIN_TEMA, SIN_TEMA, fil_prev === SIN_TEMA);
+  fil.innerHTML = html_fil;
+  // Si el tema filtrado ya no existe, vuelve a "Todos los temas".
+  if (fil.value !== fil_prev) fil.value = "";
 }
 
 async function pintar() {
   const arr = await leer();
-  llenar_datalist_temas(arr);
+  llenar_selects_de_temas(arr);
+  // Si el select de Tema quedó en "nuevo" (p. ej. su tema dejó de existir),
+  // sincroniza la visibilidad de la caja de texto de tema nuevo.
+  actualizar_visibilidad_tema_nuevo();
   const lista = $("lista");
   if (!arr.length) { lista.innerHTML = '<p class="vacio">Aún no hay plantillas guardadas.</p>'; return; }
 
-  const q = normalizar($("buscar").value.trim());
+  const filtro = $("filtro_tema").value; // "" = todos; SIN_TEMA = sin tema; otro = ese tema
 
   // Agrupar por tema conservando SIEMPRE el índice real dentro de arr (idx),
   // que es el que se usa en los data-attributes para copiar/editar/eliminar.
   const grupos = new Map();
   arr.forEach((p, idx) => {
-    if (!coincide_busqueda(p, q)) return;
     const tema = (p.tema && String(p.tema).trim()) ? String(p.tema).trim() : SIN_TEMA;
+    if (filtro && tema !== filtro) return; // aplica filtro por tema
     if (!grupos.has(tema)) grupos.set(tema, []);
     grupos.get(tema).push({ p, idx });
   });
 
-  if (!grupos.size) { lista.innerHTML = '<p class="vacio">No hay plantillas que coincidan con la búsqueda.</p>'; return; }
+  if (!grupos.size) { lista.innerHTML = '<p class="vacio">No hay plantillas para el tema seleccionado.</p>'; return; }
 
   // Orden de grupos alfabético, dejando "Sin tema" al final.
   const temas_ordenados = [...grupos.keys()].sort((a, b) => {
@@ -105,26 +126,50 @@ async function pintar() {
   lista.innerHTML = html;
 }
 
+// Tema efectivo del formulario: si está en modo "nuevo" (select en value ""),
+// se usa el texto escrito; si no, el tema elegido en el select.
+function tema_del_formulario() {
+  const sel = $("tema_sel").value;
+  return sel === "" ? $("tema_nuevo").value.trim() : sel;
+}
+
+// Al elegir "Nuevo…" (value "") muestra la caja de texto; con otra, la oculta y limpia.
+function actualizar_visibilidad_tema_nuevo() {
+  const nuevo = $("tema_nuevo");
+  if ($("tema_sel").value === "") { nuevo.style.display = "block"; }
+  else { nuevo.style.display = "none"; nuevo.value = ""; }
+}
+$("tema_sel").addEventListener("change", actualizar_visibilidad_tema_nuevo);
+
+// Deja el formulario en modo "tema nuevo" con la caja oculta y vacía.
+function reset_campos_tema() {
+  $("tema_sel").value = "";
+  $("tema_nuevo").value = "";
+  $("tema_nuevo").style.display = "none";
+}
+
 $("guardar").addEventListener("click", async () => {
   const nombre = $("nombre").value.trim();
   const texto = $("texto").value.trim();
-  const tema = $("tema").value.trim();
+  const tema = tema_del_formulario();
   const etiqueta = $("etiqueta").value.trim();
   if (!nombre && !texto) { aviso("Escribe un nombre y/o texto."); return; }
   const arr = await leer();
   const idx = arr.findIndex((p) => (p.nombre || "").toLowerCase() === nombre.toLowerCase() && nombre);
   if (idx >= 0) arr[idx] = { nombre, texto, tema, etiqueta }; else arr.push({ nombre, texto, tema, etiqueta });
   await guardar(arr);
-  $("nombre").value = ""; $("texto").value = ""; $("tema").value = ""; $("etiqueta").value = "";
+  $("nombre").value = ""; $("texto").value = ""; $("etiqueta").value = "";
+  reset_campos_tema();
   aviso("✓ Guardada");
   pintar();
 });
 
 $("limpiar").addEventListener("click", () => {
-  $("nombre").value = ""; $("texto").value = ""; $("tema").value = ""; $("etiqueta").value = "";
+  $("nombre").value = ""; $("texto").value = ""; $("etiqueta").value = "";
+  reset_campos_tema();
 });
 
-$("buscar").addEventListener("input", pintar);
+$("filtro_tema").addEventListener("change", pintar);
 
 $("lista").addEventListener("click", async (e) => {
   const arr = await leer();
@@ -135,7 +180,20 @@ $("lista").addEventListener("click", async (e) => {
   if (ed !== null) {
     const p = arr[+ed] || {};
     $("nombre").value = p.nombre || ""; $("texto").value = p.texto || "";
-    $("tema").value = p.tema || ""; $("etiqueta").value = p.etiqueta || "";
+    $("etiqueta").value = p.etiqueta || "";
+    // El tema de una plantilla existente ya figura entre las opciones: se
+    // selecciona directamente (no modo nuevo). Si por algún caso no existiera
+    // como opción, se cae a modo "nuevo" con la caja mostrando ese tema.
+    const sel = $("tema_sel");
+    const temaP = (p.tema || "").trim();
+    sel.value = temaP;
+    if (sel.value === temaP && temaP !== "") {
+      $("tema_nuevo").style.display = "none"; $("tema_nuevo").value = "";
+    } else {
+      sel.value = "";
+      $("tema_nuevo").style.display = "block";
+      $("tema_nuevo").value = temaP;
+    }
     window.scrollTo(0, 0); return;
   }
   if (el !== null) {
@@ -144,4 +202,9 @@ $("lista").addEventListener("click", async (e) => {
   }
 });
 
-(async () => { await migrar(); pintar(); })();
+(async () => {
+  await migrar();
+  await pintar();
+  // Al abrir, el select arranca en "Nuevo…": muestra la caja para poder escribir.
+  actualizar_visibilidad_tema_nuevo();
+})();
