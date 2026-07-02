@@ -22,6 +22,118 @@ function copiar(texto) {
   });
 }
 
+// ============================================================================
+//  SANEADOR DE HTML (lista blanca, sin librerías). Se aplica SIEMPRE antes de
+//  guardar, cargar al editor y renderizar en la lista. El parseo se hace en un
+//  <template> INERTE: su contenido no ejecuta <script> ni carga <img>/onerror.
+// ============================================================================
+const ETIQUETAS_PERMITIDAS = new Set(["B", "STRONG", "I", "EM", "U", "SPAN", "BR", "DIV", "P", "FONT"]);
+const ETIQUETAS_ELIMINAR = new Set(["SCRIPT", "STYLE", "IMG", "SVG", "IFRAME", "OBJECT", "LINK", "META"]);
+const STYLE_PERMITIDO = new Set(["color", "font-weight", "font-style", "text-decoration", "background-color"]);
+
+// Deja solo las propiedades de style de la lista blanca y rechaza valores peligrosos.
+function filtrar_style(valor) {
+  const salida = [];
+  String(valor || "").split(";").forEach((decl) => {
+    const i = decl.indexOf(":");
+    if (i < 0) return;
+    const prop = decl.slice(0, i).trim().toLowerCase();
+    const val = decl.slice(i + 1).trim();
+    if (!STYLE_PERMITIDO.has(prop) || !val) return;
+    const bajo = val.toLowerCase();
+    if (bajo.includes("url(") || bajo.includes("expression") || bajo.includes("javascript:") || bajo.includes("/*")) return;
+    salida.push(prop + ": " + val);
+  });
+  return salida.join("; ");
+}
+
+// Recorre y limpia el árbol in situ (sirve para DocumentFragment y elementos).
+function limpiar_nodo(nodo) {
+  Array.from(nodo.childNodes).forEach((h) => {
+    if (h.nodeType === 8) { h.remove(); return; } // comentarios fuera
+    if (h.nodeType !== 1) return;                  // deja nodos de texto
+    const tag = h.tagName.toUpperCase();
+    if (ETIQUETAS_ELIMINAR.has(tag)) { h.remove(); return; } // elimina etiqueta y su contenido
+    if (!ETIQUETAS_PERMITIDAS.has(tag)) {
+      // Etiqueta no permitida: limpiar hijos y "desenvolver" (conservar solo texto/hijos válidos).
+      limpiar_nodo(h);
+      const padre = h.parentNode;
+      while (h.firstChild) padre.insertBefore(h.firstChild, h);
+      padre.removeChild(h);
+      return;
+    }
+    // Etiqueta permitida: quitar TODOS los atributos salvo los de la lista blanca.
+    Array.from(h.attributes).forEach((a) => {
+      const nombre = a.name.toLowerCase();
+      if (tag === "FONT" && nombre === "color") {
+        const v = String(a.value).toLowerCase();
+        if (v.includes("url(") || v.includes("javascript:") || v.includes("expression")) h.removeAttribute(a.name);
+        return; // conserva color válido en <font>
+      }
+      if (nombre === "style" && (tag === "SPAN" || tag === "FONT" || tag === "DIV" || tag === "P")) {
+        const limpio = filtrar_style(a.value);
+        if (limpio) h.setAttribute("style", limpio); else h.removeAttribute("style");
+        return;
+      }
+      h.removeAttribute(a.name); // on*, href, src, class, id, style no permitido, etc.
+    });
+    limpiar_nodo(h);
+  });
+}
+
+function sanitizar_html(html) {
+  try {
+    const tpl = document.createElement("template");
+    tpl.innerHTML = String(html == null ? "" : html);
+    limpiar_nodo(tpl.content);
+    const salida = document.createElement("div");
+    salida.appendChild(tpl.content.cloneNode(true));
+    return salida.innerHTML;
+  } catch (e) {
+    // Respaldo seguro: nunca dejar la vista sin pintar por un fallo del saneo.
+    return esc(String(html == null ? "" : html));
+  }
+}
+
+// Devuelve HTML SEGURO para mostrar/editar/copiar una plantilla, distinguiendo
+// las nuevas (formato:"html") de las viejas (texto plano con saltos \n).
+function plantilla_a_html(p) {
+  p = p || {};
+  if (p.formato === "html") return sanitizar_html(p.texto || "");
+  // Legacy texto plano: escapar (queda seguro y el "<" pegado no se interpreta)
+  // y convertir los saltos de línea en <br> para que se vean y se copien.
+  return esc(p.texto || "").replace(/\n/g, "<br>");
+}
+
+// HTML (ya saneado) → texto plano preservando saltos. Se mide adjuntando el nodo
+// fuera de pantalla para que innerText calcule bien los saltos de línea.
+function html_a_texto_plano(html) {
+  const tmp = document.createElement("div");
+  tmp.style.position = "fixed"; tmp.style.left = "-9999px"; tmp.style.top = "0";
+  tmp.style.whiteSpace = "pre-wrap"; // conserva los saltos de línea en innerText
+  tmp.innerHTML = html;
+  document.body.appendChild(tmp);
+  const plano = tmp.innerText;
+  document.body.removeChild(tmp);
+  return plano;
+}
+
+// Copia CON formato: pone text/html + text/plain en el portapapeles. Si el
+// navegador no soporta ClipboardItem/clipboard.write, cae al copiado de texto.
+function copiar_rico(html) {
+  const limpio = sanitizar_html(html);
+  const plano = html_a_texto_plano(limpio);
+  const puede = typeof ClipboardItem !== "undefined" && navigator.clipboard && navigator.clipboard.write;
+  if (!puede) { copiar(plano); return; }
+  try {
+    const item = new ClipboardItem({
+      "text/html": new Blob([limpio], { type: "text/html" }),
+      "text/plain": new Blob([plano], { type: "text/plain" })
+    });
+    navigator.clipboard.write([item]).then(() => aviso("✓ Copiado")).catch(() => copiar(plano));
+  } catch (e) { copiar(plano); }
+}
+
 const TEMA_POR_DEFECTO = "Banco de Guatemala";
 const SIN_TEMA = "Sin tema";
 const CLAVE_MIGRADAS = "plantillas_migradas";
@@ -153,7 +265,7 @@ async function pintar() {
       cuerpo +=
         '<div class="item">' +
         '<div class="tit">' + esc(p.nombre || "(sin nombre)") + chip + "</div>" +
-        '<div class="txt">' + esc(p.texto || "") + "</div>" +
+        '<div class="txt">' + plantilla_a_html(p) + "</div>" +
         '<div class="acc"><button class="boton mini" data-copiar="' + idx + '">Copiar</button>' +
         '<button class="boton mini sec" data-editar="' + idx + '">Editar</button>' +
         '<button class="boton del mini" data-eliminar="' + idx + '">Eliminar</button></div>' +
@@ -188,22 +300,24 @@ function reset_campos_tema() {
 
 $("guardar").addEventListener("click", async () => {
   const nombre = $("nombre").value.trim();
-  const texto = $("texto").value.trim();
+  // Vacío se decide por el TEXTO VISIBLE; se guarda el HTML saneado.
+  const visible = $("texto").innerText.trim();
+  const texto = visible ? sanitizar_html($("texto").innerHTML) : "";
   const tema = tema_del_formulario();
   const etiqueta = $("etiqueta").value.trim();
-  if (!nombre && !texto) { aviso("Escribe un nombre y/o texto."); return; }
+  if (!nombre && !visible) { aviso("Escribe un nombre y/o texto."); return; }
   const arr = await leer();
   const idx = arr.findIndex((p) => (p.nombre || "").toLowerCase() === nombre.toLowerCase() && nombre);
-  if (idx >= 0) arr[idx] = { nombre, texto, tema, etiqueta }; else arr.push({ nombre, texto, tema, etiqueta });
+  if (idx >= 0) arr[idx] = { nombre, texto, tema, etiqueta, formato: "html" }; else arr.push({ nombre, texto, tema, etiqueta, formato: "html" });
   await guardar(arr);
-  $("nombre").value = ""; $("texto").value = ""; $("etiqueta").value = "";
+  $("nombre").value = ""; $("texto").innerHTML = ""; $("etiqueta").value = "";
   reset_campos_tema();
   aviso("✓ Guardada");
   pintar();
 });
 
 $("limpiar").addEventListener("click", () => {
-  $("nombre").value = ""; $("texto").value = ""; $("etiqueta").value = "";
+  $("nombre").value = ""; $("texto").innerHTML = ""; $("etiqueta").value = "";
   reset_campos_tema();
 });
 
@@ -223,10 +337,10 @@ $("lista").addEventListener("click", async (e) => {
   const c = e.target.getAttribute("data-copiar");
   const ed = e.target.getAttribute("data-editar");
   const el = e.target.getAttribute("data-eliminar");
-  if (c !== null) { copiar((arr[+c] || {}).texto || ""); return; }
+  if (c !== null) { copiar_rico(plantilla_a_html(arr[+c] || {})); return; }
   if (ed !== null) {
     const p = arr[+ed] || {};
-    $("nombre").value = p.nombre || ""; $("texto").value = p.texto || "";
+    $("nombre").value = p.nombre || ""; $("texto").innerHTML = plantilla_a_html(p);
     $("etiqueta").value = p.etiqueta || "";
     // El tema de una plantilla existente ya figura entre las opciones: se
     // selecciona directamente (no modo nuevo). Si por algún caso no existiera
@@ -247,6 +361,49 @@ $("lista").addEventListener("click", async (e) => {
     if (!confirm('¿Eliminar la plantilla "' + ((arr[+el] || {}).nombre || "") + '"?')) return;
     arr.splice(+el, 1); await guardar(arr); pintar();
   }
+});
+
+// ============================================================================
+//  Barra de formato del editor (negrita, cursiva, subrayado, color, quitar).
+//  Cada botón hace preventDefault en mousedown para NO perder la selección del
+//  editor; luego enfoca el editor y ejecuta el execCommand correspondiente.
+// ============================================================================
+let rango_guardado = null;
+function guardar_rango() {
+  const sel = window.getSelection();
+  if (sel && sel.rangeCount && $("texto").contains(sel.anchorNode)) {
+    rango_guardado = sel.getRangeAt(0).cloneRange();
+  }
+}
+function restaurar_rango() {
+  if (!rango_guardado) return;
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(rango_guardado);
+}
+// Mantén fresca la última selección hecha dentro del editor.
+$("texto").addEventListener("keyup", guardar_rango);
+$("texto").addEventListener("mouseup", guardar_rango);
+
+// Botones de comando simple: mousedown preventDefault conserva la selección.
+function enlazar_boton_formato(id, comando) {
+  const b = $(id);
+  b.addEventListener("mousedown", (e) => { e.preventDefault(); });
+  b.addEventListener("click", () => { $("texto").focus(); document.execCommand(comando, false, null); });
+}
+enlazar_boton_formato("fmt_negrita", "bold");
+enlazar_boton_formato("fmt_cursiva", "italic");
+enlazar_boton_formato("fmt_subrayado", "underline");
+enlazar_boton_formato("fmt_quitar", "removeFormat");
+
+// Color: el selector nativo roba el foco, así que guardamos el rango al abrirlo
+// (mousedown) y lo restauramos antes de aplicar foreColor.
+const color_texto = $("color_texto");
+color_texto.addEventListener("mousedown", guardar_rango);
+color_texto.addEventListener("input", () => {
+  $("texto").focus();
+  restaurar_rango();
+  document.execCommand("foreColor", false, color_texto.value);
 });
 
 (async () => {
