@@ -137,6 +137,12 @@ function pintar_tabla() {
   lista.forEach((d) => {
     const tr = document.createElement("tr");
     const clase_estado = (d.estado || "enviada");
+    // Indicadores de adjuntos: 📎 comprobante · 💬 respuesta de la red.
+    const marcas_adjuntos = [];
+    if (d.comprobante_img) marcas_adjuntos.push("Comprobante 📎");
+    if (d.respuesta_img) marcas_adjuntos.push("Respuesta 💬");
+    const titulo_adjuntos = marcas_adjuntos.length ? marcas_adjuntos.join(" · ") : "Sin adjuntos";
+    const iconos_adjuntos = (d.comprobante_img ? "📎" : "") + (d.respuesta_img ? "💬" : "");
     tr.innerHTML =
       '<td>' + escapar_html(d.consecutivo) + '</td>' +
       '<td>' + escapar_html(formatear_fecha(d.fecha)) + '</td>' +
@@ -146,7 +152,7 @@ function pintar_tabla() {
       '<td>' + escapar_html(d.categoria) + '</td>' +
       '<td>' + escapar_html(d.numero_caso) + '</td>' +
       '<td><span class="etiqueta_estado ' + escapar_html(clase_estado) + '">' + escapar_html(ESTADOS_REGISTRO[d.estado] || d.estado || "") + '</span></td>' +
-      '<td style="text-align:center;" title="' + (d.comprobante_img ? "Tiene captura adjunta" : "Sin captura") + '">' + (d.comprobante_img ? "📎" : "") + '</td>' +
+      '<td style="text-align:center;" title="' + escapar_html(titulo_adjuntos) + '">' + iconos_adjuntos + '</td>' +
       '<td class="celda_accion">' +
         '<button class="boton sec mini" data-accion="ver" title="Ver comprobante">👁</button>' +
         '<button class="boton sec mini" data-accion="editar" title="Editar">✏️</button>' +
@@ -351,6 +357,19 @@ function abrir_comprobante(id) {
     imgEl.removeAttribute("src");
     bloque.style.display = "none";
   }
+
+  // Imagen de RESPUESTA de la red social (campo aparte, se pega con Ctrl+V):
+  // mismo patrón que el comprobante, src por propiedad (no innerHTML).
+  const bloqueResp = $("bloque_imagen_respuesta");
+  const imgResp = $("img_respuesta");
+  if (d.respuesta_img) {
+    imgResp.src = d.respuesta_img;
+    bloqueResp.style.display = "block";
+  } else {
+    imgResp.removeAttribute("src");
+    bloqueResp.style.display = "none";
+  }
+
   $("modal_comprobante").dataset.idActivo = d.id;
 
   $("fondo_comprobante").classList.add("abierto");
@@ -375,6 +394,74 @@ async function quitar_imagen_comprobante() {
 }
 
 // ----------------------------------------------------------------------------
+//  Respuesta de la red social: se PEGA con Ctrl+V (sin adjuntar archivo).
+//  Se guarda como dataURL en la propiedad `respuesta_img` de la denuncia activa,
+//  SEPARADA de `comprobante_img`. La imagen sólo va a chrome.storage.local.
+// ----------------------------------------------------------------------------
+async function al_pegar_respuesta(e) {
+  const dt = e.clipboardData || window.clipboardData;
+  const items = dt ? dt.items : null;
+  let file = null;
+  if (items) {
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type && items[i].type.indexOf("image/") === 0) {
+        file = items[i].getAsFile();
+        break;
+      }
+    }
+  }
+  e.preventDefault(); // no pegar como texto ni dejar el comportamiento por defecto
+
+  if (!file) { mostrar_aviso("No hay una imagen en el portapapeles (copia primero la captura)."); return; }
+
+  const id = $("modal_comprobante").dataset.idActivo;
+  const d = DENUNCIAS.find((x) => x.id === id);
+  if (!d) { mostrar_aviso("Abre una denuncia antes de pegar la respuesta."); return; }
+
+  try {
+    // Redimensiona (máx 1280px de ancho) y recomprime a JPEG 0.85 para no llenar
+    // el storage. El File proviene del portapapeles y es image/*.
+    const dataURL = await leer_y_redimensionar(file, 1280, 0.85);
+    d.respuesta_img = dataURL;
+    await guardar_registro();
+    $("img_respuesta").src = dataURL;              // src por propiedad (no innerHTML)
+    $("bloque_imagen_respuesta").style.display = "block";
+    refrescar_vista();
+    mostrar_aviso("✓ Respuesta guardada.");
+  } catch (err) {
+    mostrar_aviso("No se pudo procesar la imagen pegada.");
+  }
+}
+
+// Escucha el pegado a nivel documento SÓLO cuando el modal está abierto y el foco
+// está en la zona de pegado (o dentro del modal, no en un campo de texto).
+function al_pegar_documento(e) {
+  if (!$("fondo_comprobante").classList.contains("abierto")) return;
+  const area = $("area_pegar_respuesta");
+  const activo = document.activeElement;
+  const tag = activo && activo.tagName ? activo.tagName.toLowerCase() : "";
+  const en_campo = tag === "input" || tag === "textarea" || tag === "select";
+  if (activo === area || (!en_campo && $("modal_comprobante").contains(activo))) {
+    al_pegar_respuesta(e);
+  }
+}
+
+// Quita la imagen de respuesta de la denuncia abierta en el modal (espejo de
+// quitar_imagen_comprobante, pero para `respuesta_img`).
+async function quitar_imagen_respuesta() {
+  const id = $("modal_comprobante").dataset.idActivo;
+  const d = DENUNCIAS.find((x) => x.id === id);
+  if (!d) return;
+  if (!confirm("¿Quitar la imagen de respuesta de la denuncia #" + d.consecutivo + "?")) return;
+  delete d.respuesta_img;
+  await guardar_registro();
+  $("bloque_imagen_respuesta").style.display = "none";
+  $("img_respuesta").removeAttribute("src");
+  refrescar_vista();
+  mostrar_aviso("Imagen de respuesta quitada.");
+}
+
+// ----------------------------------------------------------------------------
 //  Arranque
 // ----------------------------------------------------------------------------
 async function inicializar_registro() {
@@ -396,6 +483,10 @@ async function inicializar_registro() {
   $("campo_comprobante_img").addEventListener("change", al_elegir_comprobante);
   $("boton_quitar_comprobante").addEventListener("click", quitar_comprobante_formulario);
   $("boton_quitar_imagen_comprobante").addEventListener("click", quitar_imagen_comprobante);
+  $("boton_quitar_respuesta").addEventListener("click", quitar_imagen_respuesta);
+  // Un solo listener a nivel documento evita el doble disparo (el evento del área
+  // burbujea al documento); al_pegar_documento filtra por modal abierto + foco en el área.
+  document.addEventListener("paste", al_pegar_documento);
   ["filtro_busqueda", "filtro_marca", "filtro_plataforma", "filtro_estado"].forEach((id) =>
     $(id).addEventListener("input", pintar_tabla));
   $("boton_imprimir_comprobante").addEventListener("click", () => window.print());

@@ -67,6 +67,19 @@
   .lista_datos_comprobante .fila_dato .clave { width: 150px; flex: 0 0 150px; font-weight: 700; color: #374151; }
   .lista_datos_comprobante .fila_dato .valor { color: #1f2937; word-break: break-word; white-space: pre-wrap; }
 
+  /* --- Respuesta de la red social (área para PEGAR con Ctrl+V) --- */
+  .seccion_respuesta_red { margin-top: 18px; border-top: 1px dashed #cbd5e1; padding-top: 14px; }
+  .titulo_seccion_respuesta { font-size: 13px; font-weight: 700; color: #1d4ed8; margin: 0 0 8px; }
+  .titulo_seccion_respuesta span { font-weight: 400; color: #6b7280; }
+  .area_pegar_respuesta {
+    border: 2px dashed #94a3b8; border-radius: 8px; padding: 20px 14px; text-align: center;
+    color: #6b7280; font-size: 13px; background: #f8fafc; cursor: text; outline: none; user-select: none;
+  }
+  .area_pegar_respuesta:hover { border-color: #1d4ed8; background: #eff6ff; color: #1d4ed8; }
+  .area_pegar_respuesta:focus { border-color: #1d4ed8; background: #eff6ff; color: #1d4ed8; box-shadow: 0 0 0 3px rgba(29,78,216,.18); }
+  /* Título que SOLO aparece al imprimir (en pantalla lo cubre el título de sección). */
+  .titulo_respuesta_impresion { display: none; }
+
   /* --- Impresión: solo el comprobante --- */
   @media print {
     body * { visibility: hidden; }
@@ -74,6 +87,8 @@
     .fondo_modal { position: static; background: none; display: block; padding: 0; }
     .caja_modal { box-shadow: none; max-width: 100%; padding: 0; }
     .no_imprimir { display: none !important; }
+    .seccion_respuesta_red { border-top: 0; }
+    .titulo_respuesta_impresion { display: block !important; font-size: 15px; color: #1d4ed8; margin: 10px 0 6px; }
   }
 </style>
 </head>
@@ -181,7 +196,7 @@
       <thead>
         <tr>
           <th>#</th><th>Fecha</th><th>Marca</th><th>Plataforma</th><th>Tipo</th>
-          <th>Categoría</th><th>N.º de caso</th><th>Estado</th><th title="Comprobante adjunto">📎</th><th class="celda_accion">Acción</th>
+          <th>Categoría</th><th>N.º de caso</th><th>Estado</th><th title="Adjuntos: 📎 comprobante · 💬 respuesta de la red">📎💬</th><th class="celda_accion">Acción</th>
         </tr>
       </thead>
       <tbody id="cuerpo_registro"></tbody>
@@ -204,6 +219,24 @@
           <button class="boton sec mini" id="boton_quitar_imagen_comprobante">Quitar imagen del comprobante</button>
         </div>
       </div>
+
+      <!-- ====== Respuesta de la red social (se PEGA con Ctrl+V, sin adjuntar archivo) ====== -->
+      <div class="seccion_respuesta_red">
+        <!-- Bloque de imagen: se muestra sólo si hay respuesta; es lo que se imprime -->
+        <div id="bloque_imagen_respuesta" style="display:none;">
+          <h4 class="titulo_respuesta_impresion">Respuesta de la red social</h4>
+          <img id="img_respuesta" alt="Respuesta de la red social" style="max-width:100%; border:1px solid #e5e7eb; border-radius:7px; display:block;">
+          <div class="barra no_imprimir">
+            <button class="boton sec mini" id="boton_quitar_respuesta">Quitar respuesta</button>
+          </div>
+        </div>
+        <!-- Zona de pegado: nunca se imprime -->
+        <div class="no_imprimir" style="margin-top:10px;">
+          <div class="titulo_seccion_respuesta">Respuesta de la red social <span>(pega una captura como respaldo)</span></div>
+          <div id="area_pegar_respuesta" class="area_pegar_respuesta" tabindex="0" aria-label="Área para pegar la imagen de respuesta con Ctrl+V">Haz clic aquí y pega la imagen con Ctrl+V</div>
+        </div>
+      </div>
+
       <div class="barra no_imprimir">
         <button class="boton" id="boton_imprimir_comprobante">Imprimir</button>
         <button class="boton sec" id="boton_cerrar_comprobante">Cerrar</button>
