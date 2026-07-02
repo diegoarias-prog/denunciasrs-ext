@@ -137,12 +137,13 @@ function pintar_tabla() {
   lista.forEach((d) => {
     const tr = document.createElement("tr");
     const clase_estado = (d.estado || "enviada");
-    // Indicadores de adjuntos: 📎 comprobante · 💬 respuesta de la red.
+    // Indicadores de adjuntos: 📎 comprobante · 💬 respuesta(s) de la red.
+    const num_respuestas = respuestas_de(d).length;
     const marcas_adjuntos = [];
     if (d.comprobante_img) marcas_adjuntos.push("Comprobante 📎");
-    if (d.respuesta_img) marcas_adjuntos.push("Respuesta 💬");
+    if (num_respuestas) marcas_adjuntos.push("Respuestas 💬 (" + num_respuestas + ")");
     const titulo_adjuntos = marcas_adjuntos.length ? marcas_adjuntos.join(" · ") : "Sin adjuntos";
-    const iconos_adjuntos = (d.comprobante_img ? "📎" : "") + (d.respuesta_img ? "💬" : "");
+    const iconos_adjuntos = (d.comprobante_img ? "📎" : "") + (num_respuestas ? "💬" + num_respuestas : "");
     tr.innerHTML =
       '<td>' + escapar_html(d.consecutivo) + '</td>' +
       '<td>' + escapar_html(formatear_fecha(d.fecha)) + '</td>' +
@@ -358,17 +359,11 @@ function abrir_comprobante(id) {
     bloque.style.display = "none";
   }
 
-  // Imagen de RESPUESTA de la red social (campo aparte, se pega con Ctrl+V):
-  // mismo patrón que el comprobante, src por propiedad (no innerHTML).
-  const bloqueResp = $("bloque_imagen_respuesta");
-  const imgResp = $("img_respuesta");
-  if (d.respuesta_img) {
-    imgResp.src = d.respuesta_img;
-    bloqueResp.style.display = "block";
-  } else {
-    imgResp.removeAttribute("src");
-    bloqueResp.style.display = "none";
-  }
+  // Respuesta(s) de la red social (campo aparte, se pegan con Ctrl+V, galería
+  // acumulable). Normaliza el viejo campo único `respuesta_img` a la lista
+  // `respuestas_img` y pinta TODAS las imágenes (src por propiedad, no innerHTML).
+  normalizar_respuestas(d);
+  renderizar_galeria_respuestas(d);
 
   $("modal_comprobante").dataset.idActivo = d.id;
 
@@ -394,10 +389,79 @@ async function quitar_imagen_comprobante() {
 }
 
 // ----------------------------------------------------------------------------
-//  Respuesta de la red social: se PEGA con Ctrl+V (sin adjuntar archivo).
-//  Se guarda como dataURL en la propiedad `respuesta_img` de la denuncia activa,
-//  SEPARADA de `comprobante_img`. La imagen sólo va a chrome.storage.local.
+//  Respuesta(s) de la red social: se PEGAN con Ctrl+V (sin adjuntar archivo).
+//  Se guardan como una LISTA de dataURLs en `respuestas_img` de la denuncia
+//  activa (galería acumulable), SEPARADA de `comprobante_img`. Las imágenes sólo
+//  van a chrome.storage.local (nada de red).
+//
+//  Compatibilidad: denuncias antiguas guardaban una sola imagen en el string
+//  `respuesta_img`. `respuestas_de` la lee siempre como array sin mutar; y
+//  `normalizar_respuestas` la migra a `respuestas_img = [respuesta_img]` sin
+//  perder ninguna imagen ya pegada.
 // ----------------------------------------------------------------------------
+
+// Devuelve SIEMPRE un array con las respuestas de la denuncia, sin mutarla.
+function respuestas_de(d) {
+  if (!d) return [];
+  if (Array.isArray(d.respuestas_img)) return d.respuestas_img;
+  if (typeof d.respuesta_img === "string" && d.respuesta_img) return [d.respuesta_img];
+  return [];
+}
+
+// Migra en memoria el viejo `respuesta_img` (string) al array `respuestas_img` y
+// devuelve ese array (para poder hacerle push/splice). No pierde imágenes.
+function normalizar_respuestas(d) {
+  if (!d) return [];
+  if (!Array.isArray(d.respuestas_img)) {
+    d.respuestas_img = (typeof d.respuesta_img === "string" && d.respuesta_img) ? [d.respuesta_img] : [];
+  }
+  if ("respuesta_img" in d) delete d.respuesta_img; // ya migrado a la lista
+  return d.respuestas_img;
+}
+
+// Pinta TODAS las imágenes de respuesta en la galería del modal. Cada <img>
+// recibe su src por PROPIEDAD (nunca dataURL dentro de innerHTML) y su propio
+// botón "Quitar" (que sólo elimina esa, por índice). Si no hay ninguna, oculta
+// la galería y deja visible sólo el área de pegado.
+function renderizar_galeria_respuestas(d) {
+  const bloque = $("bloque_imagen_respuesta");
+  const galeria = $("galeria_respuestas");
+  const conteo = $("conteo_respuestas");
+  const lista = respuestas_de(d);
+  galeria.innerHTML = ""; // se vacía; las imágenes se re-crean con src por propiedad
+
+  if (!lista.length) {
+    bloque.style.display = "none";
+    conteo.textContent = "";
+    return;
+  }
+  bloque.style.display = "block";
+  conteo.textContent = "Respuestas pegadas: " + lista.length;
+
+  lista.forEach((dataURL, indice) => {
+    const item = document.createElement("div");
+    item.className = "item_respuesta_galeria";
+
+    const img = document.createElement("img");
+    img.className = "img_respuesta_galeria";
+    img.alt = "Respuesta de la red social " + (indice + 1);
+    img.src = dataURL; // por propiedad, jamás en un string de innerHTML (anti-XSS)
+    item.appendChild(img);
+
+    const barra = document.createElement("div");
+    barra.className = "barra no_imprimir";
+    const boton = document.createElement("button");
+    boton.type = "button";
+    boton.className = "boton sec mini";
+    boton.textContent = "Quitar";
+    boton.addEventListener("click", () => quitar_imagen_respuesta(indice));
+    barra.appendChild(boton);
+    item.appendChild(barra);
+
+    galeria.appendChild(item);
+  });
+}
+
 async function al_pegar_respuesta(e) {
   const dt = e.clipboardData || window.clipboardData;
   const items = dt ? dt.items : null;
@@ -422,12 +486,12 @@ async function al_pegar_respuesta(e) {
     // Redimensiona (máx 1280px de ancho) y recomprime a JPEG 0.85 para no llenar
     // el storage. El File proviene del portapapeles y es image/*.
     const dataURL = await leer_y_redimensionar(file, 1280, 0.85);
-    d.respuesta_img = dataURL;
+    const lista = normalizar_respuestas(d); // migra el viejo campo si hiciera falta
+    lista.push(dataURL);                     // AGREGA (no reemplaza): galería acumulable
     await guardar_registro();
-    $("img_respuesta").src = dataURL;              // src por propiedad (no innerHTML)
-    $("bloque_imagen_respuesta").style.display = "block";
+    renderizar_galeria_respuestas(d);
     refrescar_vista();
-    mostrar_aviso("✓ Respuesta guardada.");
+    mostrar_aviso("✓ Respuesta agregada (" + lista.length + ").");
   } catch (err) {
     mostrar_aviso("No se pudo procesar la imagen pegada.");
   }
@@ -446,17 +510,19 @@ function al_pegar_documento(e) {
   }
 }
 
-// Quita la imagen de respuesta de la denuncia abierta en el modal (espejo de
-// quitar_imagen_comprobante, pero para `respuesta_img`).
-async function quitar_imagen_respuesta() {
+// Quita SÓLO la imagen de respuesta en la posición `indice` de la denuncia
+// abierta en el modal, sin afectar las demás. Si la lista queda vacía, la galería
+// se oculta sola al re-renderizar.
+async function quitar_imagen_respuesta(indice) {
   const id = $("modal_comprobante").dataset.idActivo;
   const d = DENUNCIAS.find((x) => x.id === id);
   if (!d) return;
-  if (!confirm("¿Quitar la imagen de respuesta de la denuncia #" + d.consecutivo + "?")) return;
-  delete d.respuesta_img;
+  const lista = normalizar_respuestas(d);
+  if (indice < 0 || indice >= lista.length) return;
+  if (!confirm("¿Quitar esta imagen de respuesta de la denuncia #" + d.consecutivo + "?")) return;
+  lista.splice(indice, 1); // elimina sólo esa
   await guardar_registro();
-  $("bloque_imagen_respuesta").style.display = "none";
-  $("img_respuesta").removeAttribute("src");
+  renderizar_galeria_respuestas(d);
   refrescar_vista();
   mostrar_aviso("Imagen de respuesta quitada.");
 }
@@ -483,7 +549,8 @@ async function inicializar_registro() {
   $("campo_comprobante_img").addEventListener("change", al_elegir_comprobante);
   $("boton_quitar_comprobante").addEventListener("click", quitar_comprobante_formulario);
   $("boton_quitar_imagen_comprobante").addEventListener("click", quitar_imagen_comprobante);
-  $("boton_quitar_respuesta").addEventListener("click", quitar_imagen_respuesta);
+  // Los botones "Quitar" de cada respuesta se enlazan al renderizar la galería
+  // (renderizar_galeria_respuestas), por índice; no hay un botón único.
   // Un solo listener a nivel documento evita el doble disparo (el evento del área
   // burbujea al documento); al_pegar_documento filtra por modal abierto + foco en el área.
   document.addEventListener("paste", al_pegar_documento);
