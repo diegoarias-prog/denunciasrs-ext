@@ -182,135 +182,37 @@ async function capturarCompleta(tabId) {
 }
 
 // ============================================================================
-//  ATAJO DE TECLADO (Alt+Shift+S por defecto): captura el formulario de la
-//  pestaña activa y lo adjunta al comprobante de la denuncia en curso, SIN
-//  depender del popup (que se cierra al interactuar con el formulario).
+//  ATAJO DE TECLADO (Alt+Shift+S por defecto): dispara la captura del formulario
+//  en el CONTENT SCRIPT (captura_flotante.js), que sí tiene DOM y reutiliza el
+//  método probado del popup (Image + canvas). El worker ya NO redimensiona ni
+//  guarda: solo produce el screenshot de página completa vía `capturarCompleta`.
 // ============================================================================
-
-// Redimensiona un dataURL a 'maxAncho' px de ancho y lo recomprime a JPEG en el
-// SERVICE WORKER (no hay DOM/Image/canvas aquí; usamos OffscreenCanvas y
-// convertimos el blob a dataURL sin FileReader, que tampoco existe en el worker).
-async function redimensionar_worker(dataUrl, maxAncho, calidad) {
-  const blob0 = await (await fetch(dataUrl)).blob();
-  const bmp = await createImageBitmap(blob0);
-  let w = bmp.width, h = bmp.height;
-  if (w > maxAncho) { h = Math.round(h * maxAncho / w); w = maxAncho; }
-  const oc = new OffscreenCanvas(w, h);
-  oc.getContext("2d").drawImage(bmp, 0, 0, w, h);
-  const blob = await oc.convertToBlob({ type: "image/jpeg", quality: calidad });
-  if (bmp.close) bmp.close();
-  // blob -> dataURL (sin FileReader, que no existe en el worker).
-  const bytes = new Uint8Array(await blob.arrayBuffer());
-  let bin = ""; const paso = 0x8000;
-  for (let i = 0; i < bytes.length; i += paso) {
-    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + paso));
-  }
-  return "data:image/jpeg;base64," + btoa(bin);
-}
-
-// Inyecta un toast autodesechable en la pestaña para dar feedback sin popup.
-// Colores: éxito #059669, aviso #b45309, error #dc2626. Respaldo: badge en el ícono.
-async function toast_en_pagina(tabId, texto, color) {
-  try {
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      func: (t, c) => {
-        const d = document.createElement("div");
-        d.textContent = t;
-        d.style.cssText = "position:fixed;z-index:2147483647;bottom:20px;right:20px;max-width:320px;padding:12px 16px;border-radius:10px;background:" + c + ";color:#fff;font:600 13px 'Segoe UI',Arial,sans-serif;box-shadow:0 4px 16px rgba(0,0,0,.25);opacity:0;transition:opacity .2s;";
-        document.body.appendChild(d);
-        requestAnimationFrame(() => { d.style.opacity = "1"; });
-        setTimeout(() => { d.style.opacity = "0"; setTimeout(() => d.remove(), 300); }, 3500);
-      },
-      args: [texto, color]
-    });
-  } catch (e) {
-    // Pestaña no inyectable (chrome://, PDF, etc.): como respaldo, badge en el ícono.
-    // El badge refleja la severidad del aviso (✓ solo para éxito verde; ! para el resto).
-    try {
-      chrome.action.setBadgeText({ text: color === "#059669" ? "✓" : "!" });
-      chrome.action.setBadgeBackgroundColor({ color: color });
-      setTimeout(() => chrome.action.setBadgeText({ text: "" }), 3000);
-    } catch (x) {}
-  }
-}
-
-// Captura el formulario de la pestaña `tabId` y lo adjunta al comprobante de la
-// denuncia en curso (`ultima_denuncia_registro`). Da feedback con toasts en la
-// propia pestaña. Reutilizada por el atajo de teclado y por el botón flotante.
-async function capturar_y_guardar(tabId) {
-  if (!tabId) {
-    try { chrome.action.setBadgeText({ text: "!" }); chrome.action.setBadgeBackgroundColor({ color: "#b45309" }); setTimeout(() => chrome.action.setBadgeText({ text: "" }), 3000); } catch (x) {}
-    return;
-  }
-
-  // 1) ¿Hay una denuncia en curso a la que adjuntar?
-  const store = await new Promise((res) =>
-    chrome.storage.local.get(["ultima_denuncia_registro"], (x) => res(x || {})));
-  const idDest = store.ultima_denuncia_registro;
-  if (!idDest) {
-    await toast_en_pagina(tabId, "Primero pulsa Rellenar para iniciar una denuncia.", "#b45309");
-    return;
-  }
-
-  // 2) Capturar la página completa (función ya existente).
-  let resp;
-  try {
-    resp = await capturarCompleta(tabId);
-  } catch (e) {
-    resp = { error: String((e && e.message) || e) };
-  }
-  if (!resp || resp.error || !resp.dataUrl) {
-    await toast_en_pagina(tabId, "No se pudo capturar: " + ((resp && resp.error) || "sin imagen"), "#dc2626");
-    return;
-  }
-
-  // 3) Redimensionar en el worker; si falla, usar el original como respaldo.
-  let imagen;
-  try {
-    imagen = await redimensionar_worker(resp.dataUrl, 1280, 0.7);
-  } catch (e) {
-    imagen = resp.dataUrl;
-  }
-
-  // 4) Guardar en el comprobante de la denuncia en curso.
-  const CLAVE = "denuncias_registro";
-  const lista = await new Promise((res) =>
-    chrome.storage.local.get([CLAVE], (x) => res(Array.isArray(x[CLAVE]) ? x[CLAVE] : [])));
-  const ent = lista.find((x) => x.id === idDest);
-  if (!ent) {
-    await toast_en_pagina(tabId, "No encuentro la denuncia para adjuntar la captura.", "#b45309");
-    return;
-  }
-  ent.comprobante_img = imagen;
-  await new Promise((res) => chrome.storage.local.set({ [CLAVE]: lista }, res));
-
-  await toast_en_pagina(tabId, "✓ Captura guardada en el comprobante.", "#059669");
-}
 
 chrome.commands.onCommand.addListener(async (comando) => {
   if (comando !== "capturar_comprobante") return;
   // Pestaña del formulario (la activa de la ventana enfocada).
   const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-  await capturar_y_guardar(tab && tab.id);
+  if (tab && tab.id) {
+    try {
+      await chrome.tabs.sendMessage(tab.id, { accion: "disparaCaptura" });
+    } catch (e) { /* pestaña sin content script (chrome://, PDF, etc.) */ }
+  }
 });
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  // Solo aceptamos mensajes de los propios contextos de la extensión (popup/options),
-  // nunca de páginas o extensiones externas (blindaje ante futuros cambios de config).
+  // Solo aceptamos mensajes de los propios contextos de la extensión
+  // (popup/options/content script propio), nunca de páginas o extensiones
+  // externas (blindaje ante futuros cambios de config).
   if (!sender || sender.id !== chrome.runtime.id) return;
   if (msg && msg.accion === "clicsReales" && msg.tabId) {
     hacerClics(msg.tabId, msg.selectores || []).then(sendResponse);
     return true; // respuesta asíncrona
   }
-  if (msg && msg.accion === "capturaCompleta" && msg.tabId) {
-    capturarCompleta(msg.tabId).then(sendResponse);
-    return true; // respuesta asíncrona
-  }
-  if (msg && msg.accion === "capturarComprobante") {
-    // El botón flotante (content script) manda esto; usamos la pestaña del emisor.
-    const tabId = (sender && sender.tab && sender.tab.id) || msg.tabId;
-    capturar_y_guardar(tabId).then(() => sendResponse({ ok: true })).catch(() => sendResponse({ ok: false }));
-    return true; // respuesta asíncrona
+  if (msg && msg.accion === "capturaCompleta") {
+    // El popup manda `msg.tabId`; el content script no lo conoce, así que
+    // usamos la pestaña del emisor (`sender.tab.id`).
+    const tabId = msg.tabId || (sender && sender.tab && sender.tab.id);
+    if (tabId) { capturarCompleta(tabId).then(sendResponse); return true; }
+    return; // sin pestaña: nada que capturar
   }
 });
