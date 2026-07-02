@@ -8,7 +8,7 @@
   h1 { font-size: 18px; margin: 0 0 4px; }
   p.sub { color: #6b7280; font-size: 13px; margin: 0 0 16px; }
   label { display: block; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .3px; color: #374151; margin: 12px 0 4px; }
-  input, textarea { width: 100%; box-sizing: border-box; border: 1px solid #cbd5e1; border-radius: 7px; padding: 8px 10px; font-size: 13px; font-family: inherit; }
+  input, textarea, select { width: 100%; box-sizing: border-box; border: 1px solid #cbd5e1; border-radius: 7px; padding: 8px 10px; font-size: 13px; font-family: inherit; background: #fff; }
   textarea { min-height: 130px; line-height: 1.5; }
   .barra { margin-top: 12px; display: flex; gap: 10px; align-items: center; }
   .boton { padding: 8px 14px; border: 0; border-radius: 7px; background: #1d4ed8; color: #fff; font-weight: 600; cursor: pointer; font-size: 13px; }
@@ -24,16 +24,17 @@
   .vacio { color: #6b7280; font-size: 13px; }
   .grupo_tema { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: .3px; color: #1d4ed8; margin: 18px 0 8px; padding-bottom: 3px; border-bottom: 1px dashed #c7d2fe; }
   .chip_etiqueta { display: inline-block; background: #e0e7ff; color: #1d4ed8; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; margin-left: 8px; vertical-align: middle; }
-  #buscar { margin-bottom: 12px; }
+  #filtro_tema { margin-bottom: 12px; }
+  #tema_nuevo { margin-top: 6px; }
 </style>
 </head>
 <body>
   <h1>Plantillas</h1>
   <p class="sub">Crea y guarda textos que reutilizas en las denuncias (datos, descripciones, motivos…). Se guardan en este navegador.</p>
 
-  <label for="tema">Tema</label>
-  <input id="tema" list="lista_temas" placeholder="Ej. Banco de Guatemala" autocomplete="off">
-  <datalist id="lista_temas"></datalist>
+  <label for="tema_sel">Tema</label>
+  <select id="tema_sel"></select>
+  <input id="tema_nuevo" placeholder="Escribe el nombre del tema nuevo" style="display:none;">
 
   <label for="etiqueta">Etiqueta</label>
   <input id="etiqueta" placeholder="Ej. Motivo de suplantación">
@@ -51,7 +52,8 @@
   </div>
 
   <h2>Plantillas guardadas</h2>
-  <input id="buscar" placeholder="Buscar por tema, etiqueta o nombre…" autocomplete="off">
+  <label for="filtro_tema">Filtrar por tema</label>
+  <select id="filtro_tema"></select>
   <div id="lista"></div>
 
   <script src="plantilla.js"></script>
