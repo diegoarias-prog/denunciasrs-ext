@@ -12,6 +12,18 @@
   input, textarea { width: 100%; box-sizing: border-box; border: 1px solid #cbd5e1; border-radius: 7px; padding: 8px 10px; font-size: 13px; font-family: inherit; }
   textarea { min-height: 200px; line-height: 1.5; }
   .ref textarea, .ref input { background: #f8fafc; }
+  .editor { width: 100%; box-sizing: border-box; border: 1px solid #cbd5e1; border-radius: 7px; padding: 8px 10px; font-size: 13px; font-family: inherit; background: #fff; min-height: 200px; line-height: 1.5; overflow-y: auto; }
+  .editor:focus { outline: none; border-color: #1d4ed8; }
+  .editor:empty:before { content: attr(data-placeholder); color: #9ca3af; }
+  .ref .editor { background: #f8fafc; }
+  .barra_formato { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 0 6px; }
+  .barra_formato .boton.fmt { padding: 4px 10px; font-size: 12px; background: #e5e7eb; color: #111827; min-width: 30px; text-align: center; }
+  .barra_formato .boton.fmt:hover { background: #d1d5db; }
+  .barra_formato .fmt_neg { font-weight: 800; }
+  .barra_formato .fmt_cur { font-style: italic; }
+  .barra_formato .fmt_sub { text-decoration: underline; }
+  .barra_formato label.color_lbl { display: inline-flex; align-items: center; gap: 4px; margin: 0; font-size: 11px; color: #374151; text-transform: none; letter-spacing: 0; font-weight: 600; }
+  .barra_formato input[type="color"] { width: 30px; height: 26px; padding: 1px; border-radius: 6px; cursor: pointer; border: 1px solid #cbd5e1; }
   .barra { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .boton { padding: 9px 14px; border: 0; border-radius: 8px; background: #1d4ed8; color: #fff; font-weight: 600; cursor: pointer; font-size: 13px; }
   .boton.sec { background: #e5e7eb; color: #111827; }
@@ -39,7 +51,14 @@
   <label for="asunto_en">Asunto</label>
   <input id="asunto_en">
   <label for="cuerpo_en">Cuerpo</label>
-  <textarea id="cuerpo_en"></textarea>
+  <div class="barra_formato" id="barra_en">
+    <button type="button" class="boton fmt fmt_neg" id="fmt_en_negrita" title="Negrita">N</button>
+    <button type="button" class="boton fmt fmt_cur" id="fmt_en_cursiva" title="Cursiva">C</button>
+    <button type="button" class="boton fmt fmt_sub" id="fmt_en_subrayado" title="Subrayado">S</button>
+    <label class="color_lbl">Color <input type="color" id="color_en" value="#111827" title="Color de texto"></label>
+    <button type="button" class="boton fmt" id="fmt_en_quitar" title="Quitar formato">Quitar formato</button>
+  </div>
+  <div id="cuerpo_en" contenteditable="true" class="editor" data-placeholder="Cuerpo del correo (inglés)…"></div>
   <div class="barra">
     <button class="boton sec" id="copiar_en">📋 Copiar cuerpo (inglés)</button>
     <button class="boton sec" id="copiar_en_todo">📋 Copiar todo (inglés)</button>
@@ -50,7 +69,14 @@
     <label for="asunto_es">Asunto</label>
     <input id="asunto_es">
     <label for="cuerpo_es">Cuerpo</label>
-    <textarea id="cuerpo_es"></textarea>
+    <div class="barra_formato" id="barra_es">
+      <button type="button" class="boton fmt fmt_neg" id="fmt_es_negrita" title="Negrita">N</button>
+      <button type="button" class="boton fmt fmt_cur" id="fmt_es_cursiva" title="Cursiva">C</button>
+      <button type="button" class="boton fmt fmt_sub" id="fmt_es_subrayado" title="Subrayado">S</button>
+      <label class="color_lbl">Color <input type="color" id="color_es" value="#111827" title="Color de texto"></label>
+      <button type="button" class="boton fmt" id="fmt_es_quitar" title="Quitar formato">Quitar formato</button>
+    </div>
+    <div id="cuerpo_es" contenteditable="true" class="editor" data-placeholder="Cuerpo del correo (español)…"></div>
   </div>
   <div class="barra">
     <button class="boton sec" id="copiar_es">📋 Copiar cuerpo (español)</button>
@@ -60,6 +86,7 @@
   <p class="nota">Recuerda pegar el/los enlace(s) a denunciar donde dice <b>[ ... ]</b> antes de enviar. Si "Abrir en mi correo" recorta el texto, usa "Copiar cuerpo (inglés)" y pégalo a mano.</p>
 
   <script src="datos/config_gmail.js"></script>
+  <script src="editor_rico.js"></script>
   <script src="correo.js"></script>
 </body>
 </html>
