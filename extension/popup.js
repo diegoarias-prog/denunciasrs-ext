@@ -107,6 +107,31 @@ function obtener_urls_guardadas() {
 
 // Lee un .xlsx con ExcelJS, detecta la columna "URL" (o la 1.ª), recoge las URLs
 // válidas (no vacías, sin duplicados, que empiecen por http) y las guarda.
+// Extrae el texto de una celda (ExcelJS puede devolver objetos para hipervínculo/texto enriquecido).
+function valor_celda(celda) {
+  let v = celda ? celda.value : null;
+  if (v && typeof v === "object") v = v.text || v.hyperlink || v.result || (v.richText && v.richText.map((t) => t.text).join("")) || "";
+  return (v == null ? "" : v.toString()).trim();
+}
+
+// Normaliza un valor a URL: si ya trae http(s):// se respeta; si parece una URL/dominio
+// SIN esquema (ej. "www.facebook.com/..." o "facebook.com/...") se le antepone "https://".
+// También corrige esquemas mal escritos ("http:/...", "//..."). Devuelve "" si no parece URL.
+function normalizar_url(v) {
+  v = (v == null ? "" : v.toString()).trim();
+  if (!v) return "";
+  if (/^https?:\/\//i.test(v)) return v;
+  const m = v.match(/^(https?):\/+(.*)$/i);   // "http:/dominio" o "https:///dominio"
+  if (m) return m[1].toLowerCase() + "://" + m[2];
+  if (/^\/\//.test(v)) return "https:" + v;   // "//dominio/..."
+  if (/^www\./i.test(v)) return "https://" + v;
+  if (/^[^\s]+\.[a-z]{2,}([\/?#].*)?$/i.test(v)) return "https://" + v; // dominio.tld[/ruta]
+  return "";
+}
+
+// Rótulos de encabezado que NO son datos (para saber si la fila 1 es título o URL).
+const ROTULOS_ENCABEZADO = { "url": 1, "urls": 1, "enlace": 1, "enlaces": 1, "link": 1, "links": 1, "liga": 1, "ligas": 1, "direccion": 1, "dirección": 1 };
+
 async function cargar_archivo_urls(file) {
   if (!file) return;
   try {
@@ -119,32 +144,34 @@ async function cargar_archivo_urls(file) {
 
     // Detecta la columna cuyo encabezado (fila 1) sea "URL" (insensible a may/min/espacios).
     const norm_enc = (s) => (s == null ? "" : s.toString().trim().toLowerCase());
-    let colUrl = 0;
+    let colUrl = 0, tieneEncabezadoUrl = false;
     const fila1 = hoja.getRow(1);
     fila1.eachCell({ includeEmpty: false }, (celda, col) => {
-      if (colUrl === 0 && norm_enc(celda.value) === "url") colUrl = col;
+      if (colUrl === 0 && norm_enc(celda.value) === "url") { colUrl = col; tieneEncabezadoUrl = true; }
     });
     if (colUrl === 0) colUrl = 1; // si no la encuentra, usa la primera columna
+
+    // ¿La fila 1 es un ENCABEZADO (rótulo) o YA es un dato? Antes se saltaba SIEMPRE la
+    // fila 1, así que un Excel con la URL en A1 (sin título) daba 0 resultados. Ahora:
+    // solo se salta si hay encabezado "URL" o la 1.ª celda es un rótulo conocido.
+    let inicio = 2;
+    if (!tieneEncabezadoUrl && !ROTULOS_ENCABEZADO[norm_enc(valor_celda(fila1.getCell(colUrl)))]) inicio = 1;
 
     const urls = [];
     const vistas = {};
     const total = hoja.actualRowCount || hoja.rowCount || 0;
-    for (let r = 2; r <= total; r++) {
-      let v = hoja.getRow(r).getCell(colUrl).value;
-      // ExcelJS puede devolver objetos para celdas con hipervínculo/texto enriquecido.
-      if (v && typeof v === "object") v = v.text || v.hyperlink || v.result || v.richText && v.richText.map((t) => t.text).join("") || "";
-      v = (v == null ? "" : v.toString()).trim();
-      if (!v) continue;
-      if (!/^https?:\/\//i.test(v)) continue;
-      const clave = v.toLowerCase();
+    for (let r = inicio; r <= total; r++) {
+      const url = normalizar_url(valor_celda(hoja.getRow(r).getCell(colUrl)));
+      if (!url) continue; // vacío o no parece una URL
+      const clave = url.toLowerCase();
       if (vistas[clave]) continue;
       vistas[clave] = true;
-      urls.push(v);
+      urls.push(url);
     }
 
     await new Promise((res) => chrome.storage.local.set({ [CLAVE_URLS]: urls }, res));
     pintar_estado_urls(urls.length);
-    if (urls.length === 0) mostrar_estado("aviso", "No se encontraron URLs válidas (deben empezar por http) en el Excel.");
+    if (urls.length === 0) mostrar_estado("aviso", "No se encontraron URLs en el Excel. Revisa que la columna tenga los enlaces de las publicaciones (con o sin https).");
     else mostrar_estado("ok", "✓ " + urls.length + " URL(s) cargadas. Se pondrán en las cajas Enlace 1.." + urls.length + " al Rellenar.");
   } catch (e) {
     // El mensaje del parser es dato NO confiable: se escapa (mostrar_estado usa innerHTML).
