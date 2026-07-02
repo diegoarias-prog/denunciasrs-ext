@@ -22,7 +22,11 @@
   .item .txt { white-space: pre-wrap; font-size: 13px; color: #374151; margin: 6px 0; max-height: 120px; overflow: auto; background: #f8fafc; padding: 8px; border-radius: 6px; }
   .item .acc { display: flex; gap: 8px; }
   .vacio { color: #6b7280; font-size: 13px; }
-  .grupo_tema { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: .3px; color: #1d4ed8; margin: 18px 0 8px; padding-bottom: 3px; border-bottom: 1px dashed #c7d2fe; }
+  .grupo_tema { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: .3px; color: #1d4ed8; width: 100%; text-align: left; background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 8px; margin: 10px 0 4px; padding: 9px 12px; cursor: pointer; display: flex; align-items: center; gap: 8px; font-family: inherit; }
+  .grupo_tema:hover { background: #e0e7ff; }
+  .grupo_tema .flecha { font-size: 11px; }
+  .grupo_tema .conteo { font-weight: 600; color: #6366f1; text-transform: none; letter-spacing: 0; }
+  .grupo_cuerpo { margin: 0 0 8px; }
   .chip_etiqueta { display: inline-block; background: #e0e7ff; color: #1d4ed8; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; margin-left: 8px; vertical-align: middle; }
   #filtro_tema { margin-bottom: 12px; }
   #tema_nuevo { margin-top: 6px; }
@@ -56,6 +60,7 @@
   <select id="filtro_tema"></select>
   <div id="lista"></div>
 
+  <script src="datos/marcas.js"></script>
   <script src="plantilla.js"></script>
 </body>
 </html>

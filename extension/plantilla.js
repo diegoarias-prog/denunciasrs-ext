@@ -43,9 +43,31 @@ async function migrar() {
   await new Promise((res) => chrome.storage.local.set({ [CLAVE_MIGRADAS]: true }, res));
 }
 
-// Lista de temas existentes (únicos, no vacíos, ordenados en español).
-function temas_existentes(arr) {
-  return [...new Set(arr.map((p) => (p.tema || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, "es"));
+// Marcas del proyecto: base (window.MARCAS_BASE) + las agregadas/editadas en
+// Opciones (marcas_usuario, heredando campos) − las eliminadas (marcas_eliminadas).
+// MISMA lógica que obtener_marcas_registro() de registro.js. Devuelve NOMBRES.
+async function obtener_marcas() {
+  const d = await new Promise((res) =>
+    chrome.storage.local.get(["marcas_usuario", "marcas_eliminadas"], (x) => res(x)));
+  const guardadas = d.marcas_usuario || {};
+  const eliminadas = d.marcas_eliminadas || [];
+  const base = window.MARCAS_BASE || {};
+  const todas = Object.assign({}, base);
+  Object.keys(guardadas).forEach((m) => {
+    const b = base[m] || {}, g = guardadas[m] || {}, o = Object.assign({}, b);
+    Object.keys(g).forEach((k) => { if (g[k] !== "" && g[k] != null) o[k] = g[k]; else if (!(k in o)) o[k] = g[k]; });
+    todas[m] = o;
+  });
+  eliminadas.forEach((n) => delete todas[n]);
+  return Object.keys(todas).sort();
+}
+
+// Temas para los selects = UNIÓN de todas las marcas + los temas ya usados en
+// plantillas que no sean marcas (para no perder temas personalizados). Únicos,
+// ordenados en español.
+function lista_temas_union(arr, marcas) {
+  const usados = arr.map((p) => (p.tema || "").trim()).filter(Boolean);
+  return [...new Set([...marcas, ...usados])].sort((a, b) => a.localeCompare(b, "es"));
 }
 
 // Genera el HTML de una <option> escapando value (atributo) y texto (contenido).
@@ -53,10 +75,9 @@ function opcion(valor, texto, seleccionado) {
   return '<option value="' + esc(valor) + '"' + (seleccionado ? " selected" : "") + ">" + esc(texto) + "</option>";
 }
 
-// Llena el <select> del formulario (Tema) y el <select> de filtro.
-// Preserva la selección actual de cada uno entre re-pintados.
-function llenar_selects_de_temas(arr) {
-  const temas = temas_existentes(arr);
+// Llena el <select> del formulario (Tema) y el <select> de filtro con la unión
+// de temas (marcas + personalizados). Preserva la selección de cada uno.
+function llenar_selects_de_temas(arr, temas) {
   const hay_sin_tema = arr.some((p) => !(p.tema && String(p.tema).trim()));
 
   // Select del formulario: "Nuevo…" (value="") + un tema por opción.
@@ -78,9 +99,14 @@ function llenar_selects_de_temas(arr) {
   if (fil.value !== fil_prev) fil.value = "";
 }
 
+// Temas cuyo acordeón está desplegado (se preserva entre re-pintados).
+const temas_expandidos = new Set();
+
 async function pintar() {
   const arr = await leer();
-  llenar_selects_de_temas(arr);
+  const marcas = await obtener_marcas();
+  const temas_union = lista_temas_union(arr, marcas);
+  llenar_selects_de_temas(arr, temas_union);
   // Si el select de Tema quedó en "nuevo" (p. ej. su tema dejó de existir),
   // sincroniza la visibilidad de la caja de texto de tema nuevo.
   actualizar_visibilidad_tema_nuevo();
@@ -108,12 +134,23 @@ async function pintar() {
     return a.localeCompare(b, "es");
   });
 
+  // Acordeón: encabezado clicable por tema + cuerpo colapsable. Se expande si
+  // está en el Set de expandidos o si el filtro apunta a ese tema concreto.
   let html = "";
   temas_ordenados.forEach((tema) => {
-    html += '<div class="grupo_tema">' + esc(tema) + "</div>";
-    grupos.get(tema).forEach(({ p, idx }) => {
+    const items = grupos.get(tema);
+    const abierto = temas_expandidos.has(tema) || (filtro && tema === filtro);
+    const flecha = abierto ? "▾" : "▸";
+    html +=
+      '<button type="button" class="grupo_tema" data-toggle-tema="' + esc(tema) + '">' +
+      '<span class="flecha">' + flecha + "</span>" +
+      "<span>" + esc(tema) + "</span>" +
+      '<span class="conteo">(' + items.length + ")</span></button>";
+
+    let cuerpo = "";
+    items.forEach(({ p, idx }) => {
       const chip = p.etiqueta ? '<span class="chip_etiqueta">' + esc(p.etiqueta) + "</span>" : "";
-      html +=
+      cuerpo +=
         '<div class="item">' +
         '<div class="tit">' + esc(p.nombre || "(sin nombre)") + chip + "</div>" +
         '<div class="txt">' + esc(p.texto || "") + "</div>" +
@@ -122,6 +159,7 @@ async function pintar() {
         '<button class="boton del mini" data-eliminar="' + idx + '">Eliminar</button></div>' +
         "</div>";
     });
+    html += '<div class="grupo_cuerpo"' + (abierto ? "" : ' style="display:none;"') + ">" + cuerpo + "</div>";
   });
   lista.innerHTML = html;
 }
@@ -172,6 +210,15 @@ $("limpiar").addEventListener("click", () => {
 $("filtro_tema").addEventListener("change", pintar);
 
 $("lista").addEventListener("click", async (e) => {
+  // Toggle del acordeón: el clic puede caer en un <span> hijo del encabezado.
+  const cab = e.target.closest("[data-toggle-tema]");
+  if (cab) {
+    const tema = cab.getAttribute("data-toggle-tema");
+    if (temas_expandidos.has(tema)) temas_expandidos.delete(tema);
+    else temas_expandidos.add(tema);
+    pintar();
+    return;
+  }
   const arr = await leer();
   const c = e.target.getAttribute("data-copiar");
   const ed = e.target.getAttribute("data-editar");
