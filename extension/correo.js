@@ -28,9 +28,11 @@ chrome.storage.local.get("email_reporte", (d) => {
   const e = d.email_reporte || {};
   $("para").value = e.to || "";
   $("asunto_en").value = e.asunto || "";
-  $("cuerpo_en").value = e.cuerpo || "";
+  // Los cuerpos son editores con formato: el prefill (texto plano con saltos) se
+  // convierte a HTML seguro (escapado, con <br>) para verse bien y ser editable.
+  $("cuerpo_en").innerHTML = ER.texto_plano_a_html(e.cuerpo || "");
   $("asunto_es").value = e.asunto_es || e.asunto || "";
-  $("cuerpo_es").value = e.cuerpo_es || e.cuerpo || "";
+  $("cuerpo_es").innerHTML = ER.texto_plano_a_html(e.cuerpo_es || e.cuerpo || "");
   REMITENTE = (e.from || "").trim();
   if (es_workspace(REMITENTE)) {
     $("de_info").textContent = "✅ Se enviará DESDE " + REMITENTE + ". Pulsa \"Enviar ahora\" y sale solo (la 1.ª vez, Google pedirá permiso una única vez).";
@@ -39,6 +41,16 @@ chrome.storage.local.get("email_reporte", (d) => {
     b.textContent = "✅ Enviar ahora desde " + REMITENTE;
     b.style.display = "";
   }
+});
+
+// Cablea la barra de formato de cada editor (inglés y español).
+ER.montar_barra_formato($("cuerpo_en"), {
+  negrita: $("fmt_en_negrita"), cursiva: $("fmt_en_cursiva"), subrayado: $("fmt_en_subrayado"),
+  quitar: $("fmt_en_quitar"), color: $("color_en")
+});
+ER.montar_barra_formato($("cuerpo_es"), {
+  negrita: $("fmt_es_negrita"), cursiva: $("fmt_es_cursiva"), subrayado: $("fmt_es_subrayado"),
+  quitar: $("fmt_es_quitar"), color: $("color_es")
 });
 
 // ---------- Envío directo por la API de Gmail (OAuth implícito) ----------
@@ -78,20 +90,43 @@ function encabezado_mime(s) {
   return "=?UTF-8?B?" + btoa(unescape(encodeURIComponent(s))) + "?=";
 }
 function a_base64url(str) {
-  return btoa(str).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  // UTF-8 seguro: si por algún motivo `str` trae un carácter no-ASCII (p. ej. un
+  // nombre con acento en el "Para"), esto evita que btoa lance "Latin1 range".
+  return btoa(unescape(encodeURIComponent(str))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
-// Arma el mensaje MIME (cuerpo UTF-8 en base64) y lo deja listo (raw base64url).
-function construir_raw(remite, para, asunto, cuerpo) {
-  const cuerpoB64 = btoa(unescape(encodeURIComponent(cuerpo || ""))).replace(/(.{76})/g, "$1\r\n");
+// Codifica un texto UTF-8 en base64 troceado en líneas de 76 (MIME).
+function base64_mime(txt) {
+  return btoa(unescape(encodeURIComponent(txt || ""))).replace(/(.{76})/g, "$1\r\n");
+}
+
+// Arma el mensaje MIME multipart/alternative (text/plain + text/html), ambas
+// partes en base64 UTF-8, y lo deja listo (raw base64url). `html` es el HTML YA
+// SANEADO del cuerpo; el texto plano se deriva de él preservando saltos.
+function construir_raw(remite, para, asunto, html) {
+  const htmlSeguro = html || "";
+  const plano = ER.html_a_texto_plano(htmlSeguro);
+  const bnd = "=_denuncia_alt_boundary_=";
+  const docHtml =
+    "<html><body style=\"font-family:Arial,Helvetica,sans-serif; white-space:pre-wrap;\">" +
+    htmlSeguro + "</body></html>";
   const mime =
     "From: " + encabezado_seguro(remite) + "\r\n" +
     "To: " + encabezado_seguro(para) + "\r\n" +
     "Subject: " + encabezado_mime(asunto) + "\r\n" +
     "MIME-Version: 1.0\r\n" +
+    "Content-Type: multipart/alternative; boundary=\"" + bnd + "\"\r\n" +
+    "\r\n" +
+    "--" + bnd + "\r\n" +
     "Content-Type: text/plain; charset=\"UTF-8\"\r\n" +
     "Content-Transfer-Encoding: base64\r\n" +
     "\r\n" +
-    cuerpoB64;
+    base64_mime(plano) + "\r\n" +
+    "--" + bnd + "\r\n" +
+    "Content-Type: text/html; charset=\"UTF-8\"\r\n" +
+    "Content-Transfer-Encoding: base64\r\n" +
+    "\r\n" +
+    base64_mime(docHtml) + "\r\n" +
+    "--" + bnd + "--";
   return a_base64url(mime);
 }
 
@@ -99,8 +134,9 @@ async function enviar_directo() {
   if (!es_workspace(REMITENTE)) { aviso("⚠ El envío directo solo está disponible para cuentas propias de Workspace."); return; }
   const para = $("para").value.trim();
   if (!para) { aviso("⚠ Falta el correo del destinatario (campo \"Para\")."); return; }
-  const cuerpo = $("cuerpo_en").value;
-  if (/\[\s*(Paste|Pega)\b/i.test(cuerpo)) {
+  // Cuerpo con formato: se lee y sanea el HTML; el marcador [ ... ] se busca en el texto visible.
+  const htmlSaneado = ER.sanitizar_html($("cuerpo_en").innerHTML);
+  if (/\[\s*(Paste|Pega)\b/i.test($("cuerpo_en").innerText)) {
     if (!confirm("El cuerpo todavía tiene un marcador [ ... ] sin reemplazar (los enlaces a denunciar). ¿Enviar de todos modos?")) return;
   }
   const b = $("enviar_directo");
@@ -108,7 +144,7 @@ async function enviar_directo() {
   b.disabled = true; b.textContent = "Enviando…";
   try {
     const token = await token_para_enviar();
-    const raw = construir_raw(REMITENTE, para, $("asunto_en").value, cuerpo);
+    const raw = construir_raw(REMITENTE, para, $("asunto_en").value, htmlSaneado);
     const r = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
       method: "POST",
       headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json" },
@@ -130,9 +166,11 @@ $("enviar_directo").addEventListener("click", enviar_directo);
 
 // ---------- Respaldos: abrir en el cliente de correo / Gmail ----------
 $("mailto").addEventListener("click", () => {
+  // mailto no soporta HTML: se manda el texto plano (con saltos) del cuerpo.
+  const cuerpo_plano = ER.html_a_texto_plano(ER.sanitizar_html($("cuerpo_en").innerHTML));
   window.location.href = "mailto:" + encodeURIComponent($("para").value) +
     "?subject=" + encodeURIComponent($("asunto_en").value) +
-    "&body=" + encodeURIComponent($("cuerpo_en").value);
+    "&body=" + encodeURIComponent(cuerpo_plano);
 });
 $("gmail").addEventListener("click", () => {
   // Si el remitente es una cuenta de Workspace propia, se abre el borrador EN esa
@@ -140,10 +178,12 @@ $("gmail").addEventListener("click", () => {
   const base = es_workspace(REMITENTE)
     ? "https://mail.google.com/mail/u/" + encodeURIComponent(REMITENTE) + "/?view=cm&fs=1&tf=1"
     : "https://mail.google.com/mail/?view=cm&fs=1&tf=1";
+  // El compositor web de Gmail (view=cm) no acepta HTML: se manda texto plano.
+  const cuerpo_plano = ER.html_a_texto_plano(ER.sanitizar_html($("cuerpo_en").innerHTML));
   window.open(base +
     "&to=" + encodeURIComponent($("para").value) +
     "&su=" + encodeURIComponent($("asunto_en").value) +
-    "&body=" + encodeURIComponent($("cuerpo_en").value), "_blank");
+    "&body=" + encodeURIComponent(cuerpo_plano), "_blank");
 });
 
 function copiar(texto, msg) {
@@ -152,10 +192,17 @@ function copiar(texto, msg) {
     try { document.execCommand("copy"); aviso(msg); } catch (e) {} document.body.removeChild(ta);
   });
 }
-const todo = (asuntoId, cuerpoId) => "Para: " + $("para").value + "\nAsunto: " + $(asuntoId).value + "\n\n" + $(cuerpoId).value;
+// "Copiar todo" arma una copia de TEXTO PLANO combinada (asunto + cuerpo). El
+// cuerpo (editor con formato) se pasa a texto plano preservando saltos.
+const todo = (asuntoId, cuerpoId) =>
+  "Para: " + $("para").value + "\nAsunto: " + $(asuntoId).value + "\n\n" +
+  ER.html_a_texto_plano(ER.sanitizar_html($(cuerpoId).innerHTML));
 
 $("copiar_para").addEventListener("click", () => copiar($("para").value, "✓ Correos copiados"));
-$("copiar_en").addEventListener("click", () => copiar($("cuerpo_en").value, "✓ Cuerpo (inglés) copiado"));
+// Copiar cuerpo CON formato (text/html + text/plain).
+$("copiar_en").addEventListener("click", () =>
+  ER.copiar_rico(ER.sanitizar_html($("cuerpo_en").innerHTML)).then(() => aviso("✓ Cuerpo (inglés) copiado")));
 $("copiar_en_todo").addEventListener("click", () => copiar(todo("asunto_en", "cuerpo_en"), "✓ Todo (inglés) copiado"));
-$("copiar_es").addEventListener("click", () => copiar($("cuerpo_es").value, "✓ Cuerpo (español) copiado"));
+$("copiar_es").addEventListener("click", () =>
+  ER.copiar_rico(ER.sanitizar_html($("cuerpo_es").innerHTML)).then(() => aviso("✓ Cuerpo (español) copiado")));
 $("copiar_es_todo").addEventListener("click", () => copiar(todo("asunto_es", "cuerpo_es"), "✓ Todo (español) copiado"));
