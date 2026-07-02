@@ -51,7 +51,7 @@ function redes_disponibles() {
     const f = window.FORMULARIOS[k];
     if (reds.indexOf(f.red) < 0) reds.push(f.red);
   });
-  return reds;
+  return reds.sort((a, b) => a.localeCompare(b, "es"));
 }
 
 function formularios_de_red(red) {
