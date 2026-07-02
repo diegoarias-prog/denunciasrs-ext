@@ -109,8 +109,18 @@
   // ------------------------------------------------------------------------
   //  Captura + redimensión + guardado, todo aquí (método probado del popup).
   // ------------------------------------------------------------------------
+  // El content script queda "desconectado" si la extensión se actualizó/recargó
+  // mientras la página seguía abierta: chrome.runtime.id pasa a undefined y todo
+  // acceso a chrome.* lanza "Extension context invalidated". Lo detectamos para
+  // avisar claro (recargar la página) en vez de mostrar el error técnico.
+  function contexto_valido() {
+    try { return !!(chrome && chrome.runtime && chrome.runtime.id); } catch (e) { return false; }
+  }
+  var MSG_RECARGAR = "La extensión se actualizó. Recarga esta página (F5) y vuelve a intentar.";
+
   async function hacer_captura() {
     if (capturando) return;
+    if (!contexto_valido()) { toast(MSG_RECARGAR, "#b45309"); return; }
     capturando = true;
     try {
       // 1) ¿Hay una denuncia en curso a la que adjuntar?
@@ -168,7 +178,12 @@
         toast("✓ Captura guardada en el comprobante.", "#059669");
       }
     } catch (e) {
-      toast("No se pudo capturar: " + ((e && e.message) || e), "#dc2626");
+      var msg = (e && e.message) || String(e);
+      if (!contexto_valido() || /context invalidated|Extension context/i.test(msg)) {
+        toast(MSG_RECARGAR, "#b45309");
+      } else {
+        toast("No se pudo capturar: " + msg, "#dc2626");
+      }
     } finally {
       capturando = false;
       actualizar(); // re-muestra el botón si sigue habiendo denuncia en curso
