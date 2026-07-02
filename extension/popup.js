@@ -214,9 +214,18 @@ async function registrar_denuncia_auto(marca, form) {
   const tipo = form.tipo === "email" ? "correo" : "formulario";
   const categoria = form.nombre;
 
+  // Anti DOBLE-CLIC (no anti-duplicado general): solo reutiliza una pendiente
+  // idéntica creada hace MUY POCO (ventana corta). Antes fusionaba TODAS las
+  // pendientes del mismo tipo, por lo que denuncias DISTINTAS del mismo tipo
+  // (ej. varios posts de la misma marca en la misma red) NO se registraban como
+  // filas separadas. Ahora cada Rellenar crea su propia denuncia; solo un
+  // doble-clic inmediato (< 60 s) reutiliza la anterior.
+  const VENTANA_ANTIDOBLE_MS = 60 * 1000;
+  const ahora = Date.now();
   const existente = lista.find((d) =>
     d.estado === "pendiente" && d.marca === marca &&
-    d.plataforma === plataforma && d.categoria === categoria);
+    d.plataforma === plataforma && d.categoria === categoria &&
+    (ahora - new Date(d.fecha).getTime()) < VENTANA_ANTIDOBLE_MS);
   if (existente) {
     await new Promise((res) => chrome.storage.local.set({ ultima_denuncia_registro: existente.id }, res));
     return existente.id;
