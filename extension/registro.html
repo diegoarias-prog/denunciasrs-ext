@@ -81,6 +81,8 @@
   .titulo_respuesta_impresion { display: none; }
   /* Galería de respuestas: una imagen debajo de otra, cada una con su botón Quitar. */
   .conteo_respuestas { font-size: 12px; color: #6b7280; margin: 0 0 8px; }
+  .titulo_correo_enviado { margin: 0 0 8px; font-size: 14px; color: #111827; }
+  .cuerpo_correo_enviado { white-space: pre-wrap; word-break: break-word; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 7px; padding: 10px 12px; font-size: 12.5px; line-height: 1.5; color: #111827; max-height: 320px; overflow: auto; }
   .galeria_respuestas { display: flex; flex-direction: column; gap: 14px; }
   .item_respuesta_galeria { display: flex; flex-direction: column; }
   .img_respuesta_galeria { max-width: 100%; border: 1px solid #e5e7eb; border-radius: 7px; display: block; }
@@ -224,6 +226,16 @@
         <img id="img_comprobante" alt="Captura del comprobante" style="max-width:100%; border:1px solid #e5e7eb; border-radius:7px; display:block;">
         <div class="barra no_imprimir">
           <button class="boton sec mini" id="boton_quitar_imagen_comprobante">Quitar imagen del comprobante</button>
+        </div>
+      </div>
+
+      <!-- ====== Correo enviado (solo denuncias por correo): ver y copiar lo que se envió ====== -->
+      <div class="bloque_correo_enviado" id="bloque_correo_enviado" style="display:none; margin-top:14px;">
+        <h4 class="titulo_correo_enviado">Correo enviado</h4>
+        <div class="lista_datos_comprobante" id="correo_meta"></div>
+        <div class="cuerpo_correo_enviado" id="correo_cuerpo"></div>
+        <div class="barra no_imprimir">
+          <button type="button" class="boton sec mini" id="boton_copiar_correo">Copiar correo</button>
         </div>
       </div>
 

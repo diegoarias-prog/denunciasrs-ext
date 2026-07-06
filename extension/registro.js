@@ -365,6 +365,24 @@ function abrir_comprobante(id) {
   normalizar_respuestas(d);
   renderizar_galeria_respuestas(d);
 
+  // Correo enviado (solo denuncias por correo): muestra asunto + cuerpo y permite copiar.
+  const bloqueCorreo = $("bloque_correo_enviado");
+  if (d.correo && (d.correo.cuerpo || d.correo.asunto)) {
+    const c = d.correo;
+    const metaFilas = [
+      ["Para", c.to || "—"],
+      ["Asunto", c.asunto || "—"],
+      ["Enviado", c.enviado ? ("Sí — " + formatear_fecha(c.fecha)) : "Generado (revisa/envía desde la pestaña de correo)"]
+    ];
+    $("correo_meta").innerHTML = metaFilas.map((f) =>
+      '<div class="fila_dato"><span class="clave">' + escapar_html(f[0]) + '</span>' +
+      '<span class="valor">' + escapar_html(f[1]) + '</span></div>').join("");
+    $("correo_cuerpo").textContent = c.cuerpo || ""; // textContent: sin riesgo de inyección
+    bloqueCorreo.style.display = "block";
+  } else {
+    bloqueCorreo.style.display = "none";
+  }
+
   $("modal_comprobante").dataset.idActivo = d.id;
 
   $("fondo_comprobante").classList.add("abierto");
@@ -372,6 +390,23 @@ function abrir_comprobante(id) {
 
 function cerrar_comprobante() {
   $("fondo_comprobante").classList.remove("abierto");
+}
+
+// Copia al portapapeles el correo (Para + Asunto + Cuerpo) de la denuncia abierta.
+function copiar_correo_modal() {
+  const id = $("modal_comprobante").dataset.idActivo;
+  const d = DENUNCIAS.find((x) => String(x.id) === String(id));
+  if (!d || !d.correo) return;
+  const c = d.correo;
+  const texto = "Para: " + (c.to || "") + "\nAsunto: " + (c.asunto || "") + "\n\n" + (c.cuerpo || "");
+  const boton = $("boton_copiar_correo");
+  const et = boton.textContent;
+  const ok = () => { boton.textContent = "✅ Copiado"; setTimeout(() => { boton.textContent = et; }, 1500); };
+  navigator.clipboard.writeText(texto).then(ok).catch(() => {
+    const ta = document.createElement("textarea"); ta.value = texto; document.body.appendChild(ta); ta.select();
+    try { document.execCommand("copy"); ok(); } catch (e) {}
+    document.body.removeChild(ta);
+  });
 }
 
 // Quita la imagen adjunta de la denuncia abierta en el modal.
@@ -558,6 +593,7 @@ async function inicializar_registro() {
     $(id).addEventListener("input", pintar_tabla));
   $("boton_imprimir_comprobante").addEventListener("click", () => window.print());
   $("boton_cerrar_comprobante").addEventListener("click", cerrar_comprobante);
+  $("boton_copiar_correo").addEventListener("click", copiar_correo_modal);
   $("fondo_comprobante").addEventListener("click", (e) => { if (e.target === $("fondo_comprobante")) cerrar_comprobante(); });
 }
 
