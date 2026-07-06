@@ -102,6 +102,68 @@
     return { to: destino, asunto: "Brand impersonation / IP infringement on " + redNombre + " - urgent removal request", cuerpo: cuerpo };
   }
 
+  // Correo de DIFAMACIÓN para una red social (paralelo a emailIP). Explica con 4
+  // motivos por qué debe eliminarse, cita las POLÍTICAS/normas comunitarias de la
+  // red (con enlace, desde POLITICAS_GENERALES) y la LEY PENAL del país de la marca
+  // (delitos contra el honor: calumnia, injuria y difamación) vía JUSTIF.leyPenal.
+  function emailDifamacion(ctx, redNombre, destino, lang) {
+    var marca = ctx.marca, d = ctx.datos;
+    var repres = /seguridadmaxima\.net/i.test(d.correo || "");
+    var pols = (window.POLITICAS_GENERALES && window.POLITICAS_GENERALES[redNombre]) || [];
+    var pais = d.pais || "";
+    var ley = (window.JUSTIF && window.JUSTIF.leyPenal)
+      ? window.JUSTIF.leyPenal(pais, lang)
+      : (lang === "en" ? "the applicable criminal law on crimes against honor" : "la legislación penal aplicable sobre delitos contra el honor");
+    if (lang === "es") {
+      var quienesE = repres
+        ? "Somos Seguridad Máxima en Redes Informáticas, en representación de " + marca + "."
+        : "Somos " + marca + ".";
+      var firmaE = repres ? "Seguridad Máxima en Redes Informáticas" : marca;
+      var polTxtE = pols.length
+        ? "\n\nEste contenido infringe las políticas y normas comunitarias de " + redNombre +
+          ", en particular sus normas sobre suplantación de identidad, información falsa o engañosa y acoso u hostigamiento, incluyendo:\n" +
+          pols.map(function (p) { return "- " + p.t + ": " + p.u; }).join("\n")
+        : "";
+      var cuerpoE =
+        "Hola,\n\n" + quienesE + "\n\n" +
+        "Reportamos contenido difamatorio publicado en " + redNombre + " en contra de " + marca + ". Solicitamos su eliminación inmediata por las siguientes razones:\n" +
+        "- Difunde información FALSA y difamatoria sobre " + marca + ", dañando su reputación y su buen nombre ante el público y sus clientes.\n" +
+        "- Se hace pasar por " + marca + " o la ataca directamente sin autorización, generando confusión y engaño entre sus clientes.\n" +
+        "- El contenido puede facilitar fraudes, estafas o extorsiones contra los clientes de " + marca + ", aprovechando el descrédito y la suplantación.\n" +
+        "- No existe relación comercial ni legal con " + marca + ", ni base veraz para las afirmaciones; su permanencia agrava el daño reputacional cada día que sigue publicado." +
+        polTxtE + "\n\n" +
+        "Además, los hechos pueden constituir delitos contra el honor (calumnia, injuria y difamación) conforme a " + ley + (pais ? " (" + pais + ")" : "") + ".\n\n" +
+        "Solicitamos respetuosa y URGENTEMENTE la eliminación inmediata del siguiente contenido:\n\n" +
+        negrita("Contenido a denunciar (URL del perfil / página / publicación):") + "\n" +
+        urlsODefault(ctx, "[ Pega aquí el/los enlace(s) de " + redNombre + " a denunciar ]") + "\n\n" +
+        "Saludos,\n" + firmaE + (d.correo ? "\nContacto: " + d.correo : "");
+      return { to: destino, asunto: "Contenido difamatorio contra " + marca + " en " + redNombre + " - solicitud urgente de eliminación", cuerpo: cuerpoE };
+    }
+    var quienes = repres
+      ? "We are Security Maximum in Computer Networks, writing on behalf of " + marca + "."
+      : "We are " + marca + ".";
+    var firma = repres ? "Security Maximum in Computer Networks" : marca;
+    var polTxt = pols.length
+      ? "\n\nThis content violates " + redNombre +
+        "'s policies and community standards, in particular its rules on impersonation, false or misleading information and harassment or bullying, including:\n" +
+        pols.map(function (p) { return "- " + p.t + ": " + p.u; }).join("\n")
+      : "";
+    var cuerpo =
+      "Hello,\n\n" + quienes + "\n\n" +
+      "We are reporting defamatory content published on " + redNombre + " against " + marca + ". We request its immediate removal for the following reasons:\n" +
+      "- It spreads FALSE and defamatory information about " + marca + ", damaging its reputation and good name before the public and its customers.\n" +
+      "- It impersonates " + marca + " or attacks it directly without authorization, causing confusion and misleading its customers.\n" +
+      "- The content may facilitate fraud, scams or extortion against " + marca + "'s customers, exploiting the disrepute and impersonation.\n" +
+      "- There is no business or legal relationship with " + marca + ", nor any truthful basis for the claims; leaving it online aggravates the reputational harm every day it remains." +
+      polTxt + "\n\n" +
+      "Furthermore, these facts may constitute crimes against honor (slander, libel and defamation) under " + ley + (pais ? " (" + pais + ")" : "") + ".\n\n" +
+      "We respectfully and URGENTLY request the immediate removal of the following content:\n\n" +
+      negrita("Reported content (profile / page / post URL):") + "\n" +
+      urlsODefault(ctx, "[ Paste here the " + redNombre + " link(s) you are reporting ]") + "\n\n" +
+      "Sincerely,\n" + firma + (d.correo ? "\nContact: " + d.correo : "");
+    return { to: destino, asunto: "Defamatory content against " + marca + " on " + redNombre + " - urgent removal request", cuerpo: cuerpo };
+  }
+
   function postalDe(pais) {
     try { return window.JUSTIF.POSTAL[window.JUSTIF.norm(pais)] || ""; } catch (e) { return ""; }
   }
@@ -382,7 +444,7 @@
     tk_copy: {
       red: "TikTok", nombre: "Derechos de autor", cat: "autor",
       url: "https://www.tiktok.com/legal/report/Copyright",
-      manual: "TikTok se llena por partes: pulsa Rellenar, avanza (verifica tu correo, Siguiente) y vuelve a pulsar Rellenar para lo que aparezca. MARCA TÚ el 'Tipo de obra' y el 'Origen' (2 opciones), y completa la URL del contenido a denunciar.",
+      manual: "TikTok se rellena SOLO (la extensión repite las pasadas hasta terminar, no vuelvas a pulsar Rellenar). MARCA TÚ el 'Tipo de obra con copyright' y el 'Origen de la obra' (son 2 opciones que dependen del contenido), y revisa la URL del contenido a denunciar antes de Enviar.",
       construirPlan: function (ctx) {
         var d = ctx.datos, marca = ctx.marca;
         return { url: this.url, manual: this.manual, pasos: [
@@ -393,10 +455,11 @@
           { tipo: "fillLabel", label: "nombre del titular de los derechos de autor|titular de los derechos de autor|name of the copyright owner|copyright owner", valor: marca },
           { tipo: "fillLabel", label: "tu direccion fisica|direccion fisica|physical address", valor: d.pais },
           { tipo: "fillLabel", label: "tu direccion de correo electronico|direccion de correo|your email address|email address", valor: d.correo },
+          { tipo: "fillLabel", label: "descripcion de la obra con copyright|descripcion de la obra|describe la obra con copyright|description of the copyrighted work|describe your copyrighted work|descripcion de tu obra", valor: ctx.justif },
           { tipo: "fillLabel", label: "firma de forma electronica|firma|signature|electronic signature", valor: marca },
           { tipo: "radioVal", name: "typeCopyRight", value: "6", esperaMs: 300 },
           { tipo: "radioVal", name: "copyrightedWorkSource", value: "3", esperaMs: 300 },
-          { tipo: "checkVarios", etiquetas: "buena fe|good faith|correcta|exacta|accurate|perjurio|penalty of perjury|reconozco|acknowledge", max: 3 },
+          { tipo: "checkVarios", etiquetas: "buena fe|good faith|correcta|exacta|accurate|perjurio|penalty of perjury|reconozco|acknowledge|acepto que toda la informacion|se reenvie|reenvie a la persona|se comparta con la persona|i acknowledge|i agree", max: 3 },
           { tipo: "clickBoton", texto: "siguiente|next|continuar|continue", esperaMs: 1500 },
           { tipo: "fillUrlsUnaCaja", urls: (ctx.urls || []), label: "introduce la url del contenido que quieres denunciar|introduce la url del contenido|url del contenido que quieres denunciar|url of the content you want to report|enter the url of the content", placeholder: "tiktok.com/@|e.g.https|e.g. https" }
         ] };
@@ -405,7 +468,7 @@
     tk_marca: {
       red: "TikTok", nombre: "Marca comercial", cat: "marca",
       url: "https://www.tiktok.com/legal/report/Trademark",
-      manual: "TikTok se llena por partes: pulsa Rellenar, avanza (verifica tu correo) y vuelve a pulsar Rellenar para lo que aparezca. Completa la URL del contenido a denunciar.",
+      manual: "TikTok se rellena SOLO (la extensión repite las pasadas hasta terminar, no vuelvas a pulsar Rellenar). MARCA TÚ las opciones que dependan del contenido (tipo/origen de la marca) y revisa la URL del contenido a denunciar antes de Enviar.",
       construirPlan: function (ctx) {
         var d = ctx.datos, marca = ctx.marca;
         return { url: this.url, manual: this.manual, pasos: [
@@ -413,12 +476,13 @@
           { tipo: "dropdown", opcion: "i am the trademark owner|trademark owner|soy propietario de la marca", esperaMs: 2000 },
           { tipo: "fillLabel", label: "enter your email|verify your email|email address|verifica tu correo|correo electronico|introduce tu correo", valor: d.correo },
           { tipo: "fillLabel", label: "full name|nombre completo|tu nombre completo", valor: marca },
-          { tipo: "fillLabel", label: "trademark owner|owner of the trademark|propietario de marca|propietario de la marca", valor: marca },
+          { tipo: "fillLabel", label: "trademark owner|owner of the trademark|propietario de marca|propietario de la marca|nombre del titular de la marca", valor: marca },
           { tipo: "fillLabel", label: "physical address|direccion fisica|tu direccion fisica", valor: d.pais },
           { tipo: "fillLabel", label: "your email address|email address|direccion de correo|correo electronico", valor: d.correo },
           { tipo: "fillLabel", label: "jurisdiction|jurisdiccion|jurisdiccion del registro", valor: d.pais },
-          { tipo: "fillLabel", label: "describe|description|how you believe|descripcion|como crees", valor: ctx.justif },
-          { tipo: "fillLabel", label: "electronic signature|sign electronically|firma electronica|firma", valor: marca },
+          { tipo: "fillLabel", label: "describe|description|how you believe|descripcion de la marca|descripcion|como crees", valor: ctx.justif },
+          { tipo: "fillLabel", label: "electronic signature|sign electronically|firma electronica|firma de forma electronica|firma", valor: marca },
+          { tipo: "checkVarios", etiquetas: "buena fe|good faith|correcta|exacta|accurate|perjurio|penalty of perjury|reconozco|acknowledge|acepto que toda la informacion|se reenvie|reenvie a la persona|se comparta con la persona|i acknowledge|i agree", max: 3 },
           { tipo: "clickBoton", texto: "siguiente|next|continuar|continue", esperaMs: 1500 },
           { tipo: "fillUrlsUnaCaja", urls: (ctx.urls || []), label: "introduce la url del contenido que quieres denunciar|introduce la url del contenido|url del contenido que quieres denunciar|url of the content you want to report|enter the url of the content", placeholder: "tiktok.com/@|e.g.https|e.g. https" }
         ] };
@@ -613,6 +677,33 @@
       destino: "copyright@tiktok.com, ip-reports@tiktok.com, ip_reports@tiktok.com",
       manual: "Donde dice [ ... ] pega el/los enlace(s) de TikTok a denunciar, revisa y envía.",
       construirEmail: function (ctx) { return bilingue(emailIP(ctx, "TikTok", this.destino, "en"), emailIP(ctx, "TikTok", this.destino, "es")); }
+    },
+    // ===== "Por correo (difamación)" dentro del cintillo de cada red =====
+    // Las plataformas NO publican un buzón de difamación (suelen exigir formulario),
+    // por eso el 'destino' va vacío: se escribe el correo correcto al enviar.
+    fb_correo_difam: {
+      red: "Facebook", nombre: "Por correo (difamación)", cat: "difam", tipo: "email",
+      destino: "",
+      manual: "El 'Para' va vacío: escribe el correo legal/de contacto correcto (Facebook no tiene un buzón público de difamación). Donde dice [ ... ] pega el/los enlace(s) de Facebook a denunciar, revisa y envía.",
+      construirEmail: function (ctx) { return bilingue(emailDifamacion(ctx, "Facebook", this.destino, "en"), emailDifamacion(ctx, "Facebook", this.destino, "es")); }
+    },
+    ig_correo_difam: {
+      red: "Instagram", nombre: "Por correo (difamación)", cat: "difam", tipo: "email",
+      destino: "",
+      manual: "El 'Para' va vacío: escribe el correo legal/de contacto correcto (Instagram no tiene un buzón público de difamación). Donde dice [ ... ] pega el/los enlace(s) de Instagram a denunciar, revisa y envía.",
+      construirEmail: function (ctx) { return bilingue(emailDifamacion(ctx, "Instagram", this.destino, "en"), emailDifamacion(ctx, "Instagram", this.destino, "es")); }
+    },
+    wa_correo_difam: {
+      red: "WhatsApp", nombre: "Por correo (difamación)", cat: "difam", tipo: "email",
+      destino: "",
+      manual: "El 'Para' va vacío: escribe el correo legal/de contacto correcto (WhatsApp no tiene un buzón público de difamación). Donde dice [ ... ] pega el/los datos o enlace(s) a denunciar, revisa y envía.",
+      construirEmail: function (ctx) { return bilingue(emailDifamacion(ctx, "WhatsApp", this.destino, "en"), emailDifamacion(ctx, "WhatsApp", this.destino, "es")); }
+    },
+    tk_correo_difam: {
+      red: "TikTok", nombre: "Por correo (difamación)", cat: "difam", tipo: "email",
+      destino: "",
+      manual: "El 'Para' va vacío: escribe el correo legal/de contacto correcto (TikTok no tiene un buzón público de difamación). Donde dice [ ... ] pega el/los enlace(s) de TikTok a denunciar, revisa y envía.",
+      construirEmail: function (ctx) { return bilingue(emailDifamacion(ctx, "TikTok", this.destino, "en"), emailDifamacion(ctx, "TikTok", this.destino, "es")); }
     },
     // ============= Studocu (NO tiene form web: es por CORREO, en español) =============
     studocu_reporte: {

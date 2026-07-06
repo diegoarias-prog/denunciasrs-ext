@@ -130,6 +130,28 @@ function construir_raw(remite, para, asunto, html) {
   return a_base64url(mime);
 }
 
+// Guarda en la denuncia del Registro (la ÚLTIMA iniciada, apuntada por
+// `ultima_denuncia_registro`) el correo REAL con el texto FINAL editado, para
+// poder verlo y copiarlo después. No debe bloquear el envío si algo falla.
+async function actualizar_correo_denuncia(enviado) {
+  try {
+    const st = await new Promise((res) =>
+      chrome.storage.local.get(["ultima_denuncia_registro", "denuncias_registro"], res));
+    const id = st.ultima_denuncia_registro;
+    const lista = Array.isArray(st.denuncias_registro) ? st.denuncias_registro : [];
+    const d = lista.find((x) => String(x.id) === String(id));
+    if (!d) return;
+    const cuerpo_en = ER.html_a_texto_plano(ER.sanitizar_html($("cuerpo_en").innerHTML));
+    const cuerpo_es = ER.html_a_texto_plano(ER.sanitizar_html($("cuerpo_es").innerHTML));
+    d.correo = Object.assign({}, d.correo, {
+      to: $("para").value || "", asunto: $("asunto_en").value || "", cuerpo: cuerpo_en,
+      asunto_es: $("asunto_es").value || "", cuerpo_es: cuerpo_es,
+      enviado: !!enviado, fecha: new Date().toISOString()
+    });
+    await new Promise((res) => chrome.storage.local.set({ denuncias_registro: lista }, res));
+  } catch (e) { /* no bloquear por esto */ }
+}
+
 async function enviar_directo() {
   if (!es_workspace(REMITENTE)) { aviso("⚠ El envío directo solo está disponible para cuentas propias de Workspace."); return; }
   const para = $("para").value.trim();
@@ -157,6 +179,7 @@ async function enviar_directo() {
     }
     aviso("✅ Correo ENVIADO desde " + REMITENTE);
     b.textContent = "✅ Enviado";   // se deja deshabilitado para no reenviar
+    await actualizar_correo_denuncia(true); // deja en el Registro el correo enviado (texto final)
   } catch (e) {
     b.disabled = false; b.textContent = etiqueta;
     aviso("❌ No se pudo enviar: " + (e && e.message ? e.message : e));
@@ -168,6 +191,7 @@ $("enviar_directo").addEventListener("click", enviar_directo);
 $("mailto").addEventListener("click", () => {
   // mailto no soporta HTML: se manda el texto plano (con saltos) del cuerpo.
   const cuerpo_plano = ER.html_a_texto_plano(ER.sanitizar_html($("cuerpo_en").innerHTML));
+  actualizar_correo_denuncia(true); // registra el correo usado (texto final)
   window.location.href = "mailto:" + encodeURIComponent($("para").value) +
     "?subject=" + encodeURIComponent($("asunto_en").value) +
     "&body=" + encodeURIComponent(cuerpo_plano);
@@ -180,6 +204,7 @@ $("gmail").addEventListener("click", () => {
     : "https://mail.google.com/mail/?view=cm&fs=1&tf=1";
   // El compositor web de Gmail (view=cm) no acepta HTML: se manda texto plano.
   const cuerpo_plano = ER.html_a_texto_plano(ER.sanitizar_html($("cuerpo_en").innerHTML));
+  actualizar_correo_denuncia(true); // registra el correo usado (texto final)
   window.open(base +
     "&to=" + encodeURIComponent($("para").value) +
     "&su=" + encodeURIComponent($("asunto_en").value) +

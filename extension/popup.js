@@ -245,6 +245,25 @@ async function registrar_denuncia_auto(marca, form) {
   return id;
 }
 
+// Adjunta a la denuncia el CONTENIDO del correo generado (asunto + cuerpo, en/es),
+// para poder VERLO y COPIARLO luego desde el Registro. Se guarda el texto plano
+// bilingüe generado; cuando el usuario lo envía desde correo.html, ese archivo lo
+// actualiza con el texto FINAL (por si lo editó).
+async function guardar_correo_en_denuncia(id, em) {
+  if (!id || !em) return;
+  const CLAVE = "denuncias_registro";
+  const lista = await new Promise((res) =>
+    chrome.storage.local.get([CLAVE], (x) => res(Array.isArray(x[CLAVE]) ? x[CLAVE] : [])));
+  const d = lista.find((x) => String(x.id) === String(id));
+  if (!d) return;
+  d.correo = {
+    to: em.to || "", asunto: em.asunto || "", cuerpo: em.cuerpo || "",
+    asunto_es: em.asunto_es || "", cuerpo_es: em.cuerpo_es || "",
+    enviado: false, fecha: new Date().toISOString()
+  };
+  await new Promise((res) => chrome.storage.local.set({ [CLAVE]: lista }, res));
+}
+
 // Redimensiona un dataURL (img) a 'maxAncho' px de ancho y lo recomprime a JPEG
 // 'calidad' (~0.7), para no llenar el storage con capturas enormes.
 function redimensionar_imagen(dataUrl, maxAncho, calidad) {
@@ -328,7 +347,8 @@ async function rellenar() {
   // Redes SIN formulario web (Telegram): se genera un CORREO en una pestaña aparte.
   if (form.tipo === "email") {
     const em = form.construirEmail(ctx);
-    await registrar_denuncia_auto(marca, form);
+    const idDen = await registrar_denuncia_auto(marca, form);
+    await guardar_correo_en_denuncia(idDen, em); // adjunta el contenido para verlo/copiarlo en el Registro
     $("boton_capturar").disabled = false;
     // 'from' = correo de contacto de la marca; si es una cuenta de Google Workspace
     // propia, correo.html abre el borrador de Gmail DESDE esa cuenta (envío directo).
@@ -437,7 +457,17 @@ async function APLICAR(pasos) {
     try { el.setAttribute(attr, "1"); } catch (e) { return; }
     clicsReales.push("[" + attr + "]");
   }
-  for (const p of pasos) {
+  // VARIAS PASADAS automáticas: TikTok revela partes del formulario con retraso, así
+  // que en vez de obligar al usuario a volver a pulsar "Rellenar", la propia extensión
+  // repite la pasada (hasta 4 veces, esperando entre cada una) reintentando SOLO los
+  // pasos que quedaron pendientes, hasta completar todo lo automatizable.
+  let pendientes = pasos.slice();
+  for (let pasada = 0; pasada < 4 && pendientes.length; pasada++) {
+    if (pasada > 0) await dur(1500); // deja que aparezca la sección que faltaba
+    faltan.length = 0;               // en cada pasada solo cuentan los fallos de AHORA
+    const reintentar = [];
+    for (const p of pendientes) {
+    const antesFaltan = faltan.length;
     try {
       if (p.tipo === "select" || p.tipo === "selectPais") {
         const texto = p.tipo === "selectPais" ? p.valor : p.texto;
@@ -551,33 +581,49 @@ async function APLICAR(pasos) {
         if (p.esperaMs) await dur(p.esperaMs);
       } else if (p.tipo === "fillLabel") {
         // Rellena el primer campo VISIBLE y vacío cuyo texto cercano contenga la etiqueta.
+        // REINTENTA unos segundos: TikTok (y otros SPA React) pintan la sección un
+        // instante después, así que un solo escaneo la perdía y marcaba todo como
+        // "no encontrado". Reintentamos hasta que el campo aparezca.
         if (p.valor != null && p.valor !== "") {
           const kws = (p.label || "").split("|").map(norm).filter(Boolean);
-          const els = Array.prototype.slice.call(
-            document.querySelectorAll('textarea,input[type=text],input[type=email],input[type=url],input[type=tel],input[type=number],input:not([type])'));
-          let hit = null;
-          for (const e of els) {
-            const r = e.getBoundingClientRect();
-            if (r.width < 2 || r.height < 2 || e.value) continue;
-            let ctx = " " + (e.placeholder || "") + " " + (e.getAttribute("aria-label") || "") + " ";
-            if (e.id) { const lf = document.querySelector('label[for="' + e.id.replace(/"/g, '\\"') + '"]'); if (lf) ctx += " " + (lf.innerText || ""); }
-            // GitHub asocia el rótulo por aria-labelledby (referencia por id), no por label[for].
-            const lblby = e.getAttribute("aria-labelledby");
-            if (lblby) lblby.split(/\s+/).forEach(function (idr) { const le = document.getElementById(idr); if (le) ctx += " " + (le.innerText || ""); });
-            // El rótulo suele ser un hermano ANTERIOR directo del campo (formularios de GitHub).
-            let prevE = e.previousElementSibling, je = 0;
-            while (prevE && je < 4) { ctx += " " + (prevE.innerText || ""); prevE = prevE.previousElementSibling; je++; }
-            // En TikTok el título del campo suele ser el hermano ANTERIOR de un ancestro.
-            let par = e.parentElement, k = 0;
-            while (par && k < 6) {
-              const ps = par.previousElementSibling;
-              if (ps) ctx += " " + (ps.innerText || "");
-              par = par.parentElement; k++;
+          let yaLleno = false; // el campo que coincide ya tenía valor (p.ej. correo verificado)
+          const buscarCampo = () => {
+            const els = Array.prototype.slice.call(
+              document.querySelectorAll('textarea,input[type=text],input[type=email],input[type=url],input[type=tel],input[type=number],input:not([type])'));
+            for (const e of els) {
+              const r = e.getBoundingClientRect();
+              if (r.width < 2 || r.height < 2) continue;
+              let ctx = " " + (e.placeholder || "") + " " + (e.getAttribute("aria-label") || "") + " ";
+              if (e.id) { const lf = document.querySelector('label[for="' + e.id.replace(/"/g, '\\"') + '"]'); if (lf) ctx += " " + (lf.innerText || ""); }
+              // GitHub asocia el rótulo por aria-labelledby (referencia por id), no por label[for].
+              const lblby = e.getAttribute("aria-labelledby");
+              if (lblby) lblby.split(/\s+/).forEach(function (idr) { const le = document.getElementById(idr); if (le) ctx += " " + (le.innerText || ""); });
+              // El rótulo suele ser un hermano ANTERIOR directo del campo (formularios de GitHub).
+              let prevE = e.previousElementSibling, je = 0;
+              while (prevE && je < 4) { ctx += " " + (prevE.innerText || ""); prevE = prevE.previousElementSibling; je++; }
+              // En TikTok el título del campo suele ser el hermano ANTERIOR de un ancestro.
+              let par = e.parentElement, k = 0;
+              while (par && k < 6) {
+                const ps = par.previousElementSibling;
+                if (ps) ctx += " " + (ps.innerText || "");
+                par = par.parentElement; k++;
+              }
+              const c = norm(ctx);
+              if (kws.some((kw) => c.indexOf(kw) >= 0)) {
+                if (e.value) { yaLleno = true; continue; } // coincide pero ya tiene valor
+                return e;
+              }
             }
-            const c = norm(ctx);
-            if (kws.some((kw) => c.indexOf(kw) >= 0)) { hit = e; break; }
+            return null;
+          };
+          let hit = null;
+          for (let intentoFL = 0; intentoFL < (p.reintentos || 6) && !hit && !yaLleno; intentoFL++) {
+            hit = buscarCampo();
+            if (!hit && !yaLleno) await dur(400);
           }
-          if (hit) { setNative(hit, p.valor); ok++; } else faltan.push("etiqueta:" + p.label);
+          if (hit) { setNative(hit, p.valor); ok++; }
+          else if (yaLleno) { ok++; } // ya estaba relleno (correo verificado, etc.)
+          else faltan.push("etiqueta:" + p.label);
         }
       } else if (p.tipo === "fillUrlsUnaCaja") {
         // TikTok: UNA sola caja para TODAS las URLs, una por línea. Se llena por partes,
@@ -665,19 +711,29 @@ async function APLICAR(pasos) {
       } else if (p.tipo === "checkVarios") {
         // Marca TODAS las casillas cuyo texto coincida con alguna etiqueta (p.ej. las
         // 3 de "Declaración" de TikTok), hasta 'max'. Las deja para clic real.
+        // REINTENTA: la sección "Declaración" también se pinta con retraso.
         const kws = norm(p.etiquetas).split("|").filter(Boolean);
         const max = p.max || 99;
-        const cbs = Array.prototype.slice.call(document.querySelectorAll('input[type=checkbox]'));
-        let n = 0;
-        for (const c of cbs) {
-          if (n >= max) break;
-          let t = " " + (c.getAttribute("aria-label") || "") + " ";
-          let par = c.parentElement, k = 0;
-          while (par && k < 4) { t += " " + (par.innerText || ""); par = par.parentElement; k++; }
-          const ct = norm(t);
-          if (kws.some((kw) => ct.indexOf(kw) >= 0)) {
-            marcarRadioEl(c); marcarParaClicReal(c); ok++; n++;
+        const marcarCasillas = () => {
+          const cbs = Array.prototype.slice.call(document.querySelectorAll('input[type=checkbox]'));
+          let n = 0;
+          for (const c of cbs) {
+            if (n >= max) break;
+            if (c.checked) { n++; continue; }
+            let t = " " + (c.getAttribute("aria-label") || "") + " ";
+            let par = c.parentElement, k = 0;
+            while (par && k < 4) { t += " " + (par.innerText || ""); par = par.parentElement; k++; }
+            const ct = norm(t);
+            if (kws.some((kw) => ct.indexOf(kw) >= 0)) {
+              marcarRadioEl(c); marcarParaClicReal(c); ok++; n++;
+            }
           }
+          return n;
+        };
+        let n = 0;
+        for (let intentoCV = 0; intentoCV < (p.reintentos || 6) && n === 0; intentoCV++) {
+          n = marcarCasillas();
+          if (n === 0) await dur(400);
         }
         if (n === 0) faltan.push("checkVarios:" + p.etiquetas);
       } else if (p.tipo === "checkLabel") {
@@ -834,6 +890,9 @@ async function APLICAR(pasos) {
         if (urls.length > urlInputs.length) faltan.push("difam_urls:" + puestasU + "/" + urls.length);
       }
     } catch (e) { faltan.push((p.name || p.css || "?") + ": " + e.message); }
+      if (faltan.length > antesFaltan) reintentar.push(p); // no se completó: reintentar en la próxima pasada
+    }
+    pendientes = reintentar;
   }
   return { ok: ok, faltan: faltan, clicsReales: clicsReales };
 }

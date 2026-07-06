@@ -203,6 +203,17 @@
     return (lang === "en") ? justifEN(cat, red, nombre, pais) : justifES(cat, red, nombre, pais);
   }
 
+  // Ley penal (delitos contra el honor) del país indicado, ES o EN. Se usa para
+  // citar la ley por difamación en los correos. Si no hay país conocido, cae en
+  // una fórmula genérica ("legislación penal aplicable...").
+  function leyPenal(pais, lang) {
+    const pn = norm(pais);
+    const mapa = (lang === "en") ? LEY_PENAL_EN : LEY_PENAL;
+    return mapa[pn] || ((lang === "en")
+      ? "the applicable criminal law on crimes against honor (slander, libel and defamation)"
+      : "la legislación penal aplicable sobre delitos contra el honor (calumnia, injuria y difamación)");
+  }
+
   // Agrega la línea de política infringida según la clave de formulario (es/en).
   function conPolitica(texto, formKey, lang) {
     const p = POLITICAS[formKey];
@@ -213,6 +224,6 @@
 
   window.JUSTIF = {
     norm: norm, POSTAL: POSTAL, CODIGO: CODIGO, POLITICAS: POLITICAS,
-    justificacion: justificacion, conPolitica: conPolitica
+    justificacion: justificacion, conPolitica: conPolitica, leyPenal: leyPenal
   };
 })();
