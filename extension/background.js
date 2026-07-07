@@ -6,6 +6,10 @@
 //  Solo marca (clic) cuando el elemento NO está ya marcado, para no des-marcar.
 // ============================================================================
 
+// Motor de relleno compartido (define APLICAR en el ámbito del service worker) para
+// poder RE-INYECTARLO nosotros mismos en la pestaña durante el autorrelleno persistente.
+importScripts("motor.js");
+
 function cmd(tabId, method, params) {
   return new Promise((resolve, reject) => {
     chrome.debugger.sendCommand({ tabId }, method, params || {}, (r) => {
@@ -70,6 +74,53 @@ async function hacerClics(tabId, selectores) {
   }
   return { ok };
 }
+
+// ============================================================================
+//  AUTORRELLENO PERSISTENTE de la 2.ª etapa (TikTok Copyright/Marca).
+//  Problema real (confirmado con los volcados del DOM del formulario): tras elegir los
+//  desplegables y el correo, el formulario SOLO muestra el campo del correo; el resto
+//  (Tipo de obra, Origen, Descripción, firma, casillas, URL) NO existe hasta VERIFICAR
+//  el correo. Por eso antes había que pulsar "Rellenar" por 2.ª vez al volver del correo.
+//  Solución: tras el primer clic, el service worker REPITE por su cuenta lo mismo que hacía
+//  ese 2.º clic —re-inyecta APLICAR (una pasada) + clics reales— cada pocos segundos, hasta
+//  ~5 min o hasta que el formulario quede completo. Vive en el service worker: sobrevive a
+//  cerrar el popup y a irse a verificar el correo. Un solo "Rellenar" basta.
+// ============================================================================
+const AUTORRELLENO = {}; // tabId -> { cancelar: bool }
+
+async function autorelleno(tabId, pasos) {
+  if (AUTORRELLENO[tabId]) AUTORRELLENO[tabId].cancelar = true; // cancela un bucle previo del mismo tab
+  const estado = { cancelar: false };
+  AUTORRELLENO[tabId] = estado;
+  const fin = Date.now() + 300000; // 5 min (cubre el ida y vuelta de verificar el correo)
+  let limpias = 0;
+  while (!estado.cancelar && Date.now() < fin) {
+    let res = null;
+    try {
+      const r = await chrome.scripting.executeScript({
+        target: { tabId: tabId },
+        func: APLICAR,
+        args: [pasos, { unaPasada: true }]
+      });
+      res = (r && r[0] && r[0].result) || null;
+    } catch (e) {
+      break; // la pestaña se cerró o navegó fuera del formulario: paramos
+    }
+    if (res && res.clicsReales && res.clicsReales.length) {
+      try { await hacerClics(tabId, res.clicsReales); } catch (e) { /* seguimos igual */ }
+    }
+    // Parada anticipada: 3 rondas seguidas sin campos faltantes = formulario ya completo.
+    // Durante la espera de verificación del correo, faltan.length > 0 (los campos de la 2.ª
+    // etapa aún no existen), así que el bucle NO se corta antes de tiempo.
+    if (res && (!res.faltan || res.faltan.length === 0)) { if (++limpias >= 3) break; }
+    else limpias = 0;
+    await dormir(2500);
+  }
+  if (AUTORRELLENO[tabId] === estado) delete AUTORRELLENO[tabId];
+}
+
+// Si se cierra la pestaña, cancela su bucle de autorrelleno.
+chrome.tabs.onRemoved.addListener((tabId) => { if (AUTORRELLENO[tabId]) AUTORRELLENO[tabId].cancelar = true; });
 
 // Captura la PÁGINA COMPLETA (no solo el viewport) de la pestaña indicada, usando
 // el permiso `debugger` que la extensión ya tiene. Devuelve { dataUrl } o { error }.
@@ -217,5 +268,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const tabId = msg.tabId || (sender && sender.tab && sender.tab.id);
     if (tabId) { capturarCompleta(tabId).then(sendResponse); return true; }
     return; // sin pestaña: nada que capturar
+  }
+  if (msg && msg.accion === "iniciarAutorelleno") {
+    // El popup pide que el service worker siga rellenando la 2.ª etapa por su cuenta.
+    const tabId = msg.tabId || (sender && sender.tab && sender.tab.id);
+    if (tabId && Array.isArray(msg.pasos)) autorelleno(tabId, msg.pasos); // bucle en segundo plano
+    sendResponse({ ok: true });
+    return; // no necesitamos mantener el canal abierto
+  }
+  if (msg && msg.accion === "detenerAutorelleno") {
+    const tabId = msg.tabId || (sender && sender.tab && sender.tab.id);
+    if (tabId && AUTORRELLENO[tabId]) AUTORRELLENO[tabId].cancelar = true;
+    return;
   }
 });
