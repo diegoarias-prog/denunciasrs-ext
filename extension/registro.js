@@ -106,6 +106,8 @@ function refrescar_contadores() {
   $("contador_total").textContent = DENUNCIAS.length;
   $("contador_con_caso").textContent = DENUNCIAS.filter((d) => (d.numero_caso || "").trim() !== "").length;
   $("contador_resueltas").textContent = DENUNCIAS.filter((d) => d.estado === "resuelta").length;
+  // Denuncias POR FORMULARIO que aún no tienen la captura del formulario adjunta.
+  $("contador_sin_captura").textContent = DENUNCIAS.filter((d) => d.tipo === "formulario" && !d.comprobante_img).length;
 }
 
 // ----------------------------------------------------------------------------
@@ -139,11 +141,15 @@ function pintar_tabla() {
     const clase_estado = (d.estado || "enviada");
     // Indicadores de adjuntos: 📎 comprobante · 💬 respuesta(s) de la red.
     const num_respuestas = respuestas_de(d).length;
+    // Denuncia POR FORMULARIO sin la captura del formulario: se marca en rojo (⚠).
+    const falta_captura = (d.tipo === "formulario") && !d.comprobante_img;
     const marcas_adjuntos = [];
     if (d.comprobante_img) marcas_adjuntos.push("Comprobante 📎");
     if (num_respuestas) marcas_adjuntos.push("Respuestas 💬 (" + num_respuestas + ")");
+    if (falta_captura) marcas_adjuntos.push("⚠ FALTA la captura del formulario");
     const titulo_adjuntos = marcas_adjuntos.length ? marcas_adjuntos.join(" · ") : "Sin adjuntos";
-    const iconos_adjuntos = (d.comprobante_img ? "📎" : "") + (num_respuestas ? "💬" + num_respuestas : "");
+    const iconos_adjuntos = (d.comprobante_img ? "📎" : "") + (num_respuestas ? "💬" + num_respuestas : "") +
+      (falta_captura ? '<span class="falta_captura" title="Falta la captura del formulario">⚠</span>' : "");
     tr.innerHTML =
       '<td>' + escapar_html(d.consecutivo) + '</td>' +
       '<td>' + escapar_html(formatear_fecha(d.fecha)) + '</td>' +
@@ -382,6 +388,10 @@ function abrir_comprobante(id) {
   } else {
     bloqueCorreo.style.display = "none";
   }
+
+  // Aviso: denuncia POR FORMULARIO sin la captura del formulario adjunta.
+  $("aviso_falta_captura").style.display =
+    (d.tipo === "formulario" && !d.comprobante_img) ? "block" : "none";
 
   $("modal_comprobante").dataset.idActivo = d.id;
 
