@@ -444,7 +444,7 @@
     tk_copy: {
       red: "TikTok", nombre: "Derechos de autor", cat: "autor",
       url: "https://www.tiktok.com/legal/report/Copyright",
-      manual: "TikTok se rellena SOLO en UN clic, no vuelvas a pulsar Rellenar. La extensión marca 'Tipo de obra'='Logotipo' y 'Origen'='Mi cuenta de TikTok personal', y rellena la 'Descripción' sola en cuanto aparece. Si tu caso es otro tipo de obra (video, foto…), cámbialo tú con un clic. Si el formulario pide verificar tu correo, hazlo primero (los campos se llenan solos al aparecer). Revisa la URL antes de Enviar.",
+      manual: "Con UN solo clic en Rellenar basta: no vuelvas a pulsarlo. La extensión marca 'Tipo de obra'='Logotipo' y 'Origen'='Mi cuenta de TikTok personal', y rellena la 'Descripción' sola en cuanto aparece. Si TikTok te pide verificar tu correo, hazlo con calma: la extensión sigue marcando y rellenando sola los campos que aparezcan después (Tipo de obra, Origen, Descripción y casillas) durante varios minutos, sin volver a pulsar Rellenar. Si tu caso es otro tipo de obra (video, foto…), cámbialo tú con un clic. Revisa la URL antes de Enviar.",
       construirPlan: function (ctx) {
         var d = ctx.datos, marca = ctx.marca;
         return { url: this.url, manual: this.manual, pasos: [
@@ -473,7 +473,7 @@
     tk_marca: {
       red: "TikTok", nombre: "Marca comercial", cat: "marca",
       url: "https://www.tiktok.com/legal/report/Trademark",
-      manual: "TikTok se rellena SOLO, no vuelvas a pulsar Rellenar. MARCA TÚ las opciones que dependan del contenido (tipo/origen de la marca); si al marcarlas aparece un campo de 'Descripción', la extensión lo RELLENA SOLO (deja abierta la pestaña ~1 min). Revisa la URL antes de Enviar.",
+      manual: "Con UN solo clic en Rellenar basta, no vuelvas a pulsarlo. MARCA TÚ las opciones que dependan del contenido (tipo/origen de la marca); si al marcarlas aparece un campo de 'Descripción', la extensión lo RELLENA SOLO. Si TikTok te pide verificar tu correo, hazlo con calma: la extensión sigue marcando y rellenando sola los campos que aparezcan después durante varios minutos, sin volver a pulsar Rellenar (deja abierta la pestaña). Revisa la URL antes de Enviar.",
       construirPlan: function (ctx) {
         var d = ctx.datos, marca = ctx.marca;
         return { url: this.url, manual: this.manual, pasos: [

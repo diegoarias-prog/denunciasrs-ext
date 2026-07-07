@@ -204,9 +204,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // (popup/options/content script propio), nunca de páginas o extensiones
   // externas (blindaje ante futuros cambios de config).
   if (!sender || sender.id !== chrome.runtime.id) return;
-  if (msg && msg.accion === "clicsReales" && msg.tabId) {
-    hacerClics(msg.tabId, msg.selectores || []).then(sendResponse);
-    return true; // respuesta asíncrona
+  if (msg && msg.accion === "clicsReales") {
+    // El popup manda `msg.tabId`; el VIGILANTE (mundo isolated) no lo conoce, así que
+    // usamos la pestaña del emisor (`sender.tab.id`), igual que en `capturaCompleta`.
+    const tabId = msg.tabId || (sender && sender.tab && sender.tab.id);
+    if (tabId) { hacerClics(tabId, msg.selectores || []).then(sendResponse); return true; } // respuesta asíncrona
+    return; // sin pestaña: nada que clicar
   }
   if (msg && msg.accion === "capturaCompleta") {
     // El popup manda `msg.tabId`; el content script no lo conoce, así que
