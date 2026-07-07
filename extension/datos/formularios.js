@@ -444,7 +444,7 @@
     tk_copy: {
       red: "TikTok", nombre: "Derechos de autor", cat: "autor",
       url: "https://www.tiktok.com/legal/report/Copyright",
-      manual: "TikTok se rellena SOLO (la extensión repite las pasadas hasta terminar, no vuelvas a pulsar Rellenar). MARCA TÚ el 'Tipo de obra con copyright' y el 'Origen de la obra' (son 2 opciones que dependen del contenido), y revisa la URL del contenido a denunciar antes de Enviar.",
+      manual: "TikTok se rellena SOLO, no vuelvas a pulsar Rellenar. MARCA TÚ el 'Tipo de obra con copyright' y el 'Origen de la obra' (dependen del contenido); al marcar el Tipo de obra aparece la 'Descripción de la obra con copyright' y la extensión la RELLENA SOLA (deja abierta la pestaña ~1 min). Si el formulario pide verificar tu correo, hazlo primero. Revisa la URL antes de Enviar.",
       construirPlan: function (ctx) {
         var d = ctx.datos, marca = ctx.marca;
         return { url: this.url, manual: this.manual, pasos: [
@@ -455,12 +455,13 @@
           { tipo: "fillLabel", label: "nombre del titular de los derechos de autor|titular de los derechos de autor|name of the copyright owner|copyright owner", valor: marca },
           { tipo: "fillLabel", label: "tu direccion fisica|direccion fisica|physical address", valor: d.pais },
           { tipo: "fillLabel", label: "tu direccion de correo electronico|direccion de correo|your email address|email address", valor: d.correo },
-          { tipo: "fillLabel", label: "descripcion de la obra con copyright|descripcion de la obra|describe la obra con copyright|description of the copyrighted work|describe your copyrighted work|descripcion de tu obra", valor: ctx.justif },
+          // Campo TARDÍO: "Descripción de la obra con copyright" aparece SOLO al marcar el
+          // 'Tipo de obra'. Lo llena el VIGILANTE (ver popup.js) en cuanto surge. La
+          // justificación ya trae la política infringida citada (skill citar-politica-violada).
+          { tipo: "fillLabel", label: "descripcion de la obra con copyright|descripcion de la obra|describe la obra con copyright|description of the copyrighted work|describe your copyrighted work|descripcion de tu obra", valor: ctx.justif, opcional: true, tardio: true },
           { tipo: "fillLabel", label: "firma de forma electronica|firma|signature|electronic signature", valor: marca },
-          { tipo: "radioVal", name: "typeCopyRight", value: "6", esperaMs: 300 },
-          { tipo: "radioVal", name: "copyrightedWorkSource", value: "3", esperaMs: 300 },
           { tipo: "checkVarios", etiquetas: "buena fe|good faith|correcta|exacta|accurate|perjurio|penalty of perjury|reconozco|acknowledge|acepto que toda la informacion|se reenvie|reenvie a la persona|se comparta con la persona|i acknowledge|i agree", max: 3 },
-          { tipo: "clickBoton", texto: "siguiente|next|continuar|continue", esperaMs: 1500 },
+          { tipo: "clickBoton", texto: "siguiente|next|continuar|continue", esperaMs: 1500, opcional: true },
           { tipo: "fillUrlsUnaCaja", urls: (ctx.urls || []), label: "introduce la url del contenido que quieres denunciar|introduce la url del contenido|url del contenido que quieres denunciar|url of the content you want to report|enter the url of the content", placeholder: "tiktok.com/@|e.g.https|e.g. https" }
         ] };
       }
@@ -468,7 +469,7 @@
     tk_marca: {
       red: "TikTok", nombre: "Marca comercial", cat: "marca",
       url: "https://www.tiktok.com/legal/report/Trademark",
-      manual: "TikTok se rellena SOLO (la extensión repite las pasadas hasta terminar, no vuelvas a pulsar Rellenar). MARCA TÚ las opciones que dependan del contenido (tipo/origen de la marca) y revisa la URL del contenido a denunciar antes de Enviar.",
+      manual: "TikTok se rellena SOLO, no vuelvas a pulsar Rellenar. MARCA TÚ las opciones que dependan del contenido (tipo/origen de la marca); si al marcarlas aparece un campo de 'Descripción', la extensión lo RELLENA SOLO (deja abierta la pestaña ~1 min). Revisa la URL antes de Enviar.",
       construirPlan: function (ctx) {
         var d = ctx.datos, marca = ctx.marca;
         return { url: this.url, manual: this.manual, pasos: [
@@ -480,10 +481,10 @@
           { tipo: "fillLabel", label: "physical address|direccion fisica|tu direccion fisica", valor: d.pais },
           { tipo: "fillLabel", label: "your email address|email address|direccion de correo|correo electronico", valor: d.correo },
           { tipo: "fillLabel", label: "jurisdiction|jurisdiccion|jurisdiccion del registro", valor: d.pais },
-          { tipo: "fillLabel", label: "describe|description|how you believe|descripcion de la marca|descripcion|como crees", valor: ctx.justif },
+          { tipo: "fillLabel", label: "describe|description|how you believe|descripcion de la marca|descripcion|como crees", valor: ctx.justif, opcional: true, tardio: true },
           { tipo: "fillLabel", label: "electronic signature|sign electronically|firma electronica|firma de forma electronica|firma", valor: marca },
           { tipo: "checkVarios", etiquetas: "buena fe|good faith|correcta|exacta|accurate|perjurio|penalty of perjury|reconozco|acknowledge|acepto que toda la informacion|se reenvie|reenvie a la persona|se comparta con la persona|i acknowledge|i agree", max: 3 },
-          { tipo: "clickBoton", texto: "siguiente|next|continuar|continue", esperaMs: 1500 },
+          { tipo: "clickBoton", texto: "siguiente|next|continuar|continue", esperaMs: 1500, opcional: true },
           { tipo: "fillUrlsUnaCaja", urls: (ctx.urls || []), label: "introduce la url del contenido que quieres denunciar|introduce la url del contenido|url del contenido que quieres denunciar|url of the content you want to report|enter the url of the content", placeholder: "tiktok.com/@|e.g.https|e.g. https" }
         ] };
       }
