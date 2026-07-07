@@ -143,12 +143,16 @@ function pintar_tabla() {
     const num_respuestas = respuestas_de(d).length;
     // Denuncia POR FORMULARIO sin la captura del formulario: se marca en rojo (⚠).
     const falta_captura = (d.tipo === "formulario") && !d.comprobante_img;
+    // Denuncia POR CORREO con el texto del correo guardado (ver/copiar en el modal): ✉.
+    const tiene_correo = !!(d.correo && (d.correo.cuerpo || d.correo.asunto));
     const marcas_adjuntos = [];
     if (d.comprobante_img) marcas_adjuntos.push("Comprobante 📎");
     if (num_respuestas) marcas_adjuntos.push("Respuestas 💬 (" + num_respuestas + ")");
+    if (tiene_correo) marcas_adjuntos.push("Correo ✉ (abre 👁 para ver/copiar)");
     if (falta_captura) marcas_adjuntos.push("⚠ FALTA la captura del formulario");
     const titulo_adjuntos = marcas_adjuntos.length ? marcas_adjuntos.join(" · ") : "Sin adjuntos";
     const iconos_adjuntos = (d.comprobante_img ? "📎" : "") + (num_respuestas ? "💬" + num_respuestas : "") +
+      (tiene_correo ? "✉" : "") +
       (falta_captura ? '<span class="falta_captura" title="Falta la captura del formulario">⚠</span>' : "");
     tr.innerHTML =
       '<td>' + escapar_html(d.consecutivo) + '</td>' +
