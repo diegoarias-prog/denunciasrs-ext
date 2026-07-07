@@ -394,6 +394,17 @@ async function rellenar() {
       try { await chrome.runtime.sendMessage({ accion: "clicsReales", tabId: tab.id, selectores: r.clicsReales }); }
       catch (e) { /* si falla el modo avanzado, los radios quedan manuales */ }
     }
+    // Campos TARDÍOS (p.ej. "Descripción de la obra con copyright" de TikTok, que sólo
+    // aparece al marcar el 'Tipo de obra'): dejamos un VIGILANTE en la página que los
+    // rellena en cuanto surjan (~90 s), sin que el usuario vuelva a pulsar Rellenar.
+    const tardios = (plan.pasos || [])
+      .filter((p) => p.tardio && p.tipo === "fillLabel" && p.valor != null && p.valor !== "")
+      .map((p) => ({ labels: (p.label || "").split("|"), valor: p.valor }));
+    if (tardios.length) {
+      try {
+        await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: VIGILAR_TARDIOS, args: [tardios, 90000] });
+      } catch (e) { /* si no se puede inyectar, se llena a mano */ }
+    }
     let html = "✓ <b>" + r.ok + "</b> campo(s) rellenado(s).";
     if (form.manual) html += "<br><br>📌 " + form.manual;
     if (r.faltan && r.faltan.length) html += "<br><br>No se encontraron (revisa a mano): " + r.faltan.join(", ");
@@ -460,11 +471,18 @@ async function APLICAR(pasos) {
   }
   // VARIAS PASADAS automáticas: TikTok revela partes del formulario con retraso, así
   // que en vez de obligar al usuario a volver a pulsar "Rellenar", la propia extensión
-  // repite la pasada (hasta 4 veces, esperando entre cada una) reintentando SOLO los
-  // pasos que quedaron pendientes, hasta completar todo lo automatizable.
+  // REINTENTA en pasadas rápidas durante hasta ~16 s, reintentando SOLO los pasos
+  // pendientes, hasta que TikTok muestre todo (o no quede nada por hacer). Sale en
+  // cuanto no queda nada pendiente. Los pasos marcados p.opcional (p.ej. el botón
+  // "Siguiente", que ya no existe en el formulario de una sola página) NO bloquean ni
+  // se reportan si no aparecen.
   let pendientes = pasos.slice();
-  for (let pasada = 0; pasada < 4 && pendientes.length; pasada++) {
-    if (pasada > 0) await dur(1500); // deja que aparezca la sección que faltaba
+  const t0Pasadas = Date.now();
+  for (let pasada = 0; pendientes.length; pasada++) {
+    if (pasada > 0) {
+      if (Date.now() - t0Pasadas > 16000) break; // tope de espera total
+      await dur(700);                             // deja que aparezca la sección que faltaba
+    }
     faltan.length = 0;               // en cada pasada solo cuentan los fallos de AHORA
     const reintentar = [];
     for (const p of pendientes) {
@@ -618,7 +636,7 @@ async function APLICAR(pasos) {
             return null;
           };
           let hit = null;
-          for (let intentoFL = 0; intentoFL < (p.reintentos || 6) && !hit && !yaLleno; intentoFL++) {
+          for (let intentoFL = 0; intentoFL < (p.reintentos || 1) && !hit && !yaLleno; intentoFL++) {
             hit = buscarCampo();
             if (!hit && !yaLleno) await dur(400);
           }
@@ -732,7 +750,7 @@ async function APLICAR(pasos) {
           return n;
         };
         let n = 0;
-        for (let intentoCV = 0; intentoCV < (p.reintentos || 6) && n === 0; intentoCV++) {
+        for (let intentoCV = 0; intentoCV < (p.reintentos || 1) && n === 0; intentoCV++) {
           n = marcarCasillas();
           if (n === 0) await dur(400);
         }
@@ -891,11 +909,68 @@ async function APLICAR(pasos) {
         if (urls.length > urlInputs.length) faltan.push("difam_urls:" + puestasU + "/" + urls.length);
       }
     } catch (e) { faltan.push((p.name || p.css || "?") + ": " + e.message); }
-      if (faltan.length > antesFaltan) reintentar.push(p); // no se completó: reintentar en la próxima pasada
+      if (faltan.length > antesFaltan) {
+        // Pasos opcionales (p.ej. botón "Siguiente" inexistente en el form de una
+        // página, o campos "tardíos" que llena el vigilante): ni bloquean ni se reportan.
+        if (p.opcional || p.tardio) faltan.length = antesFaltan;
+        else reintentar.push(p); // no se completó: reintentar en la próxima pasada
+      }
     }
     pendientes = reintentar;
   }
   return { ok: ok, faltan: faltan, clicsReales: clicsReales };
+}
+
+// ===========================================================================
+//  VIGILANTE de campos TARDÍOS — se inyecta en la página y queda vigilando.
+//  Algunos campos aparecen SÓLO tras una acción manual (p.ej. la "Descripción de la
+//  obra con copyright" de TikTok, que surge al marcar el 'Tipo de obra'). Este
+//  vigilante los rellena en cuanto aparecen, hasta 'ms', sin volver a pulsar Rellenar.
+//  Debe ser autónomo (se serializa con executeScript).
+// ===========================================================================
+function VIGILAR_TARDIOS(campos, ms) {
+  const norm = (s) => (s || "").toString().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+  function setNative(el, v) {
+    const proto = el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    Object.getOwnPropertyDescriptor(proto, "value").set.call(el, v);
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+  function contexto(e) {
+    let ctx = " " + (e.placeholder || "") + " " + (e.getAttribute("aria-label") || "") + " ";
+    if (e.id) { const lf = document.querySelector('label[for="' + e.id.replace(/"/g, '\\"') + '"]'); if (lf) ctx += " " + (lf.innerText || ""); }
+    const lblby = e.getAttribute("aria-labelledby");
+    if (lblby) lblby.split(/\s+/).forEach(function (idr) { const le = document.getElementById(idr); if (le) ctx += " " + (le.innerText || ""); });
+    let prev = e.previousElementSibling, j = 0;
+    while (prev && j < 4) { ctx += " " + (prev.innerText || ""); prev = prev.previousElementSibling; j++; }
+    let par = e.parentElement, k = 0;
+    while (par && k < 6) { const ps = par.previousElementSibling; if (ps) ctx += " " + (ps.innerText || ""); par = par.parentElement; k++; }
+    return norm(ctx);
+  }
+  // Devuelve true si el campo ya está resuelto (lleno, o recién rellenado ahora).
+  function intentar(campo) {
+    const kws = (campo.labels || []).map(norm).filter(Boolean);
+    const els = Array.prototype.slice.call(
+      document.querySelectorAll('textarea,input[type=text],input[type=email],input[type=url],input[type=tel],input[type=number],input:not([type])'));
+    for (const e of els) {
+      const r = e.getBoundingClientRect();
+      if (r.width < 2 || r.height < 2) continue;
+      const c = contexto(e);
+      if (kws.some((kw) => c.indexOf(kw) >= 0)) {
+        if (e.value) return true;          // ya tiene contenido: no se pisa
+        setNative(e, campo.valor); return true;
+      }
+    }
+    return false;
+  }
+  const pend = (campos || []).slice();
+  function ronda() {
+    for (let i = pend.length - 1; i >= 0; i--) { if (intentar(pend[i])) pend.splice(i, 1); }
+    return pend.length === 0;
+  }
+  if (ronda()) return;                     // ya estaban visibles: nada que vigilar
+  const fin = Date.now() + (ms || 90000);
+  const iv = setInterval(function () { if (ronda() || Date.now() > fin) clearInterval(iv); }, 1200);
 }
 
 inicializar();
