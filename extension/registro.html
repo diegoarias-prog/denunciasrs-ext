@@ -32,6 +32,8 @@
   .tarjeta_contador { flex: 1; min-width: 140px; border: 1px solid #e5e7eb; border-radius: 9px; padding: 10px 14px; background: #fff; }
   .tarjeta_contador .numero { font-size: 22px; font-weight: 700; color: #1d4ed8; }
   .tarjeta_contador .etiqueta { font-size: 12px; color: #6b7280; }
+  .falta_captura { color: #dc2626; font-weight: 700; margin-left: 3px; }
+  .aviso_falta_captura { background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c; border-radius: 8px; padding: 10px 12px; margin-top: 12px; font-size: 13px; font-weight: 600; }
 
   /* --- Filtros --- */
   .barra_filtros_registro { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; margin-top: 8px; }
@@ -171,6 +173,7 @@
     <div class="tarjeta_contador"><div class="numero" id="contador_total">0</div><div class="etiqueta">Denuncias totales</div></div>
     <div class="tarjeta_contador"><div class="numero" id="contador_con_caso">0</div><div class="etiqueta">Con número de caso</div></div>
     <div class="tarjeta_contador"><div class="numero" id="contador_resueltas">0</div><div class="etiqueta">Resueltas</div></div>
+    <div class="tarjeta_contador"><div class="numero" id="contador_sin_captura" style="color:#dc2626;">0</div><div class="etiqueta">Formularios sin captura</div></div>
   </div>
 
   <!-- ====================== FILTROS ====================== -->
@@ -221,6 +224,7 @@
         <div class="marca_grande" id="compro_marca"></div>
         <div class="sub_compro" id="compro_sub"></div>
       </div>
+      <div class="aviso_falta_captura no_imprimir" id="aviso_falta_captura" style="display:none;">⚠ Esta denuncia por formulario todavía NO tiene la captura del formulario. Toma el pantallazo del formulario realizado y adjúntalo: usa «Capturar» en la extensión sobre el formulario, o edita esta denuncia para subir la imagen.</div>
       <div class="lista_datos_comprobante" id="compro_cuerpo"></div>
       <div class="bloque_imagen_comprobante" id="bloque_imagen_comprobante" style="display:none; margin-top:14px;">
         <img id="img_comprobante" alt="Captura del comprobante" style="max-width:100%; border:1px solid #e5e7eb; border-radius:7px; display:block;">

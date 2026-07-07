@@ -397,6 +397,7 @@ async function rellenar() {
     let html = "✓ <b>" + r.ok + "</b> campo(s) rellenado(s).";
     if (form.manual) html += "<br><br>📌 " + form.manual;
     if (r.faltan && r.faltan.length) html += "<br><br>No se encontraron (revisa a mano): " + r.faltan.join(", ");
+    html += "<br><br>⚠ <b>IMPORTANTE:</b> toma el PANTALLAZO del formulario terminado y adjúntalo con el botón «Capturar». Toda denuncia por formulario debe quedar con su captura en el Registro.";
     html += "<br><br>📓 Registrada como pendiente — agrega el N.º de caso en Registro.";
     mostrar_estado(r.ok > 0 ? "ok" : "aviso", html);
   } catch (e) {
