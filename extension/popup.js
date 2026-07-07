@@ -394,15 +394,20 @@ async function rellenar() {
       try { await chrome.runtime.sendMessage({ accion: "clicsReales", tabId: tab.id, selectores: r.clicsReales }); }
       catch (e) { /* si falla el modo avanzado, los radios quedan manuales */ }
     }
-    // Campos TARDÍOS (p.ej. "Descripción de la obra con copyright" de TikTok, que sólo
-    // aparece al marcar el 'Tipo de obra'): dejamos un VIGILANTE en la página que los
-    // rellena en cuanto surjan (~90 s), sin que el usuario vuelva a pulsar Rellenar.
-    const tardios = (plan.pasos || [])
-      .filter((p) => p.tardio && p.tipo === "fillLabel" && p.valor != null && p.valor !== "")
-      .map((p) => ({ labels: (p.label || "").split("|"), valor: p.valor }));
-    if (tardios.length) {
+    // Campos que TikTok muestra con retraso o tras una acción manual (marcar el
+    // 'Tipo de obra' revela la "Descripción"): dejamos un VIGILANTE en la página que
+    // los marca/rellena en cuanto aparezcan (~90 s), sin volver a pulsar Rellenar.
+    const campos = (plan.pasos || [])
+      .filter((p) => p.vigilar)
+      .map((p) => {
+        if (p.tipo === "clickOpcion") return { k: "opcion", textos: (p.texto || "").split("|").filter(Boolean) };
+        if (p.tipo === "fillLabel" && p.valor != null && p.valor !== "") return { k: "fill", labels: (p.label || "").split("|").filter(Boolean), valor: p.valor };
+        return null;
+      })
+      .filter(Boolean);
+    if (campos.length) {
       try {
-        await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: VIGILAR_TARDIOS, args: [tardios, 90000] });
+        await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: VIGILAR_TARDIOS, args: [campos, 90000] });
       } catch (e) { /* si no se puede inyectar, se llena a mano */ }
     }
     let html = "✓ <b>" + r.ok + "</b> campo(s) rellenado(s).";
@@ -722,7 +727,12 @@ async function APLICAR(pasos) {
             });
           // el más interno (sin hijos con el mismo texto) para no clicar el contenedor
           const el = cands.find((e) => !cands.some((o) => o !== e && e.contains(o))) || cands[0];
-          if (el) { el.click(); okC = true; }
+          if (el) {
+            try { el.scrollIntoView({ block: "center" }); } catch (e) {}
+            el.click();
+            marcarParaClicReal(el); // además, clic REAL (trusted) para que React de TikTok lo fije
+            okC = true;
+          }
           if (!okC) await dur(300);
         }
         if (okC) ok++; else faltan.push("opcion:" + p.texto);
@@ -947,8 +957,8 @@ function VIGILAR_TARDIOS(campos, ms) {
     while (par && k < 6) { const ps = par.previousElementSibling; if (ps) ctx += " " + (ps.innerText || ""); par = par.parentElement; k++; }
     return norm(ctx);
   }
-  // Devuelve true si el campo ya está resuelto (lleno, o recién rellenado ahora).
-  function intentar(campo) {
+  // Rellena un campo de texto por su etiqueta. Devuelve true si ya está resuelto.
+  function intentarFill(campo) {
     const kws = (campo.labels || []).map(norm).filter(Boolean);
     const els = Array.prototype.slice.call(
       document.querySelectorAll('textarea,input[type=text],input[type=email],input[type=url],input[type=tel],input[type=number],input:not([type])'));
@@ -963,9 +973,29 @@ function VIGILAR_TARDIOS(campos, ms) {
     }
     return false;
   }
+  // Marca una OPCIÓN (radio) por su texto visible. Devuelve true en cuanto la clica
+  // (una sola vez: así no pelea si el usuario luego elige otra opción a mano).
+  function intentarOpcion(campo) {
+    const kws = (campo.textos || []).map(norm).filter(Boolean);
+    const cands = Array.prototype.slice.call(
+      document.querySelectorAll("label,span,div,p,button,li,[role=radio],[role=checkbox]"))
+      .filter((e) => {
+        const t = norm(e.innerText || e.textContent || "");
+        const r = e.getBoundingClientRect();
+        return t && t.length < 32 && r.width > 1 && r.height > 1 && kws.some((kw) => t === kw);
+      });
+    const el = cands.find((e) => !cands.some((o) => o !== e && e.contains(o))) || cands[0];
+    if (!el) return false;                 // aún no aparece la opción
+    try { el.scrollIntoView({ block: "center" }); } catch (e) {}
+    try { el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })); } catch (e) {}
+    try { el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true })); } catch (e) {}
+    try { el.click(); } catch (e) {}
+    return true;
+  }
+  const resuelto = (campo) => (campo.k === "opcion" ? intentarOpcion(campo) : intentarFill(campo));
   const pend = (campos || []).slice();
   function ronda() {
-    for (let i = pend.length - 1; i >= 0; i--) { if (intentar(pend[i])) pend.splice(i, 1); }
+    for (let i = pend.length - 1; i >= 0; i--) { if (resuelto(pend[i])) pend.splice(i, 1); }
     return pend.length === 0;
   }
   if (ronda()) return;                     // ya estaban visibles: nada que vigilar
