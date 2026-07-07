@@ -453,6 +453,9 @@
           { tipo: "fillLabel", label: "enter your email|verify your email|email address|verifica tu correo|correo electronico|introduce tu correo", valor: d.correo },
           { tipo: "fillLabel", label: "tu nombre completo|nombre completo|full name", valor: marca },
           { tipo: "fillLabel", label: "nombre del titular de los derechos de autor|titular de los derechos de autor|name of the copyright owner|copyright owner", valor: marca },
+          // El teléfono va ANTES que la dirección: así ese campo nunca queda vacío y el paso de
+          // dirección (valor=país) no se "derrama" sobre el campo del teléfono al repetirse.
+          { tipo: "fillLabel", label: "tu numero de telefono|numero de telefono|phone number|telephone number|tu telefono", valor: d.telefono },
           { tipo: "fillLabel", label: "tu direccion fisica|direccion fisica|physical address", valor: d.pais },
           { tipo: "fillLabel", label: "tu direccion de correo electronico|direccion de correo|your email address|email address", valor: d.correo },
           // La extensión MARCA por texto visible (TikTok ya no usa 'name'): "Tipo de obra"
@@ -482,6 +485,9 @@
           { tipo: "fillLabel", label: "enter your email|verify your email|email address|verifica tu correo|correo electronico|introduce tu correo", valor: d.correo },
           { tipo: "fillLabel", label: "full name|nombre completo|tu nombre completo", valor: marca },
           { tipo: "fillLabel", label: "trademark owner|owner of the trademark|propietario de marca|propietario de la marca|nombre del titular de la marca", valor: marca },
+          // El teléfono va ANTES que la dirección (mismo motivo que en tk_copy): evita que el
+          // país se derrame sobre el campo del teléfono al repetirse el autorrelleno.
+          { tipo: "fillLabel", label: "tu numero de telefono|numero de telefono|phone number|telephone number|tu telefono", valor: d.telefono },
           { tipo: "fillLabel", label: "physical address|direccion fisica|tu direccion fisica", valor: d.pais },
           { tipo: "fillLabel", label: "your email address|email address|direccion de correo|correo electronico", valor: d.correo },
           { tipo: "fillLabel", label: "jurisdiction|jurisdiccion|jurisdiccion del registro", valor: d.pais },
