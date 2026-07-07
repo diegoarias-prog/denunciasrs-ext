@@ -444,10 +444,10 @@
     tk_copy: {
       red: "TikTok", nombre: "Derechos de autor", cat: "autor",
       url: "https://www.tiktok.com/legal/report/Copyright",
-      manual: "Con UN solo clic en Rellenar basta: no vuelvas a pulsarlo. La extensión marca 'Tipo de obra'='Logotipo' y 'Origen'='Mi cuenta de TikTok personal', y rellena la 'Descripción' sola en cuanto aparece. Si TikTok te pide verificar tu correo, hazlo con calma: la extensión sigue marcando y rellenando sola los campos que aparezcan después (Tipo de obra, Origen, Descripción y casillas) durante varios minutos, sin volver a pulsar Rellenar. Si tu caso es otro tipo de obra (video, foto…), cámbialo tú con un clic. Revisa la URL antes de Enviar.",
+      manual: "Con UN solo clic en Rellenar basta: no vuelvas a pulsarlo. La extensión marca 'Tipo de obra'='Logotipo' y 'Origen'='Mi cuenta de TikTok personal', y rellena la 'Descripción' sola en cuanto aparece. Si TikTok te pide verificar tu correo, hazlo con calma: la extensión sigue marcando y rellenando sola los campos que aparezcan después (Tipo de obra, Origen, Descripción y casillas) durante varios minutos, sin volver a pulsar Rellenar. Deja ESTA pestaña abierta mientras verificas el correo. Si tu caso es otro tipo de obra (video, foto…), cámbialo tú con un clic. Revisa la URL antes de Enviar.",
       construirPlan: function (ctx) {
         var d = ctx.datos, marca = ctx.marca;
-        return { url: this.url, manual: this.manual, pasos: [
+        return { url: this.url, manual: this.manual, autorepetir: true, pasos: [
           { tipo: "dropdown", opcion: "copyright infringement in user-generated|infraccion de copyright en contenido generado|posible infraccion de copyright en contenido", esperaMs: 2500 },
           { tipo: "dropdown", opcion: "i am the copyright owner|copyright owner|soy propietario del copyright", esperaMs: 2000 },
           { tipo: "fillLabel", label: "enter your email|verify your email|email address|verifica tu correo|correo electronico|introduce tu correo", valor: d.correo },
@@ -476,7 +476,7 @@
       manual: "Con UN solo clic en Rellenar basta, no vuelvas a pulsarlo. MARCA TÚ las opciones que dependan del contenido (tipo/origen de la marca); si al marcarlas aparece un campo de 'Descripción', la extensión lo RELLENA SOLO. Si TikTok te pide verificar tu correo, hazlo con calma: la extensión sigue marcando y rellenando sola los campos que aparezcan después durante varios minutos, sin volver a pulsar Rellenar (deja abierta la pestaña). Revisa la URL antes de Enviar.",
       construirPlan: function (ctx) {
         var d = ctx.datos, marca = ctx.marca;
-        return { url: this.url, manual: this.manual, pasos: [
+        return { url: this.url, manual: this.manual, autorepetir: true, pasos: [
           { tipo: "dropdown", opcion: "trademark infringement in user-generated|infraccion de marca comercial en contenido generado|infraccion de marca en contenido generado", esperaMs: 2500 },
           { tipo: "dropdown", opcion: "i am the trademark owner|trademark owner|soy propietario de la marca", esperaMs: 2000 },
           { tipo: "fillLabel", label: "enter your email|verify your email|email address|verifica tu correo|correo electronico|introduce tu correo", valor: d.correo },
