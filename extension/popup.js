@@ -394,22 +394,8 @@ async function rellenar() {
       try { await chrome.runtime.sendMessage({ accion: "clicsReales", tabId: tab.id, selectores: r.clicsReales }); }
       catch (e) { /* si falla el modo avanzado, los radios quedan manuales */ }
     }
-    // Campos que TikTok muestra con retraso o tras una acción manual (marcar el
-    // 'Tipo de obra' revela la "Descripción"): dejamos un VIGILANTE en la página que
-    // los marca/rellena en cuanto aparezcan (~90 s), sin volver a pulsar Rellenar.
-    const campos = (plan.pasos || [])
-      .filter((p) => p.vigilar)
-      .map((p) => {
-        if (p.tipo === "clickOpcion") return { k: "opcion", textos: (p.texto || "").split("|").filter(Boolean) };
-        if (p.tipo === "fillLabel" && p.valor != null && p.valor !== "") return { k: "fill", labels: (p.label || "").split("|").filter(Boolean), valor: p.valor };
-        return null;
-      })
-      .filter(Boolean);
-    if (campos.length) {
-      try {
-        await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: VIGILAR_TARDIOS, args: [campos, 90000] });
-      } catch (e) { /* si no se puede inyectar, se llena a mano */ }
-    }
+    // (El VIGILANTE de campos tardíos vive DENTRO de APLICAR, en la página, así sigue
+    //  trabajando aunque se cierre este popup: no hace falta inyectarlo desde aquí.)
     let html = "✓ <b>" + r.ok + "</b> campo(s) rellenado(s).";
     if (form.manual) html += "<br><br>📌 " + form.manual;
     if (r.faltan && r.faltan.length) html += "<br><br>No se encontraron (revisa a mano): " + r.faltan.join(", ");
@@ -928,79 +914,69 @@ async function APLICAR(pasos) {
     }
     pendientes = reintentar;
   }
+  // VIGILANTE en la propia página (queda vivo aunque se CIERRE el popup): rellena/marca
+  // los campos que aparezcan TARDE (tras verificar el correo, marcar el 'Tipo de obra'…)
+  // revisando rápido hasta ~90 s, para no tener que volver a pulsar Rellenar. Reusa
+  // norm/setNative/marcarRadioEl del propio motor.
+  (function () {
+    const campos = (pasos || []).map(function (p) {
+      if (p.tipo === "clickOpcion") return { k: "opcion", kws: norm(p.texto || "").split("|").filter(Boolean) };
+      if (p.tipo === "fillLabel" && p.valor != null && p.valor !== "") return { k: "fill", kws: (p.label || "").split("|").map(norm).filter(Boolean), valor: p.valor };
+      if (p.tipo === "checkVarios") return { k: "check", kws: norm(p.etiquetas || "").split("|").filter(Boolean), max: p.max || 3 };
+      return null;
+    }).filter(Boolean);
+    if (!campos.length) return;
+    function ctxDe(e) {
+      let ctx = " " + (e.placeholder || "") + " " + (e.getAttribute("aria-label") || "") + " ";
+      if (e.id) { const lf = document.querySelector('label[for="' + e.id.replace(/"/g, '\\"') + '"]'); if (lf) ctx += " " + (lf.innerText || ""); }
+      const lblby = e.getAttribute("aria-labelledby");
+      if (lblby) lblby.split(/\s+/).forEach(function (idr) { const le = document.getElementById(idr); if (le) ctx += " " + (le.innerText || ""); });
+      let prev = e.previousElementSibling, j = 0;
+      while (prev && j < 4) { ctx += " " + (prev.innerText || ""); prev = prev.previousElementSibling; j++; }
+      let par = e.parentElement, k = 0;
+      while (par && k < 6) { const ps = par.previousElementSibling; if (ps) ctx += " " + (ps.innerText || ""); par = par.parentElement; k++; }
+      return norm(ctx);
+    }
+    function vFill(c) {
+      const els = Array.prototype.slice.call(document.querySelectorAll('textarea,input[type=text],input[type=email],input[type=url],input[type=tel],input[type=number],input:not([type])'));
+      for (const e of els) { const r = e.getBoundingClientRect(); if (r.width < 2 || r.height < 2) continue; const t = ctxDe(e); if (c.kws.some((kw) => t.indexOf(kw) >= 0)) { if (e.value) return true; setNative(e, c.valor); return true; } }
+      return false;
+    }
+    function vOpcion(c) {
+      const cands = Array.prototype.slice.call(document.querySelectorAll("label,span,div,p,button,li,[role=radio],[role=checkbox]"))
+        .filter(function (e) { const t = norm(e.innerText || e.textContent || ""); const r = e.getBoundingClientRect(); return t && t.length < 32 && r.width > 1 && r.height > 1 && c.kws.some((kw) => t === kw); });
+      const el = cands.find((e) => !cands.some((o) => o !== e && e.contains(o))) || cands[0];
+      if (!el) return false;
+      try { el.scrollIntoView({ block: "center" }); } catch (e) {}
+      try { el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })); } catch (e) {}
+      try { el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true })); } catch (e) {}
+      try { el.click(); } catch (e) {}
+      return true;
+    }
+    function vCheck(c) {
+      const cbs = Array.prototype.slice.call(document.querySelectorAll('input[type=checkbox]'));
+      let n = 0, max = c.max || 3;
+      for (const cb of cbs) {
+        if (n >= max) break;
+        if (cb.checked) { n++; continue; }
+        let t = " " + (cb.getAttribute("aria-label") || "") + " ";
+        let par = cb.parentElement, k = 0;
+        while (par && k < 4) { t += " " + (par.innerText || ""); par = par.parentElement; k++; }
+        if (c.kws.some((kw) => norm(t).indexOf(kw) >= 0)) { marcarRadioEl(cb); n++; }
+      }
+      return n >= max;
+    }
+    function res(c) { return c.k === "opcion" ? vOpcion(c) : c.k === "check" ? vCheck(c) : vFill(c); }
+    let pend = campos.slice();
+    function ronda() { for (let i = pend.length - 1; i >= 0; i--) { if (res(pend[i])) pend.splice(i, 1); } return pend.length === 0; }
+    if (ronda()) return;
+    // Revisa rápido (cada 0.6 s) y llena en cuanto aparece cada campo; deja de vigilar
+    // al terminar o a los 90 s.
+    const fin = Date.now() + 90000;
+    const iv = setInterval(function () { if (ronda() || Date.now() > fin) clearInterval(iv); }, 600);
+  })();
   return { ok: ok, faltan: faltan, clicsReales: clicsReales };
 }
 
-// ===========================================================================
-//  VIGILANTE de campos TARDÍOS — se inyecta en la página y queda vigilando.
-//  Algunos campos aparecen SÓLO tras una acción manual (p.ej. la "Descripción de la
-//  obra con copyright" de TikTok, que surge al marcar el 'Tipo de obra'). Este
-//  vigilante los rellena en cuanto aparecen, hasta 'ms', sin volver a pulsar Rellenar.
-//  Debe ser autónomo (se serializa con executeScript).
-// ===========================================================================
-function VIGILAR_TARDIOS(campos, ms) {
-  const norm = (s) => (s || "").toString().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
-  function setNative(el, v) {
-    const proto = el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-    Object.getOwnPropertyDescriptor(proto, "value").set.call(el, v);
-    el.dispatchEvent(new Event("input", { bubbles: true }));
-    el.dispatchEvent(new Event("change", { bubbles: true }));
-  }
-  function contexto(e) {
-    let ctx = " " + (e.placeholder || "") + " " + (e.getAttribute("aria-label") || "") + " ";
-    if (e.id) { const lf = document.querySelector('label[for="' + e.id.replace(/"/g, '\\"') + '"]'); if (lf) ctx += " " + (lf.innerText || ""); }
-    const lblby = e.getAttribute("aria-labelledby");
-    if (lblby) lblby.split(/\s+/).forEach(function (idr) { const le = document.getElementById(idr); if (le) ctx += " " + (le.innerText || ""); });
-    let prev = e.previousElementSibling, j = 0;
-    while (prev && j < 4) { ctx += " " + (prev.innerText || ""); prev = prev.previousElementSibling; j++; }
-    let par = e.parentElement, k = 0;
-    while (par && k < 6) { const ps = par.previousElementSibling; if (ps) ctx += " " + (ps.innerText || ""); par = par.parentElement; k++; }
-    return norm(ctx);
-  }
-  // Rellena un campo de texto por su etiqueta. Devuelve true si ya está resuelto.
-  function intentarFill(campo) {
-    const kws = (campo.labels || []).map(norm).filter(Boolean);
-    const els = Array.prototype.slice.call(
-      document.querySelectorAll('textarea,input[type=text],input[type=email],input[type=url],input[type=tel],input[type=number],input:not([type])'));
-    for (const e of els) {
-      const r = e.getBoundingClientRect();
-      if (r.width < 2 || r.height < 2) continue;
-      const c = contexto(e);
-      if (kws.some((kw) => c.indexOf(kw) >= 0)) {
-        if (e.value) return true;          // ya tiene contenido: no se pisa
-        setNative(e, campo.valor); return true;
-      }
-    }
-    return false;
-  }
-  // Marca una OPCIÓN (radio) por su texto visible. Devuelve true en cuanto la clica
-  // (una sola vez: así no pelea si el usuario luego elige otra opción a mano).
-  function intentarOpcion(campo) {
-    const kws = (campo.textos || []).map(norm).filter(Boolean);
-    const cands = Array.prototype.slice.call(
-      document.querySelectorAll("label,span,div,p,button,li,[role=radio],[role=checkbox]"))
-      .filter((e) => {
-        const t = norm(e.innerText || e.textContent || "");
-        const r = e.getBoundingClientRect();
-        return t && t.length < 32 && r.width > 1 && r.height > 1 && kws.some((kw) => t === kw);
-      });
-    const el = cands.find((e) => !cands.some((o) => o !== e && e.contains(o))) || cands[0];
-    if (!el) return false;                 // aún no aparece la opción
-    try { el.scrollIntoView({ block: "center" }); } catch (e) {}
-    try { el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })); } catch (e) {}
-    try { el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true })); } catch (e) {}
-    try { el.click(); } catch (e) {}
-    return true;
-  }
-  const resuelto = (campo) => (campo.k === "opcion" ? intentarOpcion(campo) : intentarFill(campo));
-  const pend = (campos || []).slice();
-  function ronda() {
-    for (let i = pend.length - 1; i >= 0; i--) { if (resuelto(pend[i])) pend.splice(i, 1); }
-    return pend.length === 0;
-  }
-  if (ronda()) return;                     // ya estaban visibles: nada que vigilar
-  const fin = Date.now() + (ms || 90000);
-  const iv = setInterval(function () { if (ronda() || Date.now() > fin) clearInterval(iv); }, 1200);
-}
 
 inicializar();

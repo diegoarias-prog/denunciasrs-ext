@@ -444,7 +444,7 @@
     tk_copy: {
       red: "TikTok", nombre: "Derechos de autor", cat: "autor",
       url: "https://www.tiktok.com/legal/report/Copyright",
-      manual: "TikTok se rellena SOLO en UN clic, no vuelvas a pulsar Rellenar. La extensión marca por defecto 'Tipo de obra'='Logotipo' y 'Origen'='Fuera de TikTok', y rellena la 'Descripción' sola. Si tu caso es otro tipo de obra (video, foto…), cámbialo tú con un clic. Deja abierta la pestaña ~1 min. Si pide verificar tu correo, hazlo primero. Revisa la URL antes de Enviar.",
+      manual: "TikTok se rellena SOLO en UN clic, no vuelvas a pulsar Rellenar. La extensión marca 'Tipo de obra'='Logotipo' y 'Origen'='Mi cuenta de TikTok personal', y rellena la 'Descripción' sola en cuanto aparece. Si tu caso es otro tipo de obra (video, foto…), cámbialo tú con un clic. Si el formulario pide verificar tu correo, hazlo primero (los campos se llenan solos al aparecer). Revisa la URL antes de Enviar.",
       construirPlan: function (ctx) {
         var d = ctx.datos, marca = ctx.marca;
         return { url: this.url, manual: this.manual, pasos: [
@@ -458,7 +458,7 @@
           // La extensión MARCA por texto visible (TikTok ya no usa 'name'): "Tipo de obra"
           // = Logotipo (al marcarlo aparece la Descripción) y "Origen" = Fuera de TikTok.
           { tipo: "clickOpcion", texto: "logotipo|logo", esperaMs: 600, vigilar: true },
-          { tipo: "clickOpcion", texto: "fuera de tiktok|outside of tiktok|outside tiktok", esperaMs: 300, vigilar: true },
+          { tipo: "clickOpcion", texto: "mi cuenta de tiktok personal|my personal tiktok account|personal tiktok account", esperaMs: 300, vigilar: true },
           // Campo TARDÍO: "Descripción de la obra con copyright" aparece SOLO al marcar el
           // 'Tipo de obra'. Lo llena el VIGILANTE (ver popup.js) en cuanto surge. La
           // justificación ya trae la política infringida citada (skill citar-politica-violada).
