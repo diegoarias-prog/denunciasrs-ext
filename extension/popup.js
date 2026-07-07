@@ -916,8 +916,16 @@ async function APLICAR(pasos) {
   }
   // VIGILANTE en la propia página (queda vivo aunque se CIERRE el popup): rellena/marca
   // los campos que aparezcan TARDE (tras verificar el correo, marcar el 'Tipo de obra'…)
-  // revisando rápido hasta ~90 s, para no tener que volver a pulsar Rellenar. Reusa
+  // revisando rápido hasta 5 min, para no tener que volver a pulsar Rellenar. Reusa
   // norm/setNative/marcarRadioEl del propio motor.
+  //
+  // CLAVE para el 1-clic real: en React de TikTok los clics SINTÉTICOS no "pegan"; solo
+  // el CLIC REAL (trusted) vía chrome.debugger fija radios/casillas. El vigilante corre en
+  // mundo ISOLATED, así que SÍ tiene chrome.runtime.sendMessage: por cada ronda etiqueta los
+  // elementos pendientes de tipo opcion/check con un atributo ÚNICO (data-crv-N) y le pide al
+  // service worker que les dé el clic real (en un SOLO mensaje por ronda). NO da por hecha una
+  // opción por el clic sintético: solo cuando el input asociado queda .checked (o ya no hay
+  // candidato sin marcar). Así un único "Rellenar" completa también la 2.ª etapa.
   (function () {
     const campos = (pasos || []).map(function (p) {
       if (p.tipo === "clickOpcion") return { k: "opcion", kws: norm(p.texto || "").split("|").filter(Boolean) };
@@ -926,6 +934,25 @@ async function APLICAR(pasos) {
       return null;
     }).filter(Boolean);
     if (!campos.length) return;
+    // Contador propio para atributos únicos (no colisiona entre rondas ni con los data-cr-N
+    // de la 1.ª etapa). Cada elemento a "clic real" recibe su propio data-crv-<n>.
+    let crvSeq = 0;
+    let enviando = false; // evita solapar dos attach del debugger a la vez
+    function pedirClicReal(el, batch) {
+      if (!el) return;
+      const attr = "data-crv-" + (crvSeq++);
+      try { el.setAttribute(attr, "1"); } catch (e) { return; }
+      batch.push("[" + attr + "]");
+    }
+    function enviarBatch(batch) {
+      if (!batch.length || enviando) return; // si hay un envío en curso, reintentamos la próxima ronda
+      enviando = true;
+      try {
+        const p = chrome.runtime.sendMessage({ accion: "clicsReales", selectores: batch });
+        if (p && p.then) p.then(function () { enviando = false; }, function () { enviando = false; });
+        else enviando = false;
+      } catch (e) { enviando = false; }
+    }
     function ctxDe(e) {
       let ctx = " " + (e.placeholder || "") + " " + (e.getAttribute("aria-label") || "") + " ";
       if (e.id) { const lf = document.querySelector('label[for="' + e.id.replace(/"/g, '\\"') + '"]'); if (lf) ctx += " " + (lf.innerText || ""); }
@@ -942,37 +969,99 @@ async function APLICAR(pasos) {
       for (const e of els) { const r = e.getBoundingClientRect(); if (r.width < 2 || r.height < 2) continue; const t = ctxDe(e); if (c.kws.some((kw) => t.indexOf(kw) >= 0)) { if (e.value) return true; setNative(e, c.valor); return true; } }
       return false;
     }
-    function vOpcion(c) {
-      const cands = Array.prototype.slice.call(document.querySelectorAll("label,span,div,p,button,li,[role=radio],[role=checkbox]"))
+    // Candidatos visibles cuyo texto coincide EXACTO con alguna palabra clave de la opción.
+    function candidatosOpcion(c) {
+      return Array.prototype.slice.call(document.querySelectorAll("label,span,div,p,button,li,[role=radio],[role=checkbox]"))
         .filter(function (e) { const t = norm(e.innerText || e.textContent || ""); const r = e.getBoundingClientRect(); return t && t.length < 32 && r.width > 1 && r.height > 1 && c.kws.some((kw) => t === kw); });
+    }
+    // input radio/checkbox asociado a un elemento de opción (el propio input, el de su
+    // label[for], o el que cuelga de él o de un ancestro cercano). null si no lo hay.
+    function inputAsociado(el) {
+      if (!el) return null;
+      if (el.tagName === "INPUT") return el;
+      if (el.tagName === "LABEL") {
+        const f = el.getAttribute("for");
+        if (f) { try { const x = document.getElementById(f); if (x && x.tagName === "INPUT") return x; } catch (e) {} }
+      }
+      let inp = el.querySelector && el.querySelector('input[type=radio],input[type=checkbox]');
+      if (inp) return inp;
+      let par = el.parentElement, k = 0;
+      while (par && k < 3) { inp = par.querySelector('input[type=radio],input[type=checkbox]'); if (inp) return inp; par = par.parentElement; k++; }
+      return null;
+    }
+    // ¿la opción quedó realmente seleccionada? (input .checked o aria-checked=true)
+    function opcionMarcada(c) {
+      const cands = candidatosOpcion(c);
+      if (!cands.length) return false; // aún no aparece: no está hecha
+      for (const e of cands) {
+        const inp = inputAsociado(e);
+        if (inp && inp.checked) return true;
+        if (e.getAttribute && e.getAttribute("aria-checked") === "true") return true;
+        const rr = e.closest && e.closest('[role=radio],[role=checkbox]');
+        if (rr && rr.getAttribute("aria-checked") === "true") return true;
+      }
+      return false;
+    }
+    // ¿queda algún candidato claramente SIN marcar? (input sin .checked o aria-checked=false)
+    function hayCandidatoSinMarcar(c) {
+      const cands = candidatosOpcion(c);
+      for (const e of cands) {
+        const inp = inputAsociado(e);
+        if (inp && !inp.checked) return true;
+        if (e.getAttribute && e.getAttribute("aria-checked") === "false") return true;
+        const rr = e.closest && e.closest('[role=radio],[role=checkbox]');
+        if (rr && rr.getAttribute("aria-checked") === "false") return true;
+      }
+      return false;
+    }
+    function vOpcion(c, batch) {
+      if (opcionMarcada(c)) return true; // ya está fijada
+      const cands = candidatosOpcion(c);
       const el = cands.find((e) => !cands.some((o) => o !== e && e.contains(o))) || cands[0];
-      if (!el) return false;
+      if (!el) return false; // aún no aparece en el DOM
       try { el.scrollIntoView({ block: "center" }); } catch (e) {}
       try { el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })); } catch (e) {}
       try { el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true })); } catch (e) {}
       try { el.click(); } catch (e) {}
-      return true;
+      pedirClicReal(el, batch); // el clic REAL lo dará el service worker
+      c._pedido = true;
+      // Solo se da por hecha si de verdad quedó marcada, o si ya no hay nada sin marcar.
+      if (opcionMarcada(c)) return true;
+      if (c._pedido && !hayCandidatoSinMarcar(c)) return true;
+      return false; // se reintentará (clic real) en la próxima ronda
     }
-    function vCheck(c) {
-      const cbs = Array.prototype.slice.call(document.querySelectorAll('input[type=checkbox]'));
-      let n = 0, max = c.max || 3;
+    function vCheck(c, batch) {
+      const cbs = Array.prototype.slice.call(document.querySelectorAll('input[type=checkbox]'))
+        .filter(function (cb) {
+          let t = " " + (cb.getAttribute("aria-label") || "") + " ";
+          let par = cb.parentElement, k = 0;
+          while (par && k < 4) { t += " " + (par.innerText || ""); par = par.parentElement; k++; }
+          return c.kws.some((kw) => norm(t).indexOf(kw) >= 0);
+        });
+      const max = c.max || 3;
+      let marcadas = cbs.filter((cb) => cb.checked).length; // solo cuentan las .checked de verdad
+      let porPedir = max - marcadas;
       for (const cb of cbs) {
-        if (n >= max) break;
-        if (cb.checked) { n++; continue; }
-        let t = " " + (cb.getAttribute("aria-label") || "") + " ";
-        let par = cb.parentElement, k = 0;
-        while (par && k < 4) { t += " " + (par.innerText || ""); par = par.parentElement; k++; }
-        if (c.kws.some((kw) => norm(t).indexOf(kw) >= 0)) { marcarRadioEl(cb); n++; }
+        if (porPedir <= 0) break;
+        if (cb.checked) continue;
+        marcarRadioEl(cb);          // intento sintético
+        pedirClicReal(cb, batch);   // y CLIC REAL (el sintético no fija en React)
+        porPedir--;
       }
-      return n >= max;
+      return cbs.filter((cb) => cb.checked).length >= max;
     }
-    function res(c) { return c.k === "opcion" ? vOpcion(c) : c.k === "check" ? vCheck(c) : vFill(c); }
+    function res(c, batch) { return c.k === "opcion" ? vOpcion(c, batch) : c.k === "check" ? vCheck(c, batch) : vFill(c); }
     let pend = campos.slice();
-    function ronda() { for (let i = pend.length - 1; i >= 0; i--) { if (res(pend[i])) pend.splice(i, 1); } return pend.length === 0; }
+    function ronda() {
+      const batch = [];
+      for (let i = pend.length - 1; i >= 0; i--) { if (res(pend[i], batch)) pend.splice(i, 1); }
+      enviarBatch(batch); // en UNA sola llamada por ronda, los clics reales pendientes
+      return pend.length === 0;
+    }
     if (ronda()) return;
-    // Revisa rápido (cada 0.6 s) y llena en cuanto aparece cada campo; deja de vigilar
-    // al terminar o a los 90 s.
-    const fin = Date.now() + 90000;
+    // Revisa rápido (cada 0.6 s) y llena/marca en cuanto aparece cada campo; deja de vigilar
+    // al terminar o a los 5 min (el ida y vuelta de verificar el correo puede tardar).
+    const fin = Date.now() + 300000;
     const iv = setInterval(function () { if (ronda() || Date.now() > fin) clearInterval(iv); }, 600);
   })();
   return { ok: ok, faltan: faltan, clicsReales: clicsReales };
