@@ -4,48 +4,168 @@
 <meta charset="UTF-8">
 <title>Marcas · Denuncias RS</title>
 <style>
-  body { font-family: "Segoe UI", Arial, sans-serif; max-width: 1200px; margin: 24px auto; color: #1f2937; padding: 0 16px; }
-  h1 { font-size: 18px; }
-  p.sub { color: #6b7280; font-size: 13px; }
-  .tabla_marcas_scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-  table { width: 100%; min-width: 1040px; border-collapse: separate; border-spacing: 0; margin-top: 14px; }
-  th, td { border: 1px solid #e5e7eb; padding: 8px 10px; font-size: 14px; text-align: left; vertical-align: middle; }
-  th { background: #f8fafc; white-space: nowrap; }
-  /* Columna MARCA congelada: siempre visible al mover la barra horizontal */
-  th.col_marca, td.col_marca { position: sticky; left: 0; z-index: 1; background: #fff; box-shadow: 2px 0 0 #e5e7eb; }
-  th.col_marca { z-index: 3; background: #f8fafc; }
-  input { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; }
-  input[data-campo="marca"]    { min-width: 150px; }
-  input[data-campo="pais"]     { min-width: 100px; }
-  input[data-campo="correo"]   { min-width: 190px; }
-  input[data-campo="sitio"],
-  input[data-campo="play"],
-  input[data-campo="appstore"] { min-width: 240px; }
-  input[data-campo="dominio"]  { min-width: 140px; }
-  input[data-campo="telefono"] { min-width: 160px; }
-  input[data-campo="registro"] { min-width: 160px; }
-  td.acc { width: 84px; text-align: center; }
-  .boton { padding: 8px 14px; border: 0; border-radius: 7px; background: #1d4ed8; color: #fff; font-weight: 600; cursor: pointer; font-size: 13px; }
-  .boton.sec { background: #e5e7eb; color: #111827; }
-  .boton.del { background: #ef4444; padding: 4px 8px; }
-  .barra { margin-top: 16px; display: flex; gap: 10px; align-items: center; }
-  #aviso { margin-left: auto; color: #065f46; font-size: 13px; }
+  /* ====== Base ====== */
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Segoe UI", Arial, sans-serif;
+    color: #1f2937;
+    background: #f8fafc;
+    margin: 0;
+    padding: 0 16px 96px;   /* deja aire abajo para la barra fija */
+  }
+  .contenedor_de_marcas { max-width: 1200px; margin: 0 auto; }
+
+  /* ====== Encabezado ====== */
+  .encabezado_de_marcas { padding: 22px 0 6px; }
+  .encabezado_de_marcas h1 { font-size: 20px; margin: 0 0 4px; }
+  .encabezado_de_marcas p.subtitulo_de_marcas { color: #6b7280; font-size: 13px; margin: 0; line-height: 1.5; }
+
+  /* ====== Barra de búsqueda (pegada arriba) ====== */
+  .barra_buscador_de_marcas {
+    position: sticky; top: 0; z-index: 20;
+    background: #f8fafc;
+    padding: 12px 0;
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    border-bottom: 1px solid #e5e7eb;
+  }
+  .campo_buscador_de_marcas { position: relative; flex: 1 1 320px; }
+  .campo_buscador_de_marcas .icono_lupa {
+    position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+    font-size: 15px; color: #6b7280; pointer-events: none;
+  }
+  .buscador_de_marcas {
+    width: 100%; padding: 10px 12px 10px 36px;
+    border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px;
+    background: #fff; outline: none;
+  }
+  .buscador_de_marcas:focus { border-color: #1d4ed8; box-shadow: 0 0 0 3px rgba(29,78,216,.12); }
+  .contador_de_marcas { color: #6b7280; font-size: 13px; white-space: nowrap; }
+
+  /* ====== Rejilla de tarjetas ====== */
+  .rejilla_de_marcas {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 16px;
+    margin-top: 18px;
+  }
+  .sin_resultados_de_marcas {
+    display: none;
+    text-align: center; color: #6b7280; font-size: 14px;
+    padding: 40px 0;
+  }
+
+  /* ====== Tarjeta de marca ====== */
+  .tarjeta_de_marca {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.06);
+    padding: 14px 14px 12px;
+    display: flex; flex-direction: column;
+  }
+
+  /* Cabecera de la tarjeta: avatar + nombre + país */
+  .cabecera_de_tarjeta { display: flex; align-items: center; gap: 12px; }
+  .avatar_de_marca {
+    flex: 0 0 auto;
+    width: 44px; height: 44px; border-radius: 50%;
+    background: #1d4ed8; color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 19px; font-weight: 700; text-transform: uppercase;
+    user-select: none;
+  }
+  .datos_cabecera_de_marca { flex: 1 1 auto; min-width: 0; }
+  .nombre_de_marca {
+    width: 100%;
+    border: 1px solid transparent; background: transparent;
+    font-size: 16px; font-weight: 700; color: #1f2937;
+    padding: 4px 6px; border-radius: 6px; margin: 0 0 2px;
+  }
+  .nombre_de_marca:hover { border-color: #e5e7eb; }
+  .nombre_de_marca:focus { border-color: #1d4ed8; background: #fff; outline: none; box-shadow: 0 0 0 3px rgba(29,78,216,.12); }
+  .pais_cabecera_de_marca { font-size: 12.5px; color: #6b7280; padding: 0 6px; }
+  .pais_cabecera_de_marca::before { content: "📍 "; }
+
+  /* Cuerpo: secciones agrupadas */
+  .cuerpo_de_tarjeta { margin-top: 12px; display: flex; flex-direction: column; gap: 12px; }
+  .seccion_de_tarjeta { }
+  .titulo_de_seccion {
+    font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+    color: #6b7280; margin: 0 0 6px; padding-bottom: 3px;
+    border-bottom: 1px solid #e5e7eb;
+  }
+  .campo_de_marca { margin-bottom: 8px; }
+  .campo_de_marca:last-child { margin-bottom: 0; }
+  .etiqueta_de_campo {
+    display: block; font-size: 12px; color: #374151; margin: 0 0 3px; font-weight: 600;
+  }
+  .entrada_de_campo {
+    width: 100%; padding: 8px 10px;
+    border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13.5px; color: #1f2937;
+    background: #fff;
+  }
+  .entrada_de_campo:focus { border-color: #1d4ed8; outline: none; box-shadow: 0 0 0 3px rgba(29,78,216,.12); }
+
+  /* Pie de la tarjeta: botón quitar */
+  .pie_de_tarjeta { margin-top: 12px; display: flex; justify-content: flex-end; }
+
+  /* ====== Botones ====== */
+  .boton_de_marca {
+    padding: 8px 14px; border: 0; border-radius: 7px;
+    background: #1d4ed8; color: #fff; font-weight: 600; cursor: pointer; font-size: 13px;
+    font-family: inherit;
+  }
+  .boton_de_marca:hover { background: #1a43be; }
+  .boton_de_marca.secundario { background: #e5e7eb; color: #111827; }
+  .boton_de_marca.secundario:hover { background: #d6dae0; }
+  .boton_de_marca.quitar {
+    background: #fff; color: #ef4444; border: 1px solid #fecaca; padding: 6px 12px; font-weight: 600;
+  }
+  .boton_de_marca.quitar:hover { background: #fef2f2; border-color: #ef4444; }
+
+  /* ====== Barra inferior fija ====== */
+  .barra_inferior_de_marcas {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
+    background: #fff; border-top: 1px solid #e5e7eb;
+    box-shadow: 0 -1px 4px rgba(0,0,0,.05);
+    padding: 12px 16px;
+  }
+  .contenido_barra_inferior {
+    max-width: 1200px; margin: 0 auto;
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  }
+  .aviso_de_guardado { margin-left: auto; color: #065f46; font-size: 13px; font-weight: 600; }
 </style>
 </head>
 <body>
-  <h1>Marcas</h1>
-  <p class="sub">Edita país, correo, sitio, los enlaces de Play Store / App Store (para Apps maliciosas), el dominio (para Delisting) y el N.º de registro de la marca comercial (para Facebook/Instagram Marca registrada) de cada marca. El resto de los datos (leyes, códigos, justificación) se genera solo. Lo que cambies se guarda en este navegador.</p>
-  <div class="tabla_marcas_scroll">
-    <table>
-      <thead><tr><th class="col_marca">Marca</th><th>País</th><th>Correo</th><th>Sitio (opcional)</th><th>Play Store</th><th>App Store</th><th>Dominio</th><th>Teléfono</th><th>N.º de registro</th><th class="acc">Acción</th></tr></thead>
-      <tbody id="cuerpo"></tbody>
-    </table>
+  <div class="contenedor_de_marcas">
+    <header class="encabezado_de_marcas">
+      <h1>Marcas</h1>
+      <p class="subtitulo_de_marcas">Edita país, correo, teléfono, sitio, TikTok oficial, los enlaces de Play Store / App Store (para Apps maliciosas), el dominio (para Delisting) y el N.º de registro de la marca comercial (para Facebook/Instagram Marca registrada). El resto de los datos (leyes, códigos, justificación) se genera solo. Lo que cambies se guarda en este navegador.</p>
+    </header>
+
+    <div class="barra_buscador_de_marcas">
+      <div class="campo_buscador_de_marcas">
+        <span class="icono_lupa" aria-hidden="true">🔍</span>
+        <input type="text" id="buscador_de_marcas" class="buscador_de_marcas"
+               placeholder="Buscar por marca o país…" autocomplete="off"
+               aria-label="Buscar marca por nombre o país">
+      </div>
+      <span class="contador_de_marcas" id="contador_de_marcas"></span>
+    </div>
+
+    <div class="rejilla_de_marcas" id="rejilla_de_marcas"></div>
+    <div class="sin_resultados_de_marcas" id="sin_resultados_de_marcas">No hay marcas que coincidan con la búsqueda.</div>
   </div>
-  <div class="barra">
-    <button class="boton sec" id="agregar">+ Agregar marca</button>
-    <button class="boton" id="guardar">Guardar cambios</button>
-    <span id="aviso"></span>
+
+  <div class="barra_inferior_de_marcas">
+    <div class="contenido_barra_inferior">
+      <button class="boton_de_marca secundario" id="boton_agregar_marca" type="button">+ Agregar marca</button>
+      <button class="boton_de_marca" id="boton_guardar_marcas" type="button">Guardar cambios</button>
+      <span class="aviso_de_guardado" id="aviso_de_guardado" role="status" aria-live="polite"></span>
+    </div>
   </div>
+
   <script src="datos/marcas.js"></script>
   <script src="opciones.js"></script>
 </body>
