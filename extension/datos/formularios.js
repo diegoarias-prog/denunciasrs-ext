@@ -444,7 +444,7 @@
     tk_copy: {
       red: "TikTok", nombre: "Derechos de autor", cat: "autor",
       url: "https://www.tiktok.com/legal/report/Copyright",
-      manual: "Con UN solo clic en Rellenar basta: no vuelvas a pulsarlo. La extensión marca 'Tipo de obra'='Logotipo' y 'Origen'='Mi cuenta de TikTok personal', y rellena la 'Descripción' sola en cuanto aparece. Si TikTok te pide verificar tu correo, hazlo con calma: la extensión sigue marcando y rellenando sola los campos que aparezcan después (Tipo de obra, Origen, Descripción y casillas) durante varios minutos, sin volver a pulsar Rellenar. Deja ESTA pestaña abierta mientras verificas el correo. Si tu caso es otro tipo de obra (video, foto…), cámbialo tú con un clic. Revisa la URL antes de Enviar.",
+      manual: "Con UN solo clic en Rellenar basta: no vuelvas a pulsarlo. La extensión marca 'Tipo de obra'='Logotipo' y 'Origen'='Mi cuenta de TikTok personal', rellena las DOS URLs de la cuenta personal (la cuenta que posees y el contenido publicado originalmente) con el perfil de TikTok de la marca, y rellena la 'Descripción' sola en cuanto aparece. Si la marca no tiene perfil de TikTok configurado en 'Marcas', esas dos URLs quedarán vacías para que las llenes a mano. Si TikTok te pide verificar tu correo, hazlo con calma: la extensión sigue marcando y rellenando sola los campos que aparezcan después (Tipo de obra, Origen, las dos URLs, Descripción y casillas) durante varios minutos, sin volver a pulsar Rellenar. Deja ESTA pestaña abierta mientras verificas el correo. Si tu caso es otro tipo de obra (video, foto…), cámbialo tú con un clic. Revisa la URL antes de Enviar.",
       construirPlan: function (ctx) {
         var d = ctx.datos, marca = ctx.marca;
         return { url: this.url, manual: this.manual, autorepetir: true, pasos: [
@@ -459,9 +459,19 @@
           { tipo: "fillLabel", label: "tu direccion fisica|direccion fisica|physical address", valor: d.pais },
           { tipo: "fillLabel", label: "tu direccion de correo electronico|direccion de correo|your email address|email address", valor: d.correo },
           // La extensión MARCA por texto visible (TikTok ya no usa 'name'): "Tipo de obra"
-          // = Logotipo (al marcarlo aparece la Descripción) y "Origen" = Fuera de TikTok.
+          // = Logotipo (al marcarlo aparece la Descripción) y "Origen de la obra con copyright"
+          // = "Mi cuenta de TikTok personal". Al marcar el Origen, TikTok revela DOS campos de
+          // URL (la cuenta que posees y el contenido que publicaste originalmente); ambos se
+          // rellenan con el perfil oficial de TikTok de la marca (d.tiktok) en los dos fillLabel
+          // de más abajo. Si la marca no tiene perfil de TikTok, esos dos campos quedan vacíos.
           { tipo: "clickOpcion", texto: "logotipo|logo", esperaMs: 600, vigilar: true },
           { tipo: "clickOpcion", texto: "mi cuenta de tiktok personal|my personal tiktok account|personal tiktok account", esperaMs: 300, vigilar: true },
+          // Dos URLs que aparecen SOLO al marcar "Mi cuenta de TikTok personal". Ambas van con
+          // el perfil oficial de la marca (d.tiktok). Deben ir ANTES de fillUrlsUnaCaja: al
+          // quedar NO vacías, fillUrlsUnaCaja las salta (comprueba e.value) y no les mete por
+          // error las URLs a denunciar, aunque compartan el placeholder "tiktok.com/@".
+          { tipo: "fillLabel", label: "url directa a la cuenta de tiktok que posees|cuenta de tiktok que posees y gestionas|la cuenta de tiktok que posees|direct url to the tiktok account you own|tiktok account you own and currently manage|account you own and manage", valor: d.tiktok, opcional: true, tardio: true, vigilar: true },
+          { tipo: "fillLabel", label: "url del contenido que publicaste originalmente en tiktok|contenido que publicaste originalmente|que publicaste originalmente en tiktok|url of the content you originally posted on tiktok|content you originally posted|originally posted on tiktok", valor: d.tiktok, opcional: true, tardio: true, vigilar: true },
           // Campo TARDÍO: "Descripción de la obra con copyright" aparece SOLO al marcar el
           // 'Tipo de obra'. Lo llena el VIGILANTE (ver popup.js) en cuanto surge. La
           // justificación ya trae la política infringida citada (skill citar-politica-violada).
