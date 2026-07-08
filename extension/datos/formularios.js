@@ -184,6 +184,8 @@
   function postalDe(pais) {
     try { return window.JUSTIF.POSTAL[window.JUSTIF.norm(pais)] || ""; } catch (e) { return ""; }
   }
+  // URL de la base de datos de marcas del país (campo TM_URL); OMPI como fallback.
+  function baseMarcasDe(pais) { try { return window.JUSTIF.baseMarcasDe(pais); } catch (e) { return "https://branddb.wipo.int/"; } }
 
   // Constructores de plan para los formularios de Meta (Facebook/Instagram), que
   // comparten estructura y nombres de campo. 'this' es el objeto del formulario.
@@ -223,6 +225,8 @@
       { tipo: "fillName", name: "websiterightsholder", valor: (this.red === "Instagram" ? (d.instagram || d.sitio) : (d.facebook || d.sitio)) || "" },
       { tipo: "fillName", name: "what_is_your_trademark", valor: marca },
       { tipo: "fillLabel", label: "numero de registro de la marca comercial|numero de registro|registration number|trademark registration number|registration number of the trademark", valor: (d.registro || "") },
+      // URL de la base de datos de marcas del país de la marca (OMPI si el país no tiene buscador público fiable).
+      { tipo: "fillName", name: "TM_URL", valor: baseMarcasDe(d.pais) },
       { tipo: "select", name: "rights_owner_country_routing", texto: d.pais },
       { tipo: "check", name: "content_type[]", texto: "uses the rights owner" },
       { tipo: "fillName", name: "why_reporting_other", valor: ctx.justif },

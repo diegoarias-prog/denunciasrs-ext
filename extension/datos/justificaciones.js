@@ -14,6 +14,22 @@
   const CODIGO = { honduras: "+504", ecuador: "+593", nicaragua: "+505", "costa rica": "+506",
     guatemala: "+502", panama: "+507", "el salvador": "+503" };
 
+  // URL de la base de datos PÚBLICA de marcas comerciales por país, para el campo TM_URL
+  // del formulario de Marca Registrada de Facebook/Instagram. Se usa la base nacional donde
+  // hay buscador público fiable; para El Salvador, Honduras y Nicaragua (sin buscador
+  // público estable) se usa la Global Brand Database de la OMPI, que también sirve de
+  // fallback universal para cualquier país fuera del mapa.
+  const BASE_MARCAS = {
+    guatemala: "https://econsulta.rpi.gob.gt/erpiconsulta/eRPIConsultas.aspx",
+    panama: "https://consulta.digerpi.gob.pa/",
+    ecuador: "https://www.derechosintelectuales.gob.ec/senadi-en-linea/",
+    "costa rica": "https://rpi.rnp.go.cr/wipofileindex/xhtml/sesion/index.xhtml",
+    "el salvador": "https://branddb.wipo.int/",
+    honduras: "https://branddb.wipo.int/",
+    nicaragua: "https://branddb.wipo.int/"
+  };
+  const OMPI_BASE_MARCAS = "https://branddb.wipo.int/"; // fallback universal (OMPI Global Brand Database)
+
   const LEY_PENAL = {
     honduras: "el Código Penal de Honduras en sus disposiciones sobre delitos contra el honor (calumnia, injuria y difamación)",
     ecuador: "el Código Orgánico Integral Penal (COIP) del Ecuador, art. 182 (calumnia) y normas sobre injuria",
@@ -214,6 +230,14 @@
       : "la legislación penal aplicable sobre delitos contra el honor (calumnia, injuria y difamación)");
   }
 
+  // Devuelve la URL de la base de datos de marcas para el país indicado (campo TM_URL de
+  // Facebook/Instagram Marca Registrada). Si el país no está en el mapa o viene vacío,
+  // cae en la OMPI (Global Brand Database).
+  function baseMarcasDe(pais) {
+    var k = norm(pais);
+    return (k && BASE_MARCAS[k]) ? BASE_MARCAS[k] : OMPI_BASE_MARCAS;
+  }
+
   // Agrega la línea de política infringida según la clave de formulario (es/en).
   function conPolitica(texto, formKey, lang) {
     const p = POLITICAS[formKey];
@@ -224,6 +248,10 @@
 
   window.JUSTIF = {
     norm: norm, POSTAL: POSTAL, CODIGO: CODIGO, POLITICAS: POLITICAS,
+    // BASE_MARCAS: URL de la base de datos pública de marcas por país; baseMarcasDe: getter
+    // con fallback a la OMPI (Global Brand Database). Se usan para el campo TM_URL del
+    // formulario de Marca Registrada de Facebook/Instagram.
+    BASE_MARCAS: BASE_MARCAS, baseMarcasDe: baseMarcasDe,
     justificacion: justificacion, conPolitica: conPolitica, leyPenal: leyPenal
   };
 })();
