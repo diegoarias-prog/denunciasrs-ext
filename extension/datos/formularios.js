@@ -49,6 +49,15 @@
     });
   }
 
+  // Devuelve la URL del perfil OFICIAL de la marca en la red indicada (campo
+  // dedicado por red en los datos de la marca). "" si no hay. Se incluye en los
+  // correos para que la red identifique la cuenta AUTÉNTICA frente al impostor.
+  function perfilDeRed(d, redNombre) {
+    var map = { "Facebook": "facebook", "Instagram": "instagram", "TikTok": "tiktok", "X": "x", "YouTube": "youtube", "LinkedIn": "linkedin" };
+    var k = map[redNombre];
+    return (k && d && d[k]) ? String(d[k]).trim() : "";
+  }
+
   // Correo de denuncia (propiedad intelectual / suplantación) para una red social,
   // en inglés (lang "en") o español (lang "es"). Correo propio -> "We are [marca]";
   // si usa el de Seguridad Máxima -> "representing". Cita las normas de esa red.
@@ -65,6 +74,7 @@
         ? "\n\nEste contenido infringe las políticas y normas comunitarias de " + redNombre + ", incluyendo:\n" +
           pols.map(function (p) { return "- " + p.t + ": " + p.u; }).join("\n")
         : "";
+      var lineaPerfilE = (function(){ var p = perfilDeRed(d, redNombre); return p ? ("El perfil oficial de " + marca + " en " + redNombre + " es: " + p + "\n\n") : ""; })();
       var cuerpoE =
         "Hola,\n\n" + quienesE + "\n\n" +
         "Reportamos contenido en " + redNombre + " que infringe la propiedad intelectual y los derechos de marca de " + marca + ".\n\n" +
@@ -73,6 +83,7 @@
         "- Engaña y confunde a los clientes de " + marca + " y puede usarse para solicitar información confidencial o defraudarlos.\n" +
         "- No tiene ninguna relación comercial ni legal con " + marca + " e infringe sus derechos de marca y propiedad intelectual." +
         polTxtE + "\n\n" +
+        lineaPerfilE +
         "Solicitamos respetuosa y URGENTEMENTE la eliminación inmediata del siguiente contenido:\n\n" +
         negrita("Contenido a denunciar (URL del perfil / página / publicación):") + "\n" +
         urlsODefault(ctx, "[ Pega aquí el/los enlace(s) de " + redNombre + " a denunciar ]") + "\n\n" +
@@ -87,6 +98,7 @@
       ? "\n\nThis content violates " + redNombre + "'s policies and community standards, including:\n" +
         pols.map(function (p) { return "- " + p.t + ": " + p.u; }).join("\n")
       : "";
+    var lineaPerfil = (function(){ var p = perfilDeRed(d, redNombre); return p ? ("The official " + redNombre + " profile of " + marca + " is: " + p + "\n\n") : ""; })();
     var cuerpo =
       "Hello,\n\n" + quienes + "\n\n" +
       "We are reporting content on " + redNombre + " that infringes the intellectual property and brand rights of " + marca + ".\n\n" +
@@ -95,6 +107,7 @@
       "- It misleads and confuses " + marca + "'s customers and may be used to request confidential information or to defraud them.\n" +
       "- It has no business or legal relationship with " + marca + " and infringes its trademark and intellectual property rights." +
       polTxt + "\n\n" +
+      lineaPerfil +
       "We respectfully and URGENTLY request the immediate removal of the following content:\n\n" +
       negrita("Reported content (profile / page / post URL):") + "\n" +
       urlsODefault(ctx, "[ Paste here the " + redNombre + " link(s) you are reporting ]") + "\n\n" +
@@ -124,6 +137,7 @@
           ", en particular sus normas sobre suplantación de identidad, información falsa o engañosa y acoso u hostigamiento, incluyendo:\n" +
           pols.map(function (p) { return "- " + p.t + ": " + p.u; }).join("\n")
         : "";
+      var lineaPerfilE = (function(){ var p = perfilDeRed(d, redNombre); return p ? ("El perfil oficial de " + marca + " en " + redNombre + " es: " + p + "\n\n") : ""; })();
       var cuerpoE =
         "Hola,\n\n" + quienesE + "\n\n" +
         "Reportamos contenido difamatorio publicado en " + redNombre + " en contra de " + marca + ". Solicitamos su eliminación inmediata por las siguientes razones:\n" +
@@ -133,6 +147,7 @@
         "- No existe relación comercial ni legal con " + marca + ", ni base veraz para las afirmaciones; su permanencia agrava el daño reputacional cada día que sigue publicado." +
         polTxtE + "\n\n" +
         "Además, los hechos pueden constituir delitos contra el honor (calumnia, injuria y difamación) conforme a " + ley + (pais ? " (" + pais + ")" : "") + ".\n\n" +
+        lineaPerfilE +
         "Solicitamos respetuosa y URGENTEMENTE la eliminación inmediata del siguiente contenido:\n\n" +
         negrita("Contenido a denunciar (URL del perfil / página / publicación):") + "\n" +
         urlsODefault(ctx, "[ Pega aquí el/los enlace(s) de " + redNombre + " a denunciar ]") + "\n\n" +
@@ -148,6 +163,7 @@
         "'s policies and community standards, in particular its rules on impersonation, false or misleading information and harassment or bullying, including:\n" +
         pols.map(function (p) { return "- " + p.t + ": " + p.u; }).join("\n")
       : "";
+    var lineaPerfil = (function(){ var p = perfilDeRed(d, redNombre); return p ? ("The official " + redNombre + " profile of " + marca + " is: " + p + "\n\n") : ""; })();
     var cuerpo =
       "Hello,\n\n" + quienes + "\n\n" +
       "We are reporting defamatory content published on " + redNombre + " against " + marca + ". We request its immediate removal for the following reasons:\n" +
@@ -157,6 +173,7 @@
       "- There is no business or legal relationship with " + marca + ", nor any truthful basis for the claims; leaving it online aggravates the reputational harm every day it remains." +
       polTxt + "\n\n" +
       "Furthermore, these facts may constitute crimes against honor (slander, libel and defamation) under " + ley + (pais ? " (" + pais + ")" : "") + ".\n\n" +
+      lineaPerfil +
       "We respectfully and URGENTLY request the immediate removal of the following content:\n\n" +
       negrita("Reported content (profile / page / post URL):") + "\n" +
       urlsODefault(ctx, "[ Paste here the " + redNombre + " link(s) you are reporting ]") + "\n\n" +
@@ -180,7 +197,9 @@
       { tipo: "select", name: "rights_owner_country_routing", texto: d.pais },
       { tipo: "select", name: "describe_copyrighted_work_me", texto: "otro" },
       { tipo: "fillName", name: "reporter_name", valor: marca },
-      { tipo: "fillName", name: "copyright_url", valor: d.sitio || "" },
+      // URL del titular: perfil OFICIAL de la marca en esta red (Instagram/Facebook) con
+      // fallback a d.sitio si el perfil de la red aún no está configurado en "Marcas".
+      { tipo: "fillName", name: "copyright_url", valor: (this.red === "Instagram" ? (d.instagram || d.sitio) : (d.facebook || d.sitio)) || "" },
       { tipo: "fillName", name: "describe_copyrighted_work_me_URLs", valor: "Perfil oficial de " + marca },
       { tipo: "check", name: "Content_type[]", texto: "publicacion" },
       { tipo: "fillName", name: "why_reporting_other", valor: ctx.justif },
@@ -199,7 +218,9 @@
       { tipo: "fillName", name: "email", valor: d.correo },
       { tipo: "fillName", name: "confirm_email", valor: d.correo },
       { tipo: "fillName", name: "reporter_name", valor: marca },
-      { tipo: "fillName", name: "websiterightsholder", valor: d.sitio || "" },
+      // Web del titular: perfil OFICIAL de la marca en esta red (Instagram/Facebook) con
+      // fallback a d.sitio si el perfil de la red aún no está configurado en "Marcas".
+      { tipo: "fillName", name: "websiterightsholder", valor: (this.red === "Instagram" ? (d.instagram || d.sitio) : (d.facebook || d.sitio)) || "" },
       { tipo: "fillName", name: "what_is_your_trademark", valor: marca },
       { tipo: "fillLabel", label: "numero de registro de la marca comercial|numero de registro|registration number|trademark registration number|registration number of the trademark", valor: (d.registro || "") },
       { tipo: "select", name: "rights_owner_country_routing", texto: d.pais },
@@ -332,7 +353,8 @@
           { tipo: "fillName", name: "trademark_name", valor: marca },
           { tipo: "fillName", name: "trademark_country", valor: pais },
           { tipo: "fillName", name: "trademark_company_name", valor: marca },
-          { tipo: "fillName", name: "trademark_company_url", valor: sitio },
+          // URL de la empresa titular: página OFICIAL de la marca en LinkedIn con fallback a sitio.
+          { tipo: "fillName", name: "trademark_company_url", valor: (ctx.datos.linkedin || sitio) },
           { tipo: "fillName", name: "trademark_company_contact", valor: marca },
           { tipo: "fillName", name: "trademark_contact_email", valor: correo },
           { tipo: "fillCss", css: "#dyna-content_description", valor: ctx.justif },
@@ -428,7 +450,8 @@
           { tipo: "fillName", suf: true, name: "DescriptionText", valor: ctx.justif },
           { tipo: "fillName", suf: true, name: "Content_Owner_Name__c", valor: marca },
           { tipo: "fillName", suf: true, name: "trademark-holder-address", valor: d.pais },
-          { tipo: "fillName", suf: true, name: "trademark-holder-website", valor: d.sitio || "" },
+          // Web del titular: perfil OFICIAL de la marca en X con fallback a d.sitio.
+          { tipo: "fillName", suf: true, name: "trademark-holder-website", valor: d.x || d.sitio || "" },
           { tipo: "fillName", suf: true, name: "trademark-word", valor: marca },
           { tipo: "select", suf: true, name: "trademark-holder-country", texto: d.pais },
           { tipo: "check", name: "confirm-1" },
