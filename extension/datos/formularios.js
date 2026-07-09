@@ -225,8 +225,10 @@
       { tipo: "fillName", name: "websiterightsholder", valor: (this.red === "Instagram" ? (d.instagram || d.sitio) : (d.facebook || d.sitio)) || "" },
       { tipo: "fillName", name: "what_is_your_trademark", valor: marca },
       { tipo: "fillLabel", label: "numero de registro de la marca comercial|numero de registro|registration number|trademark registration number|registration number of the trademark", valor: (d.registro || "") },
-      // URL de la base de datos de marcas del país de la marca (OMPI si el país no tiene buscador público fiable).
-      { tipo: "fillName", name: "TM_URL", valor: baseMarcasDe(d.pais) },
+      // Enlace directo al registro de la marca en una base de datos de marcas: usa d.tmurl
+      // (override por marca, editable en el panel de Marcas) si está definido; si no, cae en
+      // la base por país (OMPI si el país no tiene buscador público fiable).
+      { tipo: "fillName", name: "TM_URL", valor: (d.tmurl && String(d.tmurl).trim()) ? String(d.tmurl).trim() : baseMarcasDe(d.pais) },
       { tipo: "select", name: "rights_owner_country_routing", texto: d.pais },
       { tipo: "check", name: "content_type[]", texto: "uses the rights owner" },
       { tipo: "fillName", name: "why_reporting_other", valor: ctx.justif },
