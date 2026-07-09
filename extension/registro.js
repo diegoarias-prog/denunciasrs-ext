@@ -13,7 +13,7 @@ const CLAVE_REGISTRO = "denuncias_registro";
 const PLATAFORMAS_REGISTRO = [
   "Facebook", "Instagram", "WhatsApp", "TikTok", "X", "LinkedIn", "YouTube",
   "Telegram", "GitHub", "Apps maliciosas", "Delisting", "Ofertas falsas de trabajo",
-  "Outlook / Hotmail", "Scribd", "Studocu"
+  "Outlook / Hotmail", "Scribd", "Studocu", "Sitios maliciosos Banguat"
 ];
 
 // "borrador" se conserva por compatibilidad con registros antiguos; el alta usa

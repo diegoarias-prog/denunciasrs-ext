@@ -181,6 +181,60 @@
     return { to: destino, asunto: "Defamatory content against " + marca + " on " + redNombre + " - urgent removal request", cuerpo: cuerpo };
   }
 
+  // Correo para denunciar un SITIO WEB malicioso (phishing) que usa la imagen de un
+  // funcionario del Banco de Guatemala. Fijo a Banco de Guatemala (banguat.gob.gt);
+  // 'personaEn'/'personaEs' es el nombre (+cargo) del funcionario suplantado. El
+  // destinatario (abuse del hosting) y la(s) URL(s) del sitio los completa el usuario.
+  function correoBanguatMalicioso(ctx, personaEn, personaEs) {
+    var contacto = "diegoarias@seguridadmaxima.net";
+    var en = {
+      to: "",
+      asunto: "¡¡Urgent!! - Malicious site(1) - sitio web malicioso - Banco de Guatemala",
+      cuerpo:
+        "Dear Abuse Team,\n\n" +
+        "We are Seguridad Maxima en Redes Informáticas, acting on behalf of Banco de Guatemala.\n\n" +
+        "For all incident-related communications, please contact us at: " + contacto + "\n\n" +
+        "We have identified the following fraudulent domain actively used in phishing campaigns targeting Banco de Guatemala's customers.\n\n" +
+        "We respectfully request the immediate suspension and removal of the malicious content from your infrastructure.\n\n" +
+        "Findings and Security Concerns:\n\n" +
+        "They use the image of Mr. " + personaEn + " without authorization and commit fraud.\n\n" +
+        "Brand Impersonation: The site uses the logos, visual identity and trademarks of Banco de Guatemala without authorization, deceiving users into believing it is an official service.\n\n" +
+        "Active Phishing Campaign: The domain is being used to harvest sensitive credentials (banking data, personal information) from victims.\n\n" +
+        "Mobile Access Enabled: The malicious site is fully accessible from mobile devices, increasing the attack surface and facilitating the scam.\n\n" +
+        "Geo-Restricted Access (IMPORTANT): In many cases, the malicious site can ONLY be viewed/accessed from Guatemala. The attackers geo-restrict the domain so that it does not load from other countries, which can make the URL appear inactive or unavailable from your location. If the link does not open on your end, this is expected: we can provide screenshots, video evidence and/or verification performed from a Guatemalan connection upon request.\n\n" +
+        "Acceptable Use Policy Violation: Hosting phishing content is an explicit violation of your AUP / Terms of Service.\n\n" +
+        "No Commercial Relationship: Banco de Guatemala has no commercial, operational or legal relationship with this website or its owner.\n\n" +
+        "Reputational and Financial Damage: End users are at real risk of financial loss and identity theft, and the legitimate brand suffers ongoing reputational harm.\n\n" +
+        "Official Domain: The only authorized and legitimate website of Banco de Guatemala is: https://banguat.gob.gt\n\n" +
+        negrita("Reported malicious site(s):") + "\n" + urlsODefault(ctx, "[ Paste here the malicious URL(s)/domain(s) you are reporting ]") + "\n\n" +
+        "Below you will find screenshots of the phishing site and the legitimate website for visual reference.\n\n" +
+        "Sincerely,\nSeguridad Maxima en Redes Informáticas\nOn behalf of Banco de Guatemala\nContact: " + contacto
+    };
+    var es = {
+      asunto: "¡¡Urgente!! - Sitio web malicioso - Banco de Guatemala",
+      cuerpo:
+        "Estimado equipo de Abuso,\n\n" +
+        "Somos Seguridad Máxima en Redes Informáticas, actuando en representación del Banco de Guatemala.\n\n" +
+        "Para toda comunicación relacionada con el incidente, contáctenos en: " + contacto + "\n\n" +
+        "Hemos identificado el siguiente dominio fraudulento usado activamente en campañas de phishing dirigidas a los clientes del Banco de Guatemala.\n\n" +
+        "Solicitamos respetuosamente la suspensión y eliminación inmediata del contenido malicioso de su infraestructura.\n\n" +
+        "Hallazgos y preocupaciones de seguridad:\n\n" +
+        "Utilizan la imagen del Sr. " + personaEs + " sin autorización y cometen fraude.\n\n" +
+        "Suplantación de marca: El sitio usa los logotipos, la identidad visual y las marcas del Banco de Guatemala sin autorización, engañando a los usuarios para que crean que es un servicio oficial.\n\n" +
+        "Campaña de phishing activa: El dominio se usa para robar credenciales sensibles (datos bancarios, información personal) de las víctimas.\n\n" +
+        "Acceso móvil habilitado: El sitio malicioso es totalmente accesible desde dispositivos móviles, ampliando la superficie de ataque y facilitando la estafa.\n\n" +
+        "Acceso restringido por geografía (IMPORTANTE): En muchos casos, el sitio malicioso SOLO puede verse/accederse desde Guatemala. Los atacantes restringen el dominio por geografía para que no cargue desde otros países, lo que puede hacer que la URL parezca inactiva o no disponible desde su ubicación. Si el enlace no abre de su lado, es lo esperado: podemos proporcionar capturas, evidencia en video y/o verificación hecha desde una conexión en Guatemala si lo solicitan.\n\n" +
+        "Violación de la política de uso aceptable: Alojar contenido de phishing es una violación explícita de su AUP / Términos de Servicio.\n\n" +
+        "Sin relación comercial: El Banco de Guatemala no tiene ninguna relación comercial, operativa ni legal con este sitio web ni con su propietario.\n\n" +
+        "Daño reputacional y financiero: Los usuarios finales están en riesgo real de pérdida financiera y robo de identidad, y la marca legítima sufre un daño reputacional continuo.\n\n" +
+        "Dominio oficial: El único sitio web autorizado y legítimo del Banco de Guatemala es: https://banguat.gob.gt\n\n" +
+        negrita("Sitio(s) malicioso(s) a denunciar:") + "\n" + urlsODefault(ctx, "[ Pega aquí la(s) URL(s)/dominio(s) malicioso(s) a denunciar ]") + "\n\n" +
+        "A continuación encontrará capturas del sitio de phishing y del sitio web legítimo como referencia visual.\n\n" +
+        "Atentamente,\nSeguridad Máxima en Redes Informáticas\nEn representación del Banco de Guatemala\nContacto: " + contacto
+    };
+    return bilingue(en, es);
+  }
+
   function postalDe(pais) {
     try { return window.JUSTIF.POSTAL[window.JUSTIF.norm(pais)] || ""; } catch (e) { return ""; }
   }
@@ -702,6 +756,19 @@
             "Saludos,\n" + (repres ? "Seguridad Máxima en Redes Informáticas" : marca) + (d.correo ? "\nContacto: " + d.correo : "") };
         return bilingue(en, es);
       }
+    },
+    // ===== Sitios maliciosos Banguat (phishing que usa la imagen de funcionarios) — por CORREO =====
+    banguat_mal_alvaro: {
+      red: "Sitios maliciosos Banguat", nombre: "Sitio malicioso — Álvaro González Ricci", cat: "banguat_mal", tipo: "email",
+      destino: "",
+      manual: "En 'Para' pega el correo de abuse del proveedor/hosting del sitio malicioso. Donde dice [ ... ] pega la(s) URL(s) del sitio, revisa y envía.",
+      construirEmail: function (ctx) { return correoBanguatMalicioso(ctx, "Alvaro Gonzalez Ricci (President of Banco de Guatemala)", "Álvaro González Ricci (Presidente del Banco de Guatemala)"); }
+    },
+    banguat_mal_jonathan: {
+      red: "Sitios maliciosos Banguat", nombre: "Sitio malicioso — Jonathan Menkos", cat: "banguat_mal", tipo: "email",
+      destino: "",
+      manual: "En 'Para' pega el correo de abuse del proveedor/hosting del sitio malicioso. Donde dice [ ... ] pega la(s) URL(s) del sitio, revisa y envía.",
+      construirEmail: function (ctx) { return correoBanguatMalicioso(ctx, "Jonathan Menkos", "Jonathan Menkos"); }
     },
     // ===== "Por correo" dentro del cintillo de cada red (propiedad intelectual) =====
     fb_correo: {
