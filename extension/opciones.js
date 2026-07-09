@@ -69,6 +69,7 @@ const SECCIONES_DE_MARCA = [
   ]},
   { titulo: "⚖️ Legal", campos: [
     { clave: "registro",  etiqueta: "⚖️ N.º de registro", placeholder: "N.º de marca registrada" },
+    { clave: "tmurl",     etiqueta: "🔗 Enlace al registro (TM_URL)", placeholder: "https://branddb.wipo.int/…" },
   ]},
 ];
 
