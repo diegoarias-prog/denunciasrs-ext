@@ -531,8 +531,9 @@
       construirPlan: function (ctx) {
         var d = ctx.datos, marca = ctx.marca;
         return { url: this.url, manual: this.manual, autorepetir: true, pasos: [
-          { tipo: "dropdown", opcion: "copyright infringement in user-generated|infraccion de copyright en contenido generado|posible infraccion de copyright en contenido", esperaMs: 2500 },
-          { tipo: "dropdown", opcion: "i am the copyright owner|copyright owner|soy propietario del copyright", esperaMs: 2000 },
+          // Palabras clave en ESPAÑOL (el form siempre sale en español) + respaldo por posición.
+          { tipo: "dropdown", opcion: "autor&contenido|copyright&contenido|derechos de autor|infraccion de copyright", opcionIndice: 0, esperaMs: 2500 },
+          { tipo: "dropdown", opcion: "propietari&autor|propietari&copyright|titular&autor|soy propietario", opcionIndice: 0, esperaMs: 2000 },
           { tipo: "fillLabel", label: "enter your email|verify your email|email address|verifica tu correo|correo electronico|introduce tu correo", valor: d.correo },
           { tipo: "fillLabel", label: "tu nombre completo|nombre completo|full name", valor: marca },
           { tipo: "fillLabel", label: "nombre del titular de los derechos de autor|titular de los derechos de autor|name of the copyright owner|copyright owner", valor: marca },
@@ -573,8 +574,13 @@
       construirPlan: function (ctx) {
         var d = ctx.datos, marca = ctx.marca;
         return { url: this.url, manual: this.manual, autorepetir: true, pasos: [
-          { tipo: "dropdown", opcion: "trademark infringement in user-generated|infraccion de marca comercial en contenido generado|infraccion de marca en contenido generado", esperaMs: 2500 },
-          { tipo: "dropdown", opcion: "i am the trademark owner|trademark owner|soy propietario de la marca", esperaMs: 2000 },
+          // 1.ª pregunta "¿Qué problema tienes?": la PRIMERA opción (infracción de marca en el
+          // contenido de un usuario). Casa por palabras clave en ESPAÑOL —el formulario SIEMPRE
+          // sale en español— sin depender de la frase exacta; si TikTok la reescribe, el respaldo
+          // por posición (opcionIndice:0) elige igualmente la primera.
+          { tipo: "dropdown", opcion: "marca&contenido|marca&infracc|marca&incumplimiento", opcionIndice: 0, esperaMs: 2500 },
+          // "Rol" tras verificar el correo: propietario/titular de la marca (primera opción).
+          { tipo: "dropdown", opcion: "propietari&marca|titular&marca|soy propietario", opcionIndice: 0, esperaMs: 2000 },
           { tipo: "fillLabel", label: "enter your email|verify your email|email address|verifica tu correo|correo electronico|introduce tu correo", valor: d.correo },
           { tipo: "fillLabel", label: "full name|nombre completo|tu nombre completo", valor: marca },
           { tipo: "fillLabel", label: "trademark owner|owner of the trademark|propietario de marca|propietario de la marca|nombre del titular de la marca", valor: marca },
