@@ -172,14 +172,33 @@ async function APLICAR(pasos, opciones) {
         if (!btn) btn = pool[p.indice || 0] || pool[0];
         if (btn) {
           btn.click();
-          const ops = norm(p.opcion).split("|").filter(Boolean); // varias alternativas (es|en)
-          let o = null;
+          const ops = norm(p.opcion || "").split("|").filter(Boolean); // alternativas (es|en)
+          // Coincidencia por PALABRAS CLAVE: una alternativa con "&" casa si TODAS sus
+          // palabras están presentes (en cualquier orden). Así NO dependemos de la frase
+          // exacta de TikTok, que cambia de redacción e idioma. Ej.: "marca&contenido"
+          // casa con "Infracción de derechos de marca comercial en el contenido generado…".
+          const coincide = (t) => ops.some((kw) => kw.indexOf("&") >= 0
+            ? kw.split("&").every((tok) => (tok = tok.trim()) && t.indexOf(tok) >= 0)
+            : t.indexOf(kw) >= 0);
+          // Lista solo las opciones REALMENTE visibles del menú abierto (evita <li> sueltos
+          // de otros menús de la página); si no hay role=option/menuitem, cae a <li>.
+          const listar = () => {
+            let l = Array.prototype.slice.call(document.querySelectorAll('[role=option],[role=menuitem]'))
+              .filter((x) => { const r = x.getBoundingClientRect(); return r.width > 2 && r.height > 2 && norm(x.innerText); });
+            if (!l.length) l = Array.prototype.slice.call(document.querySelectorAll('li'))
+              .filter((x) => { const r = x.getBoundingClientRect(); return r.width > 2 && r.height > 2 && norm(x.innerText); });
+            return l;
+          };
+          let o = null, lista = [];
           for (let intento = 0; intento < 7 && !o; intento++) {
             await dur(400);
-            o = Array.prototype.slice.call(document.querySelectorAll('[role=option],li,[role=menuitem]'))
-              .find((x) => { const t = norm(x.innerText); return ops.some((kw) => t.indexOf(kw) >= 0); });
+            lista = listar();
+            if (ops.length) o = lista.find((x) => coincide(norm(x.innerText)));
           }
-          if (o) { o.click(); ok++; } else { faltan.push("opcion:" + p.opcion); try { document.body.click(); } catch (e) {} }
+          // Respaldo por POSICIÓN: si no casó por texto (TikTok cambió la redacción) y el
+          // paso indica la opción por orden, la tomamos por índice (p.ej. la 1.ª).
+          if (!o && typeof p.opcionIndice === "number" && lista.length) o = lista[p.opcionIndice] || null;
+          if (o) { o.click(); ok++; } else { faltan.push("opcion:" + (p.opcion || p.opcionIndice)); try { document.body.click(); } catch (e) {} }
         } else faltan.push("menu:" + (p.pregunta || p.indice));
         if (p.esperaMs) await dur(p.esperaMs);
       } else if (p.tipo === "fillLabel") {

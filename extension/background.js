@@ -10,6 +10,19 @@
 // poder RE-INYECTARLO nosotros mismos en la pestaña durante el autorrelleno persistente.
 importScripts("motor.js");
 
+// Los archivos de datos (marcas/justificaciones/politicas/formularios) usan `window.*`
+// para exponer sus globales. En el service worker no existe `window`, así que lo
+// apuntamos a `self` (globalThis) ANTES de cargarlos. Ninguno usa el DOM al cargarse
+// (solo definen objetos de datos), por eso funcionan también aquí. Esto permite armar
+// el "plan de relleno" desde el MENÚ CONTEXTUAL (clic derecho) igual que en el popup.
+self.window = self;
+importScripts(
+  "datos/marcas.js",           // window.MARCAS_BASE, window.CORREO_PERSONA
+  "datos/justificaciones.js",  // window.JUSTIF
+  "datos/politicas_generales.js", // window.POLITICAS_GENERALES
+  "datos/formularios.js"       // window.FORMULARIOS (usa JUSTIF y POLITICAS al ejecutar)
+);
+
 function cmd(tabId, method, params) {
   return new Promise((resolve, reject) => {
     chrome.debugger.sendCommand({ tabId }, method, params || {}, (r) => {
@@ -281,4 +294,260 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (tabId && AUTORRELLENO[tabId]) AUTORRELLENO[tabId].cancelar = true;
     return;
   }
+});
+
+// ============================================================================
+//  MENÚ CONTEXTUAL (clic derecho) — aparece en CUALQUIER página del navegador.
+//  Estructura:  🚩 Denuncias RS ▸ [cada MARCA] ▸ ("✍ Rellenar ESTA página" + TODOS
+//  los formularios).  "Rellenar ESTA página" autodetecta el formulario por la URL de
+//  la pestaña actual y lo rellena.  Cada formulario ABRE la denuncia (los web en una
+//  pestaña nueva y la rellena; los de correo generan el borrador) con esa marca — así
+//  se denuncia desde donde sea, no solo estando en el formulario.
+//  Reutiliza los mismos planes (FORMULARIOS), datos de marca (MARCAS = base + editadas
+//  − eliminadas) y URLs del Excel que el popup. Justificación: ESPAÑOL en formularios
+//  web (regla del proyecto); en los correos se conserva el bilingüe en/es.
+// ============================================================================
+const CLAVE_URLS_CTX = "urls_denuncia";        // misma clave que el popup (CLAVE_URLS)
+const RS_CONTEXTS = ["page", "frame", "selection", "link", "image", "editable"];
+const rsEnc = (s) => encodeURIComponent(String(s)); // marca -> id de menú (nunca lleva '|')
+const rsDec = (s) => { try { return decodeURIComponent(s); } catch (e) { return s; } };
+
+// Marcas: base + editadas − eliminadas (idéntico a obtener_marcas() del popup).
+async function ctxObtenerMarcas() {
+  const d = await chrome.storage.local.get(["marcas_usuario", "marcas_eliminadas"]);
+  const guardadas = d.marcas_usuario || {};
+  const eliminadas = d.marcas_eliminadas || [];
+  const PELIGROSA = (k) => k === "__proto__" || k === "constructor" || k === "prototype";
+  const todas = Object.assign({}, self.MARCAS_BASE);
+  Object.keys(guardadas).forEach((m) => {
+    if (PELIGROSA(m)) return; // evita contaminación de prototipo por un nombre de marca malicioso
+    const base = self.MARCAS_BASE[m] || {}, g = guardadas[m] || {}, o = Object.assign({}, base);
+    Object.keys(g).forEach((k) => { if (PELIGROSA(k)) return; if (g[k] !== "" && g[k] != null) o[k] = g[k]; else if (!(k in o)) o[k] = g[k]; });
+    todas[m] = o;
+  });
+  eliminadas.forEach((n) => delete todas[n]);
+  return todas;
+}
+
+// Detecta qué formulario web corresponde a la URL de la pestaña (mismo dominio raíz
+// + la ruta del formulario más específica que sea prefijo de la ruta de la pestaña).
+function ctxDetectarForm(urlTab) {
+  let host = "", path = "";
+  try { const u = new URL(urlTab); host = u.host.replace(/^www\./, ""); path = (u.pathname || "").toLowerCase(); }
+  catch (e) { return null; }
+  let mejor = null, mejorLargo = -1;
+  Object.keys(self.FORMULARIOS).forEach((k) => {
+    const f = self.FORMULARIOS[k];
+    if (!f.url || f.tipo === "email") return; // los reportes por correo no se rellenan en página
+    let fh = "", fp = "";
+    try { const fu = new URL(f.url); fh = fu.host.replace(/^www\./, ""); fp = (fu.pathname || "").toLowerCase(); }
+    catch (e) { return; }
+    const raiz = fh.split(".").slice(-2).join("."); // p.ej. tiktok.com
+    if (host.indexOf(raiz) < 0 && fh.indexOf(host.split(".").slice(-2).join(".")) < 0) return;
+    if (fp && fp.length > 1 && path.indexOf(fp) === 0) {         // ruta distintiva coincide
+      if (fp.length > mejorLargo) { mejor = k; mejorLargo = fp.length; }
+    } else if (mejorLargo < 0) {                                  // solo coincide el dominio
+      mejor = mejor || k;
+    }
+  });
+  return mejor;
+}
+
+// Registra —o reutiliza— una entrada "pendiente" (anti doble-clic), igual que el popup.
+async function ctxRegistrarDenuncia(marca, form, urlDen) {
+  const CLAVE = "denuncias_registro";
+  const g = await chrome.storage.local.get([CLAVE]);
+  const lista = Array.isArray(g[CLAVE]) ? g[CLAVE] : [];
+  const plataforma = form.red;
+  const tipo = form.tipo === "email" ? "correo" : "formulario";
+  const categoria = form.nombre;
+  const VENTANA = 60 * 1000, ahora = Date.now();
+  const existente = lista.find((d) =>
+    d.estado === "pendiente" && d.marca === marca && d.plataforma === plataforma &&
+    d.categoria === categoria && (ahora - new Date(d.fecha).getTime()) < VENTANA);
+  if (existente) {
+    if (urlDen && !existente.url_denunciada) existente.url_denunciada = urlDen; // guarda el enlace clicado
+    await chrome.storage.local.set({ [CLAVE]: lista, ultima_denuncia_registro: existente.id });
+    return existente.id;
+  }
+  const consecutivo = lista.filter((d) => d.marca === marca)
+    .reduce((m, d) => Math.max(m, parseInt(d.consecutivo, 10) || 0), 0) + 1;
+  const id = Date.now() + "_" + Math.random().toString(36).slice(2, 8);
+  lista.push({ id, marca, plataforma, tipo, categoria, url_denunciada: urlDen || "", numero_caso: "",
+    estado: "pendiente", consecutivo, notas: "", fecha: new Date().toISOString() });
+  await chrome.storage.local.set({ [CLAVE]: lista, ultima_denuncia_registro: id });
+  return id;
+}
+
+// Muestra un aviso breve DENTRO de la página (toast), sin permiso de notificaciones.
+function ctxAvisar(tabId, texto, esError) {
+  chrome.scripting.executeScript({
+    target: { tabId },
+    func: (t, err) => {
+      try {
+        const id = "rs_toast_denuncias";
+        let d = document.getElementById(id);
+        if (!d) { d = document.createElement("div"); d.id = id; document.body.appendChild(d); }
+        d.textContent = t;
+        d.style.cssText = "position:fixed;z-index:2147483647;left:50%;top:18px;transform:translateX(-50%);" +
+          "max-width:90vw;padding:12px 18px;border-radius:10px;font:600 14px system-ui,Arial,sans-serif;" +
+          "color:#fff;box-shadow:0 6px 24px rgba(0,0,0,.25);background:" + (err ? "#c0392b" : "#1e824c") + ";";
+        clearTimeout(window.__rs_toast_t);
+        window.__rs_toast_t = setTimeout(() => { try { d.remove(); } catch (e) {} }, 6000);
+      } catch (e) {}
+    },
+    args: [String(texto), !!esError]
+  }).catch(() => {});
+}
+
+// Adjunta a la denuncia el CONTENIDO del correo generado (para verlo/copiarlo en el
+// Registro), igual que guardar_correo_en_denuncia() del popup.
+async function ctxGuardarCorreo(id, em) {
+  if (!id || !em) return;
+  const CLAVE = "denuncias_registro";
+  const g = await chrome.storage.local.get([CLAVE]);
+  const lista = Array.isArray(g[CLAVE]) ? g[CLAVE] : [];
+  const d = lista.find((x) => String(x.id) === String(id));
+  if (!d) return;
+  d.correo = { to: em.to || "", asunto: em.asunto || "", cuerpo: em.cuerpo || "",
+    asunto_es: em.asunto_es || "", cuerpo_es: em.cuerpo_es || "", enviado: false, fecha: new Date().toISOString() };
+  await chrome.storage.local.set({ [CLAVE]: lista });
+}
+
+// Espera a que la pestaña `tabId` termine de cargar (o 15 s como tope).
+function ctxEsperarCarga(tabId) {
+  return new Promise((resolve) => {
+    const l = (id, info) => { if (id === tabId && info.status === "complete") { chrome.tabs.onUpdated.removeListener(l); resolve(); } };
+    chrome.tabs.onUpdated.addListener(l);
+    setTimeout(() => { try { chrome.tabs.onUpdated.removeListener(l); } catch (e) {} resolve(); }, 15000);
+  });
+}
+
+// Arma el contexto (marca + formulario). Justificación en ESPAÑOL para formularios
+// web (regla del proyecto); para los reportes por CORREO se conserva el bilingüe
+// (justif=en, justif_es=es) porque Telegram y otros usan ambos. Devuelve {ctx, form,
+// datos} o null si falta la marca o el formulario.
+async function ctxArmar(marca, formKey, urlsOverride) {
+  const form = self.FORMULARIOS[formKey];
+  const MARCAS = await ctxObtenerMarcas();
+  const datos = MARCAS[marca];
+  if (!form || !datos) return null;
+  const redCode = { Facebook: "fb", Instagram: "ig", TikTok: "tk" }[form.red] || "";
+  const pais = datos.pais || "";
+  const esCorreo = form.tipo === "email";
+  const justif = self.JUSTIF.conPolitica(
+    self.JUSTIF.justificacion(form.cat, redCode, marca, pais, esCorreo ? "en" : "es"), formKey, esCorreo ? "en" : "es");
+  const justif_es = self.JUSTIF.conPolitica(
+    self.JUSTIF.justificacion(form.cat, redCode, marca, pais, "es"), formKey, "es");
+  const g = await chrome.storage.local.get([CLAVE_URLS_CTX]);
+  const urlsExcel = Array.isArray(g[CLAVE_URLS_CTX]) ? g[CLAVE_URLS_CTX] : [];
+  // Si el usuario hizo clic derecho SOBRE un enlace (o imagen/selección con URL), ESE
+  // enlace es el que se denuncia; si no, se usan las URLs cargadas del Excel.
+  const urls = (Array.isArray(urlsOverride) && urlsOverride.length) ? urlsOverride : urlsExcel;
+  const ctx = { marca, datos, justif, justif_es, correoPersona: self.CORREO_PERSONA, urls };
+  return { ctx, form, datos };
+}
+
+// Ejecuta un plan (APLICAR + clics reales + autorrelleno persistente) en una pestaña.
+async function ctxEjecutarPlan(tabId, plan, marca) {
+  const r = await chrome.scripting.executeScript({ target: { tabId }, func: APLICAR, args: [plan.pasos] });
+  const res = (r && r[0] && r[0].result) || { ok: 0, faltan: [], clicsReales: [] };
+  if (res.clicsReales && res.clicsReales.length) { try { await hacerClics(tabId, res.clicsReales); } catch (e) {} }
+  if (plan.autorepetir) autorelleno(tabId, plan.pasos.filter((p) => p.tipo !== "dropdown"));
+  ctxAvisar(tabId, "Denuncias RS: " + res.ok + " campo(s) rellenado(s) para «" + marca +
+    "». Revisa y captura el comprobante antes de enviar.", false);
+}
+
+// "Rellenar ESTA página": autodetecta el formulario por la URL de la pestaña actual.
+async function ctxRellenarPagina(tab, marca, objetivo) {
+  const formKey = ctxDetectarForm(tab.url || "");
+  if (!formKey) {
+    ctxAvisar(tab.id, "Denuncias RS: esta página no es un formulario de denuncia. Usa la marca ▸ el formulario que quieras para abrirlo.", true);
+    return;
+  }
+  const a = await ctxArmar(marca, formKey, objetivo);
+  if (!a) { ctxAvisar(tab.id, "Denuncias RS: no encuentro la marca «" + marca + "».", true); return; }
+  await ctxRegistrarDenuncia(marca, a.form, (objetivo && objetivo[0]) || "");
+  try { await ctxEjecutarPlan(tab.id, a.form.construirPlan(a.ctx), marca); }
+  catch (e) { ctxAvisar(tab.id, "Denuncias RS: no se pudo rellenar aquí (" + (e.message || e) + ").", true); }
+}
+
+// Abre la denuncia elegida con esa marca: los formularios WEB en una pestaña NUEVA (no
+// pierdes la página actual) y los rellena; los de CORREO generan el borrador (correo.html).
+async function ctxAbrirDenuncia(tabOrigen, marca, formKey, objetivo) {
+  const a = await ctxArmar(marca, formKey, objetivo);
+  if (!a) { if (tabOrigen && tabOrigen.id) ctxAvisar(tabOrigen.id, "Denuncias RS: no encuentro la marca «" + marca + "».", true); return; }
+  const form = a.form, ctx = a.ctx, datos = a.datos;
+  const urlDen = (objetivo && objetivo[0]) || "";
+  if (form.tipo === "email") {
+    const em = form.construirEmail(ctx);
+    const idDen = await ctxRegistrarDenuncia(marca, form, urlDen);
+    await ctxGuardarCorreo(idDen, em);
+    await chrome.storage.local.set({ email_reporte: Object.assign({}, em, { from: datos.correo || "" }) });
+    chrome.tabs.create({ url: chrome.runtime.getURL("correo.html") });
+    return;
+  }
+  const plan = form.construirPlan(ctx);
+  await ctxRegistrarDenuncia(marca, form, urlDen);
+  let nueva;
+  try { nueva = await chrome.tabs.create({ url: plan.url }); } catch (e) { return; }
+  await ctxEsperarCarga(nueva.id);
+  await dormir(1800); // deja aparecer los campos
+  try { await ctxEjecutarPlan(nueva.id, plan, marca); }
+  catch (e) { /* la pestaña abrió; el usuario puede rellenar con el clic derecho de nuevo */ }
+}
+
+// (Re)construye el menú: 🚩 Denuncias RS ▸ [cada marca] ▸ (Rellenar esta página + todos
+// los formularios). Se arma una sola vez al instalar/arrancar y al cambiar las marcas.
+let rsConstruyendo = false;
+async function ctxConstruirMenus() {
+  if (rsConstruyendo) return; rsConstruyendo = true;
+  try {
+    await new Promise((res) => chrome.contextMenus.removeAll(res));
+    const base = { contexts: RS_CONTEXTS }; // sin documentUrlPatterns: aparece en TODA página
+    chrome.contextMenus.create(Object.assign({ id: "rs_root", title: "🚩 Denuncias RS" }, base));
+    const MARCAS = await ctxObtenerMarcas();
+    const marcas = Object.keys(MARCAS).sort((a, b) => a.localeCompare(b, "es"));
+    // Formularios ordenados por "Red: Nombre" (se listan dentro de cada marca).
+    const forms = Object.keys(self.FORMULARIOS).sort((a, b) =>
+      (self.FORMULARIOS[a].red + ": " + self.FORMULARIOS[a].nombre)
+        .localeCompare(self.FORMULARIOS[b].red + ": " + self.FORMULARIOS[b].nombre, "es"));
+    marcas.forEach((m) => {
+      const pid = "rs_m|" + rsEnc(m);
+      chrome.contextMenus.create(Object.assign({ id: pid, parentId: "rs_root", title: m }, base));
+      chrome.contextMenus.create(Object.assign({ id: "rs_fill|" + rsEnc(m), parentId: pid, title: "✍ Rellenar ESTA página" }, base));
+      chrome.contextMenus.create(Object.assign({ id: "rs_sep|" + rsEnc(m), parentId: pid, type: "separator" }, base));
+      forms.forEach((fk) => {
+        const f = self.FORMULARIOS[fk];
+        chrome.contextMenus.create(Object.assign({ id: "rs_open|" + rsEnc(m) + "|" + fk, parentId: pid, title: f.red + ": " + f.nombre }, base));
+      });
+    });
+  } catch (e) { /* si falla, el popup sigue funcionando igual */ }
+  finally { rsConstruyendo = false; }
+}
+
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  const id = String(info.menuItemId || "");
+  // Si el clic derecho fue SOBRE un enlace (o una imagen/media, o texto seleccionado que
+  // es una URL), ese enlace es el que se denuncia; si no, se usan las URLs del Excel.
+  const esUrl = (s) => /^https?:\/\//i.test((s || "").trim());
+  let objetivo = [];
+  if (esUrl(info.linkUrl)) objetivo = [info.linkUrl.trim()];
+  else if (esUrl(info.srcUrl)) objetivo = [info.srcUrl.trim()];
+  else if (esUrl(info.selectionText)) objetivo = [info.selectionText.trim()];
+  if (id.indexOf("rs_fill|") === 0) {
+    if (tab && tab.id) ctxRellenarPagina(tab, rsDec(id.slice("rs_fill|".length)), objetivo);
+  } else if (id.indexOf("rs_open|") === 0) {
+    const resto = id.slice("rs_open|".length);
+    const i = resto.indexOf("|"); // "<marca URL-encoded>|<formKey>" — la marca no lleva '|'
+    if (i > 0) ctxAbrirDenuncia(tab, rsDec(resto.slice(0, i)), resto.slice(i + 1), objetivo);
+  }
+});
+
+// Reconstruye el menú al instalar/arrancar y cuando cambian las marcas (no en cada relleno).
+chrome.runtime.onInstalled.addListener(ctxConstruirMenus);
+chrome.runtime.onStartup.addListener(ctxConstruirMenus);
+chrome.storage.onChanged.addListener((cambios, area) => {
+  if (area !== "local") return;
+  if (cambios.marcas_usuario || cambios.marcas_eliminadas) ctxConstruirMenus();
 });
