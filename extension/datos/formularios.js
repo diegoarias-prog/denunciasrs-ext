@@ -265,6 +265,10 @@
       { tipo: "fillUrlList", dominio: (this.red === "Instagram" ? "instagram.com" : "facebook.com"), checkLabel: "Tengo enlaces adicionales que denunciar", urls: (ctx.urls || []) }
     ] };
   }
+  // Clase de bienes/servicios de la marca (campo "Clase de bienes y servicios de marca
+  // comercial" de TikTok y similares). Valor por defecto; se puede sobrescribir por marca
+  // con el campo `clase_bienes` en los datos de la marca.
+  var CLASE_BIENES_DEFECTO = "Negocios financieros, bancarios, de crédito. Negocios Monetarios.";
   function planMarca(ctx) {
     var d = ctx.datos, marca = ctx.marca;
     return { url: this.url, manual: this.manual, pasos: [
@@ -283,6 +287,7 @@
       // (override por marca, editable en el panel de Marcas) si está definido; si no, cae en
       // la base por país (OMPI si el país no tiene buscador público fiable).
       { tipo: "fillName", name: "TM_URL", valor: (d.tmurl && String(d.tmurl).trim()) ? String(d.tmurl).trim() : baseMarcasDe(d.pais) },
+      { tipo: "fillLabel", label: "clase de bienes y servicios de marca comercial|clase de bienes y servicios|clase de los bienes y servicios|bienes y servicios de la marca|clase de la marca|goods and services|class of goods|bienes y/o servicios", valor: (d.clase_bienes || CLASE_BIENES_DEFECTO), opcional: true, tardio: true },
       { tipo: "select", name: "rights_owner_country_routing", texto: d.pais },
       { tipo: "check", name: "content_type[]", texto: "uses the rights owner" },
       { tipo: "fillName", name: "why_reporting_other", valor: ctx.justif },
@@ -331,6 +336,7 @@
       pasos.push({ tipo: "fillName", name: "website_rights_holder", valor: d.sitio || "" });
       pasos.push({ tipo: "fillName", name: "what_is_your_trademark", valor: marca });
       pasos.push({ tipo: "select", name: "registration_trademark", texto: d.pais });
+      pasos.push({ tipo: "fillLabel", label: "clase de bienes y servicios de marca comercial|clase de bienes y servicios|clase de los bienes y servicios|bienes y servicios de la marca|clase de la marca|goods and services|class of goods|bienes y/o servicios", valor: (d.clase_bienes || CLASE_BIENES_DEFECTO), opcional: true, tardio: true });
     }
     pasos.push({ tipo: "radio", name: "srt_content_type", texto: "Private Message", esperaMs: 1200 });
     pasos.push({ tipo: "radio", name: "content_type_private_message", texto: "Phone Number", esperaMs: 800 });
@@ -412,6 +418,7 @@
           { tipo: "fillName", name: "email", valor: correo },
           { tipo: "fillName", name: "trademark_name", valor: marca },
           { tipo: "fillName", name: "trademark_country", valor: pais },
+          { tipo: "fillLabel", label: "clase de bienes y servicios de marca comercial|clase de bienes y servicios|clase de los bienes y servicios|bienes y servicios de la marca|clase de la marca|goods and services|class of goods|bienes y/o servicios", valor: (ctx.datos.clase_bienes || CLASE_BIENES_DEFECTO), opcional: true, tardio: true },
           { tipo: "fillName", name: "trademark_company_name", valor: marca },
           // URL de la empresa titular: página OFICIAL de la marca en LinkedIn con fallback a sitio.
           { tipo: "fillName", name: "trademark_company_url", valor: (ctx.datos.linkedin || sitio) },
@@ -514,6 +521,7 @@
           { tipo: "fillName", suf: true, name: "trademark-holder-website", valor: d.x || d.sitio || "" },
           { tipo: "fillName", suf: true, name: "trademark-word", valor: marca },
           { tipo: "select", suf: true, name: "trademark-holder-country", texto: d.pais },
+          { tipo: "fillLabel", label: "clase de bienes y servicios de marca comercial|clase de bienes y servicios|clase de los bienes y servicios|bienes y servicios de la marca|clase de la marca|goods and services|class of goods|bienes y/o servicios", valor: (d.clase_bienes || CLASE_BIENES_DEFECTO), opcional: true, tardio: true },
           { tipo: "check", name: "confirm-1" },
           { tipo: "check", name: "confirm-2" },
           { tipo: "check", name: "confirm-3" },
@@ -590,6 +598,7 @@
           { tipo: "fillLabel", label: "physical address|direccion fisica|tu direccion fisica", valor: d.pais },
           { tipo: "fillLabel", label: "your email address|email address|direccion de correo|correo electronico", valor: d.correo },
           { tipo: "fillLabel", label: "jurisdiction|jurisdiccion|jurisdiccion del registro", valor: d.pais },
+          { tipo: "fillLabel", label: "clase de bienes y servicios de marca comercial|clase de bienes y servicios|clase de los bienes y servicios|bienes y servicios de la marca|clase de la marca|goods and services|class of goods|bienes y/o servicios", valor: (d.clase_bienes || CLASE_BIENES_DEFECTO), opcional: true, tardio: true },
           { tipo: "fillLabel", label: "describe|description|how you believe|descripcion de la marca|descripcion|como crees", valor: ctx.justif, opcional: true, tardio: true },
           { tipo: "fillLabel", label: "electronic signature|sign electronically|firma electronica|firma de forma electronica|firma", valor: marca },
           { tipo: "checkVarios", etiquetas: "buena fe|good faith|correcta|exacta|accurate|perjurio|penalty of perjury|reconozco|acknowledge|acepto que toda la informacion|se reenvie|reenvie a la persona|se comparta con la persona|i acknowledge|i agree", max: 3 },
@@ -659,6 +668,7 @@
           { tipo: "select", name: "Brand_one", texto: "denominativa y logotipo" },
           { tipo: "select", name: "Jurisdiction_one", texto: "otra" },
           { tipo: "select", name: "Jurisdiction_one_other", texto: d.pais },
+          { tipo: "fillLabel", label: "clase de bienes y servicios de marca comercial|clase de bienes y servicios|clase de los bienes y servicios|bienes y servicios de la marca|clase de la marca|goods and services|class of goods|bienes y/o servicios", valor: (d.clase_bienes || CLASE_BIENES_DEFECTO), opcional: true, tardio: true },
           { tipo: "fillName", name: "AllegedlyInfringed", valor: ctx.justif },
           { tipo: "fillName", name: "Signature", valor: marca },
           { tipo: "check", name: "AffirmationOne" },
