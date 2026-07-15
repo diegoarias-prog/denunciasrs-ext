@@ -369,21 +369,24 @@ async function rellenar() {
   await registrar_denuncia_auto(marca, form);
   $("boton_capturar").disabled = false;
 
-  // ¿Estamos en el formulario correcto? Si no, lo abrimos, esperamos a que cargue
-  // y rellenamos solo (sin tener que pulsar dos veces).
+  // ¿Estamos ya en el formulario correcto? Si SÍ, se rellena esta misma pestaña.
+  // Si NO, se abre el formulario en una pestaña APARTE en segundo plano (active:false)
+  // y se rellena ESA, para NO sacar al usuario de la pestaña que está viendo.
+  let objetivoTabId = tab.id;
   const hostForm = new URL(plan.url).host.replace(/^www\./, "");
   const hostTab = (() => { try { return new URL(tab.url).host.replace(/^www\./, ""); } catch (e) { return ""; } })();
   $("boton_rellenar").disabled = true;
   if (hostTab.indexOf(hostForm.split(".").slice(-2).join(".")) < 0) {
-    mostrar_estado("aviso", "Abriendo el formulario…");
-    await chrome.tabs.update(tab.id, { url: plan.url });
-    await esperar_carga(tab.id);
+    mostrar_estado("aviso", "Abriendo el formulario en una pestaña aparte…");
+    const nueva = await chrome.tabs.create({ url: plan.url, active: false });
+    objetivoTabId = nueva.id;
+    await esperar_carga(objetivoTabId);
     await new Promise((r) => setTimeout(r, 1800)); // tiempo para que aparezcan los campos
   }
   mostrar_estado("aviso", "Rellenando…");
   try {
     const res = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
+      target: { tabId: objetivoTabId },
       func: APLICAR,
       args: [plan.pasos]
     });
@@ -391,7 +394,7 @@ async function rellenar() {
     // Clics REALES de los radios/casillas (los sintéticos no "pegan" en React).
     if (r.clicsReales && r.clicsReales.length) {
       mostrar_estado("aviso", "Marcando opciones…");
-      try { await chrome.runtime.sendMessage({ accion: "clicsReales", tabId: tab.id, selectores: r.clicsReales }); }
+      try { await chrome.runtime.sendMessage({ accion: "clicsReales", tabId: objetivoTabId, selectores: r.clicsReales }); }
       catch (e) { /* si falla el modo avanzado, los radios quedan manuales */ }
     }
     // AUTORRELLENO PERSISTENTE de la 2.ª etapa (TikTok): campos como "Tipo de obra",
@@ -405,10 +408,11 @@ async function rellenar() {
       // repetición para NO reabrirlos cada pocos segundos. El bucle solo insiste en los campos
       // de la 2.ª etapa (Tipo de obra, Origen, Descripción, firma, casillas, URL).
       const pasos2 = plan.pasos.filter(function (p) { return p.tipo !== "dropdown"; });
-      try { await chrome.runtime.sendMessage({ accion: "iniciarAutorelleno", tabId: tab.id, pasos: pasos2 }); }
+      try { await chrome.runtime.sendMessage({ accion: "iniciarAutorelleno", tabId: objetivoTabId, pasos: pasos2 }); }
       catch (e) { /* si el service worker no responde, el usuario puede pulsar Rellenar otra vez */ }
     }
-    let html = "✓ <b>" + r.ok + "</b> campo(s) rellenado(s).";
+    let html = "✓ <b>" + r.ok + "</b> campo(s) rellenado(s)." +
+      (objetivoTabId !== tab.id ? " El formulario se abrió en una <b>pestaña aparte</b> (cambia a ella para revisarlo y capturarlo)." : "");
     if (form.manual) html += "<br><br>📌 " + form.manual;
     if (r.faltan && r.faltan.length) html += "<br><br>No se encontraron (revisa a mano): " + r.faltan.join(", ");
     html += "<br><br>⚠ <b>IMPORTANTE:</b> toma el PANTALLAZO del formulario terminado y adjúntalo con el botón «Capturar». Toda denuncia por formulario debe quedar con su captura en el Registro.";

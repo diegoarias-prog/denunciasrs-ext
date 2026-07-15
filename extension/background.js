@@ -490,7 +490,9 @@ async function ctxAbrirDenuncia(tabOrigen, marca, formKey, objetivo) {
   const plan = form.construirPlan(ctx);
   await ctxRegistrarDenuncia(marca, form, urlDen);
   let nueva;
-  try { nueva = await chrome.tabs.create({ url: plan.url }); } catch (e) { return; }
+  // active:false: abre la denuncia en una pestaña APARTE en segundo plano para NO sacar
+  // al usuario de la pestaña que está viendo. El autorrelleno funciona igual (usa nueva.id).
+  try { nueva = await chrome.tabs.create({ url: plan.url, active: false }); } catch (e) { return; }
   await ctxEsperarCarga(nueva.id);
   await dormir(1800); // deja aparecer los campos
   try { await ctxEjecutarPlan(nueva.id, plan, marca); }
@@ -512,14 +514,24 @@ async function ctxConstruirMenus() {
     const forms = Object.keys(self.FORMULARIOS).sort((a, b) =>
       (self.FORMULARIOS[a].red + ": " + self.FORMULARIOS[a].nombre)
         .localeCompare(self.FORMULARIOS[b].red + ": " + self.FORMULARIOS[b].nombre, "es"));
+    // Lista de redes sociales presentes (ordenadas), para agrupar los formularios.
+    const redes = [];
+    forms.forEach((fk) => { const r = self.FORMULARIOS[fk].red; if (redes.indexOf(r) < 0) redes.push(r); });
+    redes.sort((a, b) => a.localeCompare(b, "es"));
     marcas.forEach((m) => {
       const pid = "rs_m|" + rsEnc(m);
       chrome.contextMenus.create(Object.assign({ id: pid, parentId: "rs_root", title: m }, base));
       chrome.contextMenus.create(Object.assign({ id: "rs_fill|" + rsEnc(m), parentId: pid, title: "✍ Rellenar ESTA página" }, base));
       chrome.contextMenus.create(Object.assign({ id: "rs_sep|" + rsEnc(m), parentId: pid, type: "separator" }, base));
-      forms.forEach((fk) => {
-        const f = self.FORMULARIOS[fk];
-        chrome.contextMenus.create(Object.assign({ id: "rs_open|" + rsEnc(m) + "|" + fk, parentId: pid, title: f.red + ": " + f.nombre }, base));
+      // Un submenú por RED SOCIAL; dentro, solo los formularios de esa red (así el menú
+      // queda agrupado y legible en vez de una lista larga y plana).
+      redes.forEach((red) => {
+        const rid = "rs_red|" + rsEnc(m) + "|" + rsEnc(red);
+        chrome.contextMenus.create(Object.assign({ id: rid, parentId: pid, title: red }, base));
+        forms.filter((fk) => self.FORMULARIOS[fk].red === red).forEach((fk) => {
+          const f = self.FORMULARIOS[fk];
+          chrome.contextMenus.create(Object.assign({ id: "rs_open|" + rsEnc(m) + "|" + fk, parentId: rid, title: f.nombre }, base));
+        });
       });
     });
   } catch (e) { /* si falla, el popup sigue funcionando igual */ }
