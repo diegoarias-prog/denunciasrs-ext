@@ -101,12 +101,13 @@ async function hacerClics(tabId, selectores) {
 // ============================================================================
 const AUTORRELLENO = {}; // tabId -> { cancelar: bool }
 
-async function autorelleno(tabId, pasos) {
+async function autorelleno(tabId, pasos, opts) {
+  opts = opts || {};
   if (AUTORRELLENO[tabId]) AUTORRELLENO[tabId].cancelar = true; // cancela un bucle previo del mismo tab
   const estado = { cancelar: false };
   AUTORRELLENO[tabId] = estado;
   const fin = Date.now() + 300000; // 5 min (cubre el ida y vuelta de verificar el correo)
-  let limpias = 0;
+  let limpias = 0, completado = false;
   while (!estado.cancelar && Date.now() < fin) {
     let res = null;
     try {
@@ -125,11 +126,16 @@ async function autorelleno(tabId, pasos) {
     // Parada anticipada: 3 rondas seguidas sin campos faltantes = formulario ya completo.
     // Durante la espera de verificación del correo, faltan.length > 0 (los campos de la 2.ª
     // etapa aún no existen), así que el bucle NO se corta antes de tiempo.
-    if (res && (!res.faltan || res.faltan.length === 0)) { if (++limpias >= 3) break; }
+    if (res && (!res.faltan || res.faltan.length === 0)) { if (++limpias >= 3) { completado = true; break; } }
     else limpias = 0;
     await dormir(2500);
   }
   if (AUTORRELLENO[tabId] === estado) delete AUTORRELLENO[tabId];
+  // Solo al COMPLETARSE (no por cancelación ni por agotar el tiempo) y si la red lo permite:
+  // capturar el comprobante y enviar solo (con la cuenta atrás de 5 s).
+  if (completado && opts.autoenviar && !estado.cancelar) {
+    try { await enviarFormulario(tabId, opts.marca || "", opts.enviarLabel); } catch (e) { /* el usuario puede enviar a mano */ }
+  }
 }
 
 // Si se cierra la pestaña, cancela su bucle de autorrelleno.
@@ -246,6 +252,162 @@ async function capturarCompleta(tabId) {
 }
 
 // ============================================================================
+//  ENVÍO AUTOMÁTICO de formularios web. Tras rellenar, en las redes SIN captcha
+//  (Facebook/Instagram/WhatsApp/TikTok) la extensión trae la pestaña al frente, captura el
+//  comprobante, muestra una cuenta atrás de 5 s (cancelable) y pulsa "Enviar" por el usuario.
+//  En las redes con captcha (X/YouTube/LinkedIn) NO se envía: solo se captura y se avisa.
+// ============================================================================
+const REDES_AUTOENVIO = ["Facebook", "Instagram", "WhatsApp", "TikTok"];
+function permiteAutoenvio(form) { return !!form && REDES_AUTOENVIO.indexOf(form.red) >= 0; }
+const ENVIAR_LABEL_DEFECTO = "enviar|enviar denuncia|enviar informe|enviar reporte|submit|send|send report|send feedback";
+
+// Trae la pestaña del formulario al frente (durante el relleno estuvo en 2.º plano) para que
+// el usuario VEA la cuenta atrás / el captcha y pueda actuar. Falla en silencio si no puede.
+async function activarPestana(tabId) {
+  try {
+    const tb = await chrome.tabs.get(tabId);
+    await chrome.tabs.update(tabId, { active: true });
+    if (tb && tb.windowId != null) await chrome.windows.update(tb.windowId, { focused: true });
+  } catch (e) { /* la pestaña pudo cerrarse; seguimos igual */ }
+}
+
+// Reduce una imagen dataURL (jpeg) a `maxW` de ancho con OffscreenCanvas (disponible en el
+// service worker). Devuelve un dataURL más liviano o el original si algo falla.
+async function redimensionarSW(dataUrl, maxW, calidad) {
+  try {
+    const blob = await (await fetch(dataUrl)).blob();
+    const bmp = await createImageBitmap(blob);
+    let w = bmp.width, h = bmp.height;
+    if (w > maxW) { h = Math.round(h * (maxW / w)); w = maxW; }
+    const canvas = new OffscreenCanvas(w, h);
+    const cx = canvas.getContext("2d");
+    cx.drawImage(bmp, 0, 0, w, h);
+    const outBlob = await canvas.convertToBlob({ type: "image/jpeg", quality: calidad || 0.7 });
+    const buf = new Uint8Array(await outBlob.arrayBuffer());
+    let bin = ""; for (let i = 0; i < buf.length; i++) bin += String.fromCharCode(buf[i]);
+    return "data:image/jpeg;base64," + btoa(bin);
+  } catch (e) { return dataUrl; }
+}
+
+// Captura el formulario y lo adjunta (comprobante_img) a la denuncia en curso
+// (ultima_denuncia_registro), igual que el botón "Capturar" del popup. Devuelve bool.
+async function guardarComprobante(tabId) {
+  try {
+    const cap = await capturarCompleta(tabId);
+    if (!cap || cap.error || !cap.dataUrl) return false;
+    const img = await redimensionarSW(cap.dataUrl, 1280, 0.7);
+    const g = await chrome.storage.local.get(["ultima_denuncia_registro", "denuncias_registro"]);
+    const idDest = g.ultima_denuncia_registro;
+    const lista = Array.isArray(g.denuncias_registro) ? g.denuncias_registro : [];
+    const ent = lista.find((x) => String(x.id) === String(idDest));
+    if (!ent) return false;
+    ent.comprobante_img = img;
+    await chrome.storage.local.set({ denuncias_registro: lista });
+    return true;
+  } catch (e) { return false; }
+}
+
+// Se INYECTA en la página (función autónoma, no usa nada externo): muestra una cuenta atrás
+// con botones "Cancelar" y "Enviar ahora". Devuelve una promesa que resuelve {cancelado:bool}.
+function overlayEnvio(segundos, titulo) {
+  return new Promise((resolve) => {
+    try {
+      const idc = "rs_overlay_envio";
+      const viejo = document.getElementById(idc); if (viejo) viejo.remove();
+      const cont = document.createElement("div"); cont.id = idc;
+      cont.style.cssText = "position:fixed;z-index:2147483647;right:18px;bottom:18px;max-width:360px;" +
+        "padding:16px 18px;border-radius:12px;font:600 14px system-ui,Arial,sans-serif;color:#fff;" +
+        "background:#1e824c;box-shadow:0 8px 30px rgba(0,0,0,.35);";
+      const t = document.createElement("div"); t.textContent = titulo || "Enviando la denuncia…"; t.style.marginBottom = "10px";
+      const c = document.createElement("div"); c.style.cssText = "font-weight:400;margin-bottom:12px;line-height:1.35;";
+      const fila = document.createElement("div"); fila.style.cssText = "display:flex;gap:8px;";
+      const bCancel = document.createElement("button"); bCancel.textContent = "Cancelar";
+      bCancel.style.cssText = "flex:1;padding:8px;border:0;border-radius:8px;background:#c0392b;color:#fff;font-weight:700;cursor:pointer;";
+      const bYa = document.createElement("button"); bYa.textContent = "Enviar ahora";
+      bYa.style.cssText = "flex:1;padding:8px;border:0;border-radius:8px;background:#145a32;color:#fff;font-weight:700;cursor:pointer;";
+      fila.appendChild(bCancel); fila.appendChild(bYa);
+      cont.appendChild(t); cont.appendChild(c); cont.appendChild(fila);
+      document.body.appendChild(cont);
+      let queda = segundos, terminado = false;
+      const fin = (cancelado) => { if (terminado) return; terminado = true; clearInterval(iv); try { cont.remove(); } catch (e) {} resolve({ cancelado: cancelado }); };
+      const pinta = () => { c.textContent = "Se enviará en " + queda + " s. Pulsa Cancelar para revisarlo y enviarlo tú."; };
+      pinta();
+      const iv = setInterval(() => { queda--; if (queda <= 0) fin(false); else pinta(); }, 1000);
+      bCancel.onclick = () => fin(true);
+      bYa.onclick = () => fin(false);
+    } catch (e) { resolve({ cancelado: false }); }
+  });
+}
+
+// Expresión (string) que localiza el BOTÓN de envío por su texto visible, excluyendo botones
+// intermedios (siguiente/continuar/cancelar/adjuntar). Devuelve las coordenadas de su centro
+// o null. Se elige el ÚLTIMO que coincide (el botón de envío suele ir al final del formulario).
+function exprCoordsEnviar(labelRegexSrc) {
+  return "(function(){" +
+    "var norm=function(s){return (s||'').toString().toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').trim();};" +
+    "var ok=new RegExp(" + JSON.stringify(labelRegexSrc) + ");" +
+    "var no=/(siguiente|next|continuar|continue|cancel|cancelar|atras|back|volver|adjuntar|upload|examinar|browse|guardar borrador|save draft|anadir|add)/;" +
+    "var els=Array.prototype.slice.call(document.querySelectorAll('button,input[type=submit],input[type=button],[role=button],a[role=button]'));" +
+    "var cand=null;" +
+    "for(var i=0;i<els.length;i++){var e=els[i];" +
+      "if(e.disabled) continue;" +
+      "var ar=e.getAttribute&&e.getAttribute('aria-disabled'); if(ar==='true') continue;" +
+      "var txt=norm(e.innerText||e.value||(e.getAttribute&&e.getAttribute('aria-label'))||'');" +
+      "if(!txt||!ok.test(txt)||no.test(txt)) continue;" +
+      "var r=e.getBoundingClientRect(); if(r.width<2||r.height<2) continue;" +
+      "cand=e;" +
+    "}" +
+    "if(!cand) return null;" +
+    "try{cand.scrollIntoView({block:'center'});}catch(x){}" +
+    "var r2=cand.getBoundingClientRect();" +
+    "return {x:Math.round(r2.left+r2.width/2), y:Math.round(r2.top+r2.height/2)};})()";
+}
+
+// Clic REAL (de confianza, vía debugger) sobre el botón de envío. React exige clics reales.
+async function clicRealEnviar(tabId, labelRegexSrc) {
+  let attached = false;
+  try {
+    await attach(tabId); attached = true;
+    await cmd(tabId, "Runtime.enable").catch(() => {});
+    const r = await cmd(tabId, "Runtime.evaluate", { expression: exprCoordsEnviar(labelRegexSrc), returnByValue: true });
+    const c = r && r.result && r.result.value;
+    if (!c) return false;
+    await cmd(tabId, "Input.dispatchMouseEvent", { type: "mouseMoved", x: c.x, y: c.y });
+    await cmd(tabId, "Input.dispatchMouseEvent", { type: "mousePressed", x: c.x, y: c.y, button: "left", clickCount: 1 });
+    await cmd(tabId, "Input.dispatchMouseEvent", { type: "mouseReleased", x: c.x, y: c.y, button: "left", clickCount: 1 });
+    return true;
+  } catch (e) { return false; }
+  finally { if (attached) await detach(tabId); }
+}
+
+// FLUJO DE ENVÍO: activar pestaña -> capturar comprobante -> cuenta atrás 5 s -> clic Enviar.
+async function enviarFormulario(tabId, marca, enviarLabel) {
+  try {
+    await activarPestana(tabId);
+    await guardarComprobante(tabId); // el comprobante queda en el Registro antes de enviar
+    let cancelado = false;
+    try {
+      const r = await chrome.scripting.executeScript({ target: { tabId }, func: overlayEnvio, args: [5, "Denuncias RS: enviando la denuncia de «" + marca + "»"] });
+      cancelado = !!(r && r[0] && r[0].result && r[0].result.cancelado);
+    } catch (e) { cancelado = false; }
+    if (cancelado) { ctxAvisar(tabId, "Denuncias RS: envío cancelado. Revísalo y pulsa Enviar cuando quieras (el comprobante ya se guardó).", false); return; }
+    const ok = await clicRealEnviar(tabId, enviarLabel || ENVIAR_LABEL_DEFECTO);
+    ctxAvisar(tabId, ok
+      ? "Denuncias RS: denuncia enviada. El comprobante quedó guardado en el Registro."
+      : "Denuncias RS: no encontré el botón «Enviar». Revisa y envíalo tú (el comprobante ya se guardó).", !ok);
+  } catch (e) { /* si algo falla, el usuario envía a mano */ }
+}
+
+// Formulario NO progresivo ya rellenado: si faltan campos requeridos, avisa; si no, envía.
+async function finalizarEnvio(tabId, marca, enviarLabel, faltan) {
+  if (faltan && faltan.length) {
+    ctxAvisar(tabId, "Denuncias RS: para «" + marca + "» faltan datos (" + faltan.join(", ") + "). Complétalos y pulsa Enviar tú.", true);
+    return;
+  }
+  await enviarFormulario(tabId, marca, enviarLabel);
+}
+
+// ============================================================================
 //  ATAJO DE TECLADO (Alt+Shift+S por defecto): dispara la captura del formulario
 //  en el CONTENT SCRIPT (captura_flotante.js), que sí tiene DOM y reutiliza el
 //  método probado del popup (Image + canvas). El worker ya NO redimensiona ni
@@ -285,9 +447,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg && msg.accion === "iniciarAutorelleno") {
     // El popup pide que el service worker siga rellenando la 2.ª etapa por su cuenta.
     const tabId = msg.tabId || (sender && sender.tab && sender.tab.id);
-    if (tabId && Array.isArray(msg.pasos)) autorelleno(tabId, msg.pasos); // bucle en segundo plano
+    if (tabId && Array.isArray(msg.pasos)) autorelleno(tabId, msg.pasos, { autoenviar: !!msg.autoenviar, marca: msg.marca, enviarLabel: msg.enviarLabel }); // bucle en segundo plano; envía al completar si procede
     sendResponse({ ok: true });
     return; // no necesitamos mantener el canal abierto
+  }
+  if (msg && msg.accion === "finalizar") {
+    // Formulario NO progresivo ya rellenado: en redes sin captcha, captura + envía solo;
+    // en las de captcha, captura + avisa. Corre en el service worker (sobrevive a cerrar el popup).
+    const tabId = msg.tabId || (sender && sender.tab && sender.tab.id);
+    if (tabId) {
+      (async () => {
+        if (msg.autoenviar) await finalizarEnvio(tabId, msg.marca || "", msg.enviarLabel, msg.faltan || []);
+        else { await activarPestana(tabId); await guardarComprobante(tabId); ctxAvisar(tabId, "Denuncias RS: comprobante capturado. Resuelve el captcha y pulsa Enviar.", false); }
+      })().then(() => sendResponse({ ok: true }), () => sendResponse({ ok: false }));
+      return true; // respuesta asíncrona
+    }
+    return;
   }
   if (msg && msg.accion === "detenerAutorelleno") {
     const tabId = msg.tabId || (sender && sender.tab && sender.tab.id);
@@ -449,13 +624,25 @@ async function ctxArmar(marca, formKey, urlsOverride) {
 }
 
 // Ejecuta un plan (APLICAR + clics reales + autorrelleno persistente) en una pestaña.
-async function ctxEjecutarPlan(tabId, plan, marca) {
+async function ctxEjecutarPlan(tabId, plan, marca, form) {
   const r = await chrome.scripting.executeScript({ target: { tabId }, func: APLICAR, args: [plan.pasos] });
   const res = (r && r[0] && r[0].result) || { ok: 0, faltan: [], clicsReales: [] };
   if (res.clicsReales && res.clicsReales.length) { try { await hacerClics(tabId, res.clicsReales); } catch (e) {} }
-  if (plan.autorepetir) autorelleno(tabId, plan.pasos.filter((p) => p.tipo !== "dropdown"));
-  ctxAvisar(tabId, "Denuncias RS: " + res.ok + " campo(s) rellenado(s) para «" + marca +
-    "». Revisa y captura el comprobante antes de enviar.", false);
+  const autoenv = permiteAutoenvio(form);
+  if (plan.autorepetir) {
+    autorelleno(tabId, plan.pasos.filter((p) => p.tipo !== "dropdown"), { autoenviar: autoenv, marca: marca, enviarLabel: plan.enviarLabel });
+    ctxAvisar(tabId, "Denuncias RS: " + res.ok + " campo(s) para «" + marca + "». " +
+      (autoenv ? "Cuando el formulario quede completo se capturará y enviará solo (5 s para cancelar)." : "Resuelve el captcha y envíalo tú."), false);
+    return;
+  }
+  if (autoenv) {
+    ctxAvisar(tabId, "Denuncias RS: " + res.ok + " campo(s) para «" + marca + "». Capturando y enviando (5 s para cancelar)…", false);
+    await finalizarEnvio(tabId, marca, plan.enviarLabel, res.faltan);
+  } else {
+    await activarPestana(tabId);
+    await guardarComprobante(tabId);
+    ctxAvisar(tabId, "Denuncias RS: " + res.ok + " campo(s) para «" + marca + "». Comprobante capturado. Resuelve el captcha y pulsa Enviar.", false);
+  }
 }
 
 // "Rellenar ESTA página": autodetecta el formulario por la URL de la pestaña actual.
@@ -468,7 +655,7 @@ async function ctxRellenarPagina(tab, marca, objetivo) {
   const a = await ctxArmar(marca, formKey, objetivo);
   if (!a) { ctxAvisar(tab.id, "Denuncias RS: no encuentro la marca «" + marca + "».", true); return; }
   await ctxRegistrarDenuncia(marca, a.form, (objetivo && objetivo[0]) || "");
-  try { await ctxEjecutarPlan(tab.id, a.form.construirPlan(a.ctx), marca); }
+  try { await ctxEjecutarPlan(tab.id, a.form.construirPlan(a.ctx), marca, a.form); }
   catch (e) { ctxAvisar(tab.id, "Denuncias RS: no se pudo rellenar aquí (" + (e.message || e) + ").", true); }
 }
 
@@ -495,7 +682,7 @@ async function ctxAbrirDenuncia(tabOrigen, marca, formKey, objetivo) {
   try { nueva = await chrome.tabs.create({ url: plan.url, active: false }); } catch (e) { return; }
   await ctxEsperarCarga(nueva.id);
   await dormir(1800); // deja aparecer los campos
-  try { await ctxEjecutarPlan(nueva.id, plan, marca); }
+  try { await ctxEjecutarPlan(nueva.id, plan, marca, form); }
   catch (e) { /* la pestaña abrió; el usuario puede rellenar con el clic derecho de nuevo */ }
 }
 

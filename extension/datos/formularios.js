@@ -582,13 +582,21 @@
       construirPlan: function (ctx) {
         var d = ctx.datos, marca = ctx.marca;
         return { url: this.url, manual: this.manual, autorepetir: true, pasos: [
-          // 1.ª pregunta "¿Qué problema tienes?": la PRIMERA opción (infracción de marca en el
-          // contenido de un usuario). Casa por palabras clave en ESPAÑOL —el formulario SIEMPRE
-          // sale en español— sin depender de la frase exacta; si TikTok la reescribe, el respaldo
-          // por posición (opcionIndice:0) elige igualmente la primera.
+          // 0) "¿Qué problema tienes?" SIGUE siendo un MENÚ desplegable (Select): hay que
+          // elegirlo PRIMERO para que aparezcan las preguntas de radio de abajo. NO quitar este
+          // paso: sin él el formulario no avanza ("de aquí no pasa"). Casa por palabras clave
+          // (marca + contenido/infracción) con respaldo por posición (opcionIndice:0).
           { tipo: "dropdown", opcion: "marca&contenido|marca&infracc|marca&incumplimiento", opcionIndice: 0, esperaMs: 2500 },
-          // "Rol" tras verificar el correo: propietario/titular de la marca (primera opción).
-          { tipo: "dropdown", opcion: "propietari&marca|titular&marca|soy propietario", opcionIndice: 0, esperaMs: 2000 },
+          // Tras elegir el desplegable, TikTok muestra estas preguntas como BOTONES DE OPCIÓN
+          // (radios), NO desplegables. Se marcan con 'radioPregunta' (ver motor.js), anclando
+          // cada radio a SU pregunta: varias preguntas repiten "Sí/No", así que sin anclar se
+          // marcaría el grupo equivocado. Respuestas confirmadas con el usuario (2026-07-24).
+          // 1) "¿Se trata de un problema relacionado con productos falsificados?" -> Sí
+          { tipo: "radioPregunta", pregunta: "productos falsificados|falsificados|tipo de problema", opcion: "si", esperaMs: 1500 },
+          // 2) "Tu relación con el propietario de la marca comercial" -> representante/agente/administrador
+          { tipo: "radioPregunta", pregunta: "relacion con el propietario|tu relacion con el propietario|derechos de marca comercial", opcion: "representante&agente&administrador|representante, agente o administrador", esperaMs: 1500 },
+          // 3) "¿El contenido denunciado era de tu cuenta personal de TikTok?" -> No
+          { tipo: "radioPregunta", pregunta: "cuenta personal de tiktok|contenido denunciado era de tu cuenta|cuenta personal", opcion: "no", esperaMs: 1500 },
           { tipo: "fillLabel", label: "enter your email|verify your email|email address|verifica tu correo|correo electronico|introduce tu correo", valor: d.correo },
           { tipo: "fillLabel", label: "full name|nombre completo|tu nombre completo", valor: marca },
           { tipo: "fillLabel", label: "trademark owner|owner of the trademark|propietario de marca|propietario de la marca|nombre del titular de la marca", valor: marca },
