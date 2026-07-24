@@ -113,6 +113,63 @@ async function APLICAR(pasos, opciones) {
         }
         if (targetFinal) { marcarParaClicReal(targetFinal); ok++; } else faltan.push("radioVal:" + p.name);
         if (p.esperaMs) await dur(p.esperaMs);
+      } else if (p.tipo === "radioPregunta") {
+        // Marca un RADIO identificándolo por (a) la PREGUNTA a la que pertenece y (b) el
+        // TEXTO de la opción. Necesario para TikTok, que ya NO usa <select>/menús sino radios
+        // con texto y REPITE "Sí/No" en varias preguntas: sin anclar a la pregunta se marcaría
+        // el grupo equivocado. Casa por palabras clave en español (respaldo a inglés), sin
+        // depender de la frase exacta. Marca robusto + clic real (React de TikTok lo exige).
+        const kpreg = norm(p.pregunta || "").split("|").filter(Boolean);
+        const kop = norm(p.opcion || "").split("|").filter(Boolean);
+        // Casa la ETIQUETA de la opción: alternativas con "&" => todas sus palabras presentes;
+        // alternativas cortas (sí/no) => coincidencia EXACTA (evita casar "no" dentro de otra
+        // palabra); el resto => "contiene".
+        const casaOpcion = (label) => kop.some((kw) => {
+          if (kw.indexOf("&") >= 0) return kw.split("&").every((tok) => (tok = tok.trim()) && label.indexOf(tok) >= 0);
+          if (kw.length <= 4) return label === kw;
+          return label.indexOf(kw) >= 0;
+        });
+        // PREGUNTA más cercana a un radio: el hermano anterior (subiendo por ancestros) que NO
+        // contiene a su vez un radio (así saltamos otras OPCIONES y llegamos al título).
+        const preguntaDe = (r) => {
+          let par = r.parentElement, k = 0;
+          while (par && k < 8) {
+            let ps = par.previousElementSibling, j = 0;
+            while (ps && j < 8) {
+              const t = norm(ps.innerText || "");
+              if (t && t.length > 4 && !ps.querySelector('input[type=radio],[role=radio]')) return t;
+              ps = ps.previousElementSibling; j++;
+            }
+            par = par.parentElement; k++;
+          }
+          return "";
+        };
+        // ETIQUETA propia de un radio: label[for] / aria-label / <label> contenedor / hermano
+        // siguiente / texto del padre corto. Se toma UNA sola (sin concatenar) para poder
+        // comparar exacto en las opciones cortas.
+        const etiquetaDe = (r) => {
+          let lab = "";
+          if (r.id) { const lf = document.querySelector('label[for="' + r.id.replace(/"/g, '\\"') + '"]'); if (lf) lab = lf.innerText || ""; }
+          if (!lab && r.getAttribute("aria-label")) lab = r.getAttribute("aria-label");
+          if (!lab && r.closest) { const lc = r.closest("label"); if (lc) lab = lc.innerText || ""; }
+          if (!lab && r.nextElementSibling) lab = r.nextElementSibling.innerText || "";
+          if (!lab && r.parentElement && (r.parentElement.innerText || "").length < 80) lab = r.parentElement.innerText || "";
+          return norm(lab);
+        };
+        let okRP = false, destinoRP = null;
+        for (let it = 0; it < 4 && !okRP; it++) {
+          const radios = Array.prototype.slice.call(document.querySelectorAll('input[type=radio],[role=radio]'));
+          const cand = radios.find((r) => {
+            const rr = r.getBoundingClientRect();
+            if (rr.width < 1 && rr.height < 1) return false; // oculto de verdad
+            if (kpreg.length) { const preg = preguntaDe(r); if (!kpreg.some((kw) => preg.indexOf(kw) >= 0)) return false; }
+            return casaOpcion(etiquetaDe(r));
+          });
+          if (cand) { destinoRP = cand; okRP = marcarRadioEl(cand); }
+          if (!okRP) await dur(300);
+        }
+        if (destinoRP) { marcarParaClicReal(destinoRP); ok++; } else faltan.push("radioPregunta:" + (p.pregunta || p.opcion));
+        if (p.esperaMs) await dur(p.esperaMs);
       } else if (p.tipo === "check") {
         const cbs = Array.prototype.slice.call(
           document.querySelectorAll('input[type=checkbox][name' + (p.suf ? "$" : "") + '="' + (p.name + "").replace(/"/g, '\\"') + '"]'));

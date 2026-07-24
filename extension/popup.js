@@ -4,6 +4,10 @@
 //  (función APLICAR) se ejecuta en el contexto de la página del formulario.
 // ============================================================================
 
+// Redes cuyos formularios se envían solos (sin captcha). En X/YouTube/LinkedIn hay captcha:
+// solo se rellena y captura, el usuario resuelve el captcha y envía.
+const REDES_AUTOENVIO_POPUP = ["Facebook", "Instagram", "WhatsApp", "TikTok"];
+
 // --- Marcas: base + las editadas/agregadas en Opciones − las eliminadas ---
 async function obtener_marcas() {
   const d = await new Promise((res) =>
@@ -403,19 +407,31 @@ async function rellenar() {
     // (o hasta completar), así el usuario NO tiene que volver a pulsar Rellenar. Vive en el
     // service worker (no en el popup ni en un timer de la página), así sobrevive a cerrar el
     // popup y a irse a verificar el correo. Ver autorelleno() en background.js.
+    const autoEnviable = REDES_AUTOENVIO_POPUP.indexOf(form.red) >= 0;
     if (plan.autorepetir) {
       // La 1.ª etapa (los desplegables) ya quedó hecha en este primer clic; se excluye de la
       // repetición para NO reabrirlos cada pocos segundos. El bucle solo insiste en los campos
-      // de la 2.ª etapa (Tipo de obra, Origen, Descripción, firma, casillas, URL).
+      // de la 2.ª etapa (Tipo de obra, Origen, Descripción, firma, casillas, URL). Al completar,
+      // el service worker captura y envía solo si la red lo permite (autoenviar).
       const pasos2 = plan.pasos.filter(function (p) { return p.tipo !== "dropdown"; });
-      try { await chrome.runtime.sendMessage({ accion: "iniciarAutorelleno", tabId: objetivoTabId, pasos: pasos2 }); }
+      try { await chrome.runtime.sendMessage({ accion: "iniciarAutorelleno", tabId: objetivoTabId, pasos: pasos2, autoenviar: autoEnviable, marca: marca, enviarLabel: plan.enviarLabel }); }
       catch (e) { /* si el service worker no responde, el usuario puede pulsar Rellenar otra vez */ }
+    } else {
+      // Formulario NO progresivo: el service worker captura y (si no hay captcha) envía solo.
+      try { await chrome.runtime.sendMessage({ accion: "finalizar", tabId: objetivoTabId, marca: marca, autoenviar: autoEnviable, enviarLabel: plan.enviarLabel, faltan: (r.faltan || []) }); }
+      catch (e) { /* el usuario puede enviar a mano */ }
     }
     let html = "✓ <b>" + r.ok + "</b> campo(s) rellenado(s)." +
-      (objetivoTabId !== tab.id ? " El formulario se abrió en una <b>pestaña aparte</b> (cambia a ella para revisarlo y capturarlo)." : "");
+      (objetivoTabId !== tab.id ? " El formulario se abrió en una <b>pestaña aparte</b>." : "");
     if (form.manual) html += "<br><br>📌 " + form.manual;
     if (r.faltan && r.faltan.length) html += "<br><br>No se encontraron (revisa a mano): " + r.faltan.join(", ");
-    html += "<br><br>⚠ <b>IMPORTANTE:</b> toma el PANTALLAZO del formulario terminado y adjúntalo con el botón «Capturar». Toda denuncia por formulario debe quedar con su captura en el Registro.";
+    if (autoEnviable) {
+      html += plan.autorepetir
+        ? "<br><br>🚀 Cuando el formulario quede completo, la extensión <b>capturará el comprobante y lo enviará sola</b> (5 s para cancelar en la pestaña del formulario)."
+        : "<br><br>🚀 La extensión está <b>capturando el comprobante y enviando</b> (5 s para cancelar en la pestaña del formulario).";
+    } else {
+      html += "<br><br>⚠ Este formulario tiene <b>captcha</b>: la extensión capturó el comprobante; <b>resuelve el captcha y pulsa Enviar</b> tú.";
+    }
     html += "<br><br>📓 Registrada como pendiente — agrega el N.º de caso en Registro.";
     mostrar_estado(r.ok > 0 ? "ok" : "aviso", html);
   } catch (e) {
