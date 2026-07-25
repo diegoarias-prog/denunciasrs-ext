@@ -663,25 +663,37 @@
     yt_marca: {
       red: "YouTube", nombre: "Marca registrada", cat: "marca",
       url: "https://support.google.com/youtube/contact/trademark_complaint?hl=es",
-      manual: "Completa: tipo de marca/registro y N.º de registro (si lo tienes), la URL del vídeo o canal infractor, adjuntos. Resuelve el captcha y revisa antes de enviar.",
+      // Formulario de Google (support.google.com): NO expone atributos `name` estables, así que
+      // se rellena SIEMPRE por RÓTULO en español (fillLabel/selectLabel/radioPregunta/checkLabel),
+      // igual que hacemos en formularios SPA. Textos tomados del formulario real (?hl=es).
+      manual: "Completa lo que falte (URL del vídeo/canal infractor y N.º de registro si lo tienes) y verifica las 3 casillas de declaración y la firma. El formulario tiene captcha: resuélvelo y revisa antes de enviar.",
       construirPlan: function (ctx) {
         var d = ctx.datos, marca = ctx.marca;
         return { url: this.url, manual: this.manual, pasos: [
-          { tipo: "fillName", name: "Fulllegalname", valor: marca },
-          { tipo: "fillName", name: "email_prefill", valor: d.correo },
-          { tipo: "fillName", name: "Title", valor: "Representante autorizado" },
-          { tipo: "fillName", name: "CompanyName", valor: marca },
-          { tipo: "fillName", name: "TrademarkOwnerName", valor: marca },
-          { tipo: "fillName", name: "OwnerRelationship", valor: "Propietario / representante autorizado" },
-          { tipo: "select", name: "Brand_one", texto: "denominativa y logotipo" },
-          { tipo: "select", name: "Jurisdiction_one", texto: "otra" },
-          { tipo: "select", name: "Jurisdiction_one_other", texto: d.pais },
-          { tipo: "fillLabel", label: "clase de bienes y servicios de marca comercial|clase de bienes y servicios|clase de los bienes y servicios|bienes y servicios de la marca|clase de la marca|goods and services|class of goods|bienes y/o servicios", valor: (d.clase_bienes || CLASE_BIENES_DEFECTO), opcional: true, tardio: true },
-          { tipo: "fillName", name: "AllegedlyInfringed", valor: ctx.justif },
-          { tipo: "fillName", name: "Signature", valor: marca },
-          { tipo: "check", name: "AffirmationOne" },
-          { tipo: "check", name: "AffirmationTwo" },
-          { tipo: "check", name: "AffirmationThree" }
+          // --- Datos del reclamante (campos de texto por rótulo) ---
+          { tipo: "fillLabel", label: "nombre y apellidos|nombre y apellido|nombre legal completo|nombre completo", valor: marca, reintentos: 6 },
+          { tipo: "fillLabel", label: "direccion de correo de contacto|correo de contacto|direccion de correo|correo electronico", valor: d.correo, reintentos: 6 },
+          { tipo: "fillLabel", label: "cargo|puesto", valor: "Representante autorizado", reintentos: 6 },
+          { tipo: "fillLabel", label: "nombre de la empresa|razon social", valor: marca, reintentos: 6 },
+          { tipo: "fillLabel", label: "titular de la marca|propietario de la marca", valor: marca, reintentos: 6 },
+          { tipo: "fillLabel", label: "relacion con el titular de la marca|relacion con el titular|relacion con el propietario", valor: "Representante autorizado del titular de la marca", reintentos: 6 },
+          // --- Datos de la marca (desplegables y radios por rótulo) ---
+          { tipo: "selectLabel", label: "cuantas infracciones de marca|cuantas infracciones|numero de infracciones", opcion: "una", opcional: true },
+          { tipo: "selectLabel", label: "selecciona el tipo de marca|tipo de marca", opcion: "denominativa y logotipo", opcional: true },
+          // ¿Está registrada? -> "Sí" (son radios en el formulario real). Al marcarlo aparecen
+          // jurisdicción/país/N.º de registro, que se llenan como campos "tardíos".
+          { tipo: "radioPregunta", pregunta: "esta registrada|registrada", opcion: "si", opcional: true, esperaMs: 800 },
+          { tipo: "selectLabel", label: "jurisdiccion", opcion: "otra", opcional: true, tardio: true },
+          { tipo: "selectLabel", label: "pais en el que esta registrada|selecciona el pais|pais de registro", opcion: d.pais, opcional: true, tardio: true },
+          { tipo: "fillLabel", label: "numero de registro", valor: (d.registro || ""), opcional: true, tardio: true },
+          // --- Contenido infractor y descripción ---
+          { tipo: "selectLabel", label: "tipo de contenido infractor|tipo de contenido", opcion: "video y canal", opcional: true },
+          { tipo: "fillLabel", label: "describe especificamente la infraccion de marca|describe la infraccion|infraccion de marca que presuntamente|descripcion de la infraccion", valor: ctx.justif, reintentos: 6, tardio: true },
+          // --- Declaraciones juradas (3 casillas por su texto en español) + firma ---
+          { tipo: "checkLabel", texto: "creo de buena fe|de buena fe que el uso de las marcas", opcional: true, tardio: true },
+          { tipo: "checkLabel", texto: "informacion contenida en esta notificacion es correcta|correcta y veraz|autorizacion para actuar en nombre", opcional: true, tardio: true },
+          { tipo: "checkLabel", texto: "doy mi consentimiento para que se reenvie|se reenvie mi reclamacion|reenvie mi reclamacion al usuario", opcional: true, tardio: true },
+          { tipo: "fillLabel", label: "firma", valor: marca, opcional: true, tardio: true }
         ] };
       }
     },
