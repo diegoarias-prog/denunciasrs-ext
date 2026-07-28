@@ -154,17 +154,41 @@ async function APLICAR(pasos, opciones) {
           if (!lab && r.closest) { const lc = r.closest("label"); if (lc) lab = lc.innerText || ""; }
           if (!lab && r.nextElementSibling) lab = r.nextElementSibling.innerText || "";
           if (!lab && r.parentElement && (r.parentElement.innerText || "").length < 80) lab = r.parentElement.innerText || "";
-          return norm(lab);
+          // OJO: hay que NORMALIZAR ESPACIOS. El portal nuevo de Meta devuelve rótulos con
+          // saltos de línea ("\nSí\n"), y las opciones cortas (sí/no) se comparan EXACTO:
+          // sin recortar, "si\n" nunca casaría con "si" y el radio se quedaba sin marcar.
+          return norm(lab).replace(/\s+/g, " ").trim();
         };
+        // RESPALDO de anclaje: en el portal nuevo de Meta el título de la pregunta NO es
+        // hermano anterior de la opción, así que preguntaDe() devuelve "". Buscamos entonces
+        // el ANCESTRO MÁS AJUSTADO (el de texto más corto, hasta 10 niveles) que contenga la
+        // pregunta: eso identifica el grupo correcto aunque otras preguntas repitan "Sí/No".
+        const cercaniaPregunta = (r) => {
+          let par = r.parentElement, k = 0;
+          while (par && k < 10) {
+            const t = norm(par.innerText || "");
+            if (kpreg.some((kw) => t.indexOf(kw) >= 0)) return t.length;
+            par = par.parentElement; k++;
+          }
+          return -1;
+        };
+        const visible = (r) => { const rr = r.getBoundingClientRect(); return !(rr.width < 1 && rr.height < 1); };
         let okRP = false, destinoRP = null;
         for (let it = 0; it < 4 && !okRP; it++) {
           const radios = Array.prototype.slice.call(document.querySelectorAll('input[type=radio],[role=radio]'));
-          const cand = radios.find((r) => {
-            const rr = r.getBoundingClientRect();
-            if (rr.width < 1 && rr.height < 1) return false; // oculto de verdad
+          let cand = radios.find((r) => {
+            if (!visible(r)) return false; // oculto de verdad
             if (kpreg.length) { const preg = preguntaDe(r); if (!kpreg.some((kw) => preg.indexOf(kw) >= 0)) return false; }
             return casaOpcion(etiquetaDe(r));
           });
+          if (!cand && kpreg.length) {
+            const conBloque = radios
+              .filter((r) => visible(r) && casaOpcion(etiquetaDe(r)))
+              .map((r) => ({ r: r, d: cercaniaPregunta(r) }))
+              .filter((o) => o.d >= 0)
+              .sort((a, b) => a.d - b.d); // el bloque más pequeño = el grupo de esta pregunta
+            if (conBloque.length) cand = conBloque[0].r;
+          }
           if (cand) { destinoRP = cand; okRP = marcarRadioEl(cand); }
           if (!okRP) await dur(300);
         }
@@ -305,33 +329,45 @@ async function APLICAR(pasos, opciones) {
           else faltan.push("etiqueta:" + p.label);
         }
       } else if (p.tipo === "fillUrlsUnaCaja") {
-        // TikTok: UNA sola caja para TODAS las URLs, una por línea. Se llena por partes,
-        // así que si la caja aún no está visible NO rompe (la llenará un Rellenar posterior).
+        // UNA sola caja para TODAS las URLs (TikTok: una por línea; portal nuevo de Meta:
+        // separadas por coma -> p.separador). Se llena por partes, así que si la caja aún
+        // no está visible NO rompe (la llenará un Rellenar posterior).
         const urls = (p.urls || []).map((u) => (u || "").toString().trim()).filter(Boolean);
         if (!urls.length) {
           // nada que poner
         } else {
           const etiquetas = (p.label || "").split("|").map(norm).filter(Boolean);
           const placeholders = (p.placeholder || "").split("|").map(norm).filter(Boolean);
-          const campos = Array.prototype.slice.call(
-            document.querySelectorAll("textarea, input[type=text], input:not([type])"));
+          const texto = urls.join(p.separador || "\n");
+          const buscarCaja = () => {
+            const campos = Array.prototype.slice.call(
+              document.querySelectorAll("textarea, input[type=text], input:not([type])"));
+            for (const e of campos) {
+              const r = e.getBoundingClientRect();
+              if (r.width <= 2 || r.height <= 2) continue;
+              if (e.value) { if (e.value === texto) return e; continue; } // ya la llenamos antes
+              const ph = norm(e.placeholder || "");
+              let ctx = " " + (e.placeholder || "") + " " + (e.getAttribute("aria-label") || "") + " ";
+              if (e.id) { const lf = document.querySelector('label[for="' + e.id.replace(/"/g, '\\"') + '"]'); if (lf) ctx += " " + (lf.innerText || ""); }
+              const lblby = e.getAttribute("aria-labelledby");
+              if (lblby) lblby.split(/\s+/).forEach(function (idr) { const le = document.getElementById(idr); if (le) ctx += " " + (le.innerText || ""); });
+              if (e.previousElementSibling) ctx += " " + (e.previousElementSibling.innerText || "");
+              // El rótulo del portal nuevo de Meta es el hermano anterior de un ANCESTRO.
+              let par = e.parentElement, k = 0;
+              while (par && k < 6) { const ps = par.previousElementSibling; if (ps) ctx += " " + (ps.innerText || ""); ctx += " " + (par.getAttribute("aria-label") || ""); par = par.parentElement; k++; }
+              const c = norm(ctx);
+              const porEtiqueta = etiquetas.some((kw) => c.indexOf(kw) >= 0);
+              const porPlaceholder = placeholders.some((kw) => ph.indexOf(kw) >= 0);
+              if (porEtiqueta || porPlaceholder) return e;
+            }
+            return null;
+          };
           let hit = null;
-          for (const e of campos) {
-            const r = e.getBoundingClientRect();
-            if (r.width <= 2 || r.height <= 2 || e.value) continue;
-            const ph = norm(e.placeholder || "");
-            let ctx = " " + (e.placeholder || "") + " " + (e.getAttribute("aria-label") || "") + " ";
-            if (e.id) { const lf = document.querySelector('label[for="' + e.id.replace(/"/g, '\\"') + '"]'); if (lf) ctx += " " + (lf.innerText || ""); }
-            const lblby = e.getAttribute("aria-labelledby");
-            if (lblby) lblby.split(/\s+/).forEach(function (idr) { const le = document.getElementById(idr); if (le) ctx += " " + (le.innerText || ""); });
-            if (e.previousElementSibling) ctx += " " + (e.previousElementSibling.innerText || "");
-            if (e.parentElement) ctx += " " + (e.parentElement.innerText || "");
-            const c = norm(ctx);
-            const porEtiqueta = etiquetas.some((kw) => c.indexOf(kw) >= 0);
-            const porPlaceholder = placeholders.some((kw) => ph.indexOf(kw) >= 0);
-            if (porEtiqueta || porPlaceholder) { hit = e; break; }
+          for (let itUC = 0; itUC < (p.reintentos || 1) && !hit; itUC++) {
+            hit = buscarCaja();
+            if (!hit) await dur(400);
           }
-          if (hit) { setNative(hit, urls.join("\n")); ok++; } else faltan.push("urls_caja_tiktok");
+          if (hit) { if (hit.value !== texto) setNative(hit, texto); ok++; } else faltan.push("urls_caja_unica");
         }
       } else if (p.tipo === "selectLabel") {
         // Como fillLabel pero para <select> nativos: encuentra el menú por su etiqueta
@@ -470,15 +506,25 @@ async function APLICAR(pasos, opciones) {
               const r = e.getBoundingClientRect();
               return r.width > 2 && r.height > 2;
             });
+          // URLs que YA están puestas en una caja (pasadas anteriores del motor): así el
+          // paso se da por hecho en vez de reintentar hasta agotar el tiempo.
+          const yaPuestas = () => {
+            const dominio = norm(p.dominio || "");
+            return Array.prototype.slice.call(
+              document.querySelectorAll('textarea, input[type=text], input[type=url], input:not([type])'))
+              .filter((e) => e.value && norm(e.placeholder || "").indexOf(dominio) >= 0 &&
+                urls.indexOf(e.value.trim()) >= 0).length;
+          };
           let cajas = buscarCajas();
           // ¿Faltan cajas? Marca el checkbox de "enlaces adicionales" y espera a que
           // el formulario revele las cajas 11..30 (React las agrega de forma asíncrona).
-          if (urls.length > cajas.length && p.checkLabel) {
+          if (urls.length > cajas.length + yaPuestas() && p.checkLabel) {
             const kws = (p.checkLabel || "").split("|").map(norm).filter(Boolean);
             const cbs = Array.prototype.slice.call(document.querySelectorAll('input[type=checkbox]'));
             let cb = null;
             for (const c of cbs) {
-              let lab = " " + (c.getAttribute("aria-label") || "") + " ";
+              // El value (en inglés) sirve de respaldo cuando Meta reescribe el rótulo.
+              let lab = " " + (c.value || "") + " " + (c.getAttribute("aria-label") || "") + " ";
               const lb = c.getAttribute("aria-labelledby");
               if (lb) lb.split(/\s+/).forEach(function (idr) { const le = document.getElementById(idr); if (le) lab += " " + (le.innerText || ""); });
               if (c.id) { const lf = document.querySelector('label[for="' + c.id.replace(/"/g, '\\"') + '"]'); if (lf) lab += " " + (lf.innerText || ""); }
@@ -497,11 +543,18 @@ async function APLICAR(pasos, opciones) {
             }
             cajas = buscarCajas();
           }
-          // Rellena en orden: URL i -> caja i.
+          // Rellena en orden: la URL i-ésima que aún no esté puesta -> caja libre i.
+          const pendientesU = urls.filter((u) => {
+            const dominio = norm(p.dominio || "");
+            return !Array.prototype.slice.call(
+              document.querySelectorAll('textarea, input[type=text], input[type=url], input:not([type])'))
+              .some((e) => e.value && e.value.trim() === u && norm(e.placeholder || "").indexOf(dominio) >= 0);
+          });
           let puestas = 0;
-          for (let i = 0; i < urls.length && i < cajas.length; i++) { setNative(cajas[i], urls[i]); puestas++; }
+          for (let i = 0; i < pendientesU.length && i < cajas.length; i++) { setNative(cajas[i], pendientesU[i]); puestas++; }
+          const total = yaPuestas(); // recuenta el DOM: incluye las que se acaban de poner
           if (puestas > 0) ok++;
-          if (puestas < urls.length) faltan.push("urls:" + puestas + "/" + urls.length + " (FB tope 30)");
+          if (total < urls.length) faltan.push("urls:" + total + "/" + urls.length + " (tope 30 de Meta)");
         }
       } else if (p.tipo === "fillDifamUrls") {
         // Formulario de difamación (FB/IG): primero elige en el <select> nativo

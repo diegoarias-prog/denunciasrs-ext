@@ -243,26 +243,47 @@
 
   // Constructores de plan para los formularios de Meta (Facebook/Instagram), que
   // comparten estructura y nombres de campo. 'this' es el objeto del formulario.
+  // DERECHOS DE AUTOR de Facebook/Instagram: Meta RETIRÓ los formularios antiguos
+  // (facebook.com/help/contact/1758255661104383 y help.instagram.com/contact/552695131608132):
+  // al elegir el país redirigían al portal NUEVO help.meta.com/requests/1523801815366035.
+  // El formulario nuevo es un ASISTENTE DE 2 PASOS, sus campos NO tienen atributo `name`
+  // (se localizan por su rótulo en español) y las URLs van TODAS en UNA sola caja
+  // (hasta 30, separadas por coma), ya no en las cajas "Enlace 1..30".
+  //   Paso 1 - "Danos más detalles sobre el propietario de los derechos de autor":
+  //            país (desplegable) + "¿Eres el propietario de los derechos?" = Sí + nombre
+  //            del propietario -> botón "Siguiente".
+  //   Paso 2 - "Danos más detalles sobre lo que quieres reportar y envía el reporte":
+  //            URLs, ejemplo de la obra, descripción, nombre, correo (x2) y firma.
   function planCopyright(ctx) {
     var d = ctx.datos, marca = ctx.marca;
+    // Perfil OFICIAL de la marca en esta red (Instagram/Facebook), con fallback a d.sitio
+    // si el perfil de la red aún no está configurado en "Marcas".
+    var perfil = (this.red === "Instagram" ? (d.instagram || d.sitio) : (d.facebook || d.sitio)) || "";
     return { url: this.url, manual: this.manual, pasos: [
-      { tipo: "radio", name: "copyright_owner", texto: "rights owner", esperaMs: 1200 },
-      { tipo: "fillName", name: "your_name", valor: marca },
-      { tipo: "fillName", name: "email", valor: d.correo },
-      { tipo: "fillName", name: "confirm_email", valor: d.correo },
-      { tipo: "select", name: "rights_owner_country_routing", texto: d.pais },
-      { tipo: "select", name: "describe_copyrighted_work_me", texto: "otro" },
-      { tipo: "fillName", name: "reporter_name", valor: marca },
-      // URL del titular: perfil OFICIAL de la marca en esta red (Instagram/Facebook) con
-      // fallback a d.sitio si el perfil de la red aún no está configurado en "Marcas".
-      { tipo: "fillName", name: "copyright_url", valor: (this.red === "Instagram" ? (d.instagram || d.sitio) : (d.facebook || d.sitio)) || "" },
-      { tipo: "fillName", name: "describe_copyrighted_work_me_URLs", valor: "Perfil oficial de " + marca },
-      { tipo: "check", name: "Content_type[]", texto: "publicacion" },
-      { tipo: "fillName", name: "why_reporting_other", valor: ctx.justif },
-      { tipo: "fillName", name: "Electronic_sig", valor: marca },
-      { tipo: "radio", name: "copyright_owner", texto: "rights owner" }, // re-marcar al final
-      // Autollena las cajas "Enlace 1..30" con la lista de URLs del Excel (si la hay).
-      { tipo: "fillUrlList", dominio: (this.red === "Instagram" ? "instagram.com" : "facebook.com"), checkLabel: "Tengo enlaces adicionales que denunciar", urls: (ctx.urls || []) }
+      // -------- Paso 1: propietario de los derechos --------
+      { tipo: "dropdown", pregunta: "donde estas defendiendo derechos|defendiendo derechos|asserting rights",
+        opcion: d.pais, esperaMs: 1200 },
+      { tipo: "radioPregunta", pregunta: "eres el propietario de los derechos|are you the rights owner",
+        opcion: "si|yes", esperaMs: 1200 },
+      { tipo: "fillLabel", label: "nombre del propietario de los derechos|name of the rights owner|rights owner name",
+        valor: marca, reintentos: 6 },
+      { tipo: "clickBoton", texto: "siguiente|next", esperaMs: 3000 },
+      // -------- Paso 2: contenido a denunciar (en ORDEN de aparición) --------
+      // Todas las URLs del Excel en UNA sola caja, separadas por coma (tope 30 de Meta).
+      { tipo: "fillUrlsUnaCaja",
+        label: "identificadores que lleven directamente al contenido|url o los identificadores|urls o identificadores|urls or identifiers",
+        placeholder: "instagram.com|facebook.com", urls: (ctx.urls || []), separador: ", ", reintentos: 6 },
+      { tipo: "fillLabel", label: "ejemplo de tu obra con derechos de autor|example of your copyrighted work",
+        valor: perfil, reintentos: 6 },
+      { tipo: "fillLabel", label: "manera consideras que este contenido infringe|manera crees que este contenido infringe|believe this content infringes",
+        valor: ctx.justif, reintentos: 6 },
+      { tipo: "fillLabel", label: "tu nombre completo|your full name", valor: marca, reintentos: 6 },
+      { tipo: "fillLabel", label: "correo electronico|email address", valor: d.correo, reintentos: 6 },
+      { tipo: "fillLabel", label: "confirmar correo electronico|confirm email", valor: d.correo, reintentos: 6 },
+      { tipo: "fillLabel", label: "firma electronica|electronic signature", valor: marca, reintentos: 6 },
+      // Re-marcar al final: React del portal nuevo revierte el radio al rellenar lo demás.
+      { tipo: "radioPregunta", pregunta: "eres el propietario de los derechos|are you the rights owner",
+        opcion: "si|yes", opcional: true }
     ] };
   }
   // Clase de bienes/servicios de la marca (campo "Clase de bienes y servicios de marca
@@ -282,7 +303,10 @@
       // fallback a d.sitio si el perfil de la red aún no está configurado en "Marcas".
       { tipo: "fillName", name: "websiterightsholder", valor: (this.red === "Instagram" ? (d.instagram || d.sitio) : (d.facebook || d.sitio)) || "" },
       { tipo: "fillName", name: "what_is_your_trademark", valor: marca },
-      { tipo: "fillLabel", label: "numero de registro de la marca comercial|numero de registro|registration number|trademark registration number|registration number of the trademark", valor: (d.registro || "") },
+      // N.º de registro: el campo ya tiene name propio (TMREGNUMBER); se deja además la
+      // búsqueda por rótulo como respaldo por si Meta le vuelve a cambiar el name.
+      { tipo: "fillName", name: "TMREGNUMBER", valor: (d.registro || "") },
+      { tipo: "fillLabel", label: "numero de registro de la marca comercial|numero de registro|registration number|trademark registration number|registration number of the trademark", valor: (d.registro || ""), opcional: true },
       // Enlace directo al registro de la marca en una base de datos de marcas: usa d.tmurl
       // (override por marca, editable en el panel de Marcas) si está definido; si no, cae en
       // la base por país (OMPI si el país no tiene buscador público fiable).
@@ -295,7 +319,9 @@
       { tipo: "radio", name: "continuereport", texto: "trademark" },          // re-marcar al final
       { tipo: "radio", name: "relationship_rightsowner", texto: "rights owner" },
       // Autollena las cajas "Enlace 1..30" con la lista de URLs del Excel (si la hay).
-      { tipo: "fillUrlList", dominio: (this.red === "Instagram" ? "instagram.com" : "facebook.com"), checkLabel: "Tengo enlaces adicionales que denunciar", urls: (ctx.urls || []) }
+      // checkLabel: Meta cambió la redacción ("...adicionales PARA REPORTAR", antes "que
+      // denunciar"); se dejan varias redacciones + el value en inglés como respaldo.
+      { tipo: "fillUrlList", dominio: (this.red === "Instagram" ? "instagram.com" : "facebook.com"), checkLabel: "enlaces adicionales|additional links to report|enlaces adicionales que denunciar", urls: (ctx.urls || []) }
     ] };
   }
   function planDifam(ctx) {
@@ -430,8 +456,9 @@
       }
     },
     // ================= Facebook / Instagram (motor Meta) =================
-    fb_da:        { red: "Facebook",  nombre: "Derechos de autor", cat: "autor", url: "https://www.facebook.com/help/contact/1758255661104383", manual: "Pega las URL del contenido infractor en el campo de enlaces. Revisa antes de enviar.", construirPlan: planCopyright },
-    ig_copyright: { red: "Instagram", nombre: "Derechos de autor", cat: "autor", url: "https://help.instagram.com/contact/552695131608132",        manual: "Pega las URL del contenido infractor. Revisa antes de enviar.", construirPlan: planCopyright },
+    // Derechos de autor: portal NUEVO de Meta (el antiguo help/contact ya solo redirige aquí).
+    fb_da:        { red: "Facebook",  nombre: "Derechos de autor", cat: "autor", url: "https://help.meta.com/requests/1523801815366035?claim_type=IP_COPYRIGHT&platform_copyright=FACEBOOK_CORE",  manual: "Formulario de 2 pasos. Las URL van todas en una sola caja (tope 30). Revisa y pulsa Enviar.", construirPlan: planCopyright },
+    ig_copyright: { red: "Instagram", nombre: "Derechos de autor", cat: "autor", url: "https://help.meta.com/requests/1523801815366035?claim_type=IP_COPYRIGHT&platform_copyright=INSTAGRAM_CORE", manual: "Formulario de 2 pasos. Las URL van todas en una sola caja (tope 30). Revisa y pulsa Enviar.", construirPlan: planCopyright },
     fb_marca:     { red: "Facebook",  nombre: "Marca registrada",  cat: "marca", url: "https://www.facebook.com/help/contact/1057530390957243", manual: "Pega las URL del contenido infractor y el N.º de registro si lo tienes. Revisa antes de enviar.", construirPlan: planMarca },
     ig_marca:     { red: "Instagram", nombre: "Marca registrada",  cat: "marca", url: "https://help.instagram.com/contact/230197320740525",        manual: "Pega las URL del contenido infractor. Revisa antes de enviar.", construirPlan: planMarca },
     fb_difam:     { red: "Facebook",  nombre: "Difamación",        cat: "difam", url: "https://www.facebook.com/help/contact/430253071144967", manual: "Selecciona cuántas URL y pega cada enlace con su motivo. Revisa antes de enviar.", construirPlan: planDifam },
@@ -657,6 +684,39 @@
             negrita("Enlaces del contenido / canal / usuario a denunciar:") + "\n" + urlsODefault(ctx, "[ Pega aquí los enlaces t.me/... ]") + "\n\n" +
             "Agradecemos su pronta gestión.\n" + marca };
         return bilingue(en, es);
+      }
+    },
+    // ================= Google Ads (publicidad maliciosa) =================
+    // Formulario "Denunciar un anuncio o una ficha de shopping" de Google. Es corto y sus
+    // campos SÍ tienen name estable: violating_policy (radios), email_field y clickstring.
+    // El ancla #ts=6006595 abre directamente el paso "Infringe las políticas de Google".
+    // Flujo pedido: 1.ª opción marcada + enlace del anuncio + captura del comprobante + Enviar
+    // (el envío automático lo hace el service worker, con 5 s para cancelar).
+    go_ads: {
+      red: "Google", nombre: "Publicidad maliciosa", cat: "malic",
+      url: "https://support.google.com/ads/troubleshooter/4578507?hl=es#ts=6006595",
+      manual: "Se marca la 1.ª opción («Es engañoso o trata de estafar a los usuarios») y se pega el enlace del anuncio. Se captura el comprobante y se envía solo (5 s para cancelar).",
+      enviarLabel: "enviar|submit",
+      construirPlan: function (ctx) {
+        var d = ctx.datos;
+        // Enlace del anuncio: el del clic derecho si se usó el menú contextual; si no, el
+        // primero de la lista cargada del Excel. Este formulario admite UN solo anuncio.
+        var enlace = ((ctx.urls || [])[0] || "").toString().trim();
+        return { url: this.url, manual: this.manual, enviarLabel: this.enviarLabel, pasos: [
+          // 1.ª opción del grupo (sin texto => el primer radio): "Es engañoso o trata de
+          // estafar a los usuarios (ofertas falsas, suplantación, phishing, clickbait…)".
+          { tipo: "radio", name: "violating_policy", texto: "", esperaMs: 900 },
+          { tipo: "fillName", name: "email_field", valor: d.correo },
+          // "Enlace del anuncio o de la ficha (si se rellena automáticamente, no lo cambie)".
+          { tipo: "fillName", name: "clickstring", valor: enlace },
+          // "Comentarios": campo OBLIGATORIO que Google revela AL marcar la opción. Lleva la
+          // justificación, que ya incluye la política de Google infringida y su enlace.
+          // OJO: aquí NO se puede usar fillLabel; el rótulo de la caja anterior ("Enlace del
+          // anuncio…") queda dentro del contexto de este campo y acabaría metiendo la URL.
+          { tipo: "fillAny", names: ["comments_mandetory", "comments_mandatory", "comments"], valor: ctx.justif },
+          // Re-marcar la 1.ª opción al final (el formulario la revierte al rellenar el resto).
+          { tipo: "radio", name: "violating_policy", texto: "", opcional: true }
+        ] };
       }
     },
     // ================= YouTube (formularios de soporte de Google, sin login) =================

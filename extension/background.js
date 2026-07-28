@@ -257,7 +257,9 @@ async function capturarCompleta(tabId) {
 //  comprobante, muestra una cuenta atrás de 5 s (cancelable) y pulsa "Enviar" por el usuario.
 //  En las redes con captcha (X/YouTube/LinkedIn) NO se envía: solo se captura y se avisa.
 // ============================================================================
-const REDES_AUTOENVIO = ["Facebook", "Instagram", "WhatsApp", "TikTok"];
+// "Google" = formulario de publicidad maliciosa (support.google.com/ads/troubleshooter):
+// no lleva captcha, así que se captura el comprobante y se envía solo.
+const REDES_AUTOENVIO = ["Facebook", "Instagram", "WhatsApp", "TikTok", "Google"];
 function permiteAutoenvio(form) { return !!form && REDES_AUTOENVIO.indexOf(form.red) >= 0; }
 const ENVIAR_LABEL_DEFECTO = "enviar|enviar denuncia|enviar informe|enviar reporte|submit|send|send report|send feedback";
 
