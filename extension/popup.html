@@ -22,6 +22,9 @@
   .bloque_urls { margin-top: 12px; padding: 9px 10px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; }
   .bloque_urls label { margin: 0 0 5px; }
   .bloque_urls input[type=file] { width: 100%; font-size: 11px; }
+  .caja_url_manual { width: 100%; box-sizing: border-box; margin-bottom: 5px; padding: 6px 8px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 11.5px; }
+  .caja_url_manual:focus { outline: 0; border-color: #1d4ed8; }
+  #estado_urls_manuales { font-size: 11px; color: #475569; }
   .fila_estado_urls { display: flex; align-items: center; justify-content: space-between; margin-top: 6px; gap: 8px; }
   #estado_urls { font-size: 11px; color: #475569; }
   .boton_quitar_urls { padding: 3px 9px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; color: #b91c1c; font-size: 11px; cursor: pointer; }
@@ -44,6 +47,16 @@
   <button class="boton" id="boton_rellenar">Rellenar formulario</button>
   <button class="boton sec" id="boton_capturar" disabled title="Adjunta una captura de esta pestaña al comprobante de la denuncia en curso">📸 Capturar pantalla</button>
   <p class="sub" style="margin:6px 0 0;">Atajo: Alt+Shift+S — captura el formulario sin abrir esto (se puede cambiar en chrome://extensions/shortcuts).</p>
+
+  <div class="bloque_urls">
+    <label for="caja_url_1">🔗 URL(s) a denunciar (a mano)</label>
+    <input type="url" id="caja_url_1" class="caja_url_manual" placeholder="https://… (URL 1)">
+    <input type="url" id="caja_url_2" class="caja_url_manual" placeholder="https://… (URL 2, opcional)">
+    <div class="fila_estado_urls">
+      <span id="estado_urls_manuales">Vacías: se usará la lista del Excel</span>
+      <button type="button" class="boton_quitar_urls" id="quitar_urls_manuales">Borrar</button>
+    </div>
+  </div>
 
   <div class="bloque_urls">
     <label for="archivo_urls">📄 Cargar lista de URLs (Excel)</label>

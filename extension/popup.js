@@ -8,6 +8,16 @@
 // solo se rellena y captura, el usuario resuelve el captcha y envía.
 const REDES_AUTOENVIO_POPUP = ["Facebook", "Instagram", "WhatsApp", "TikTok", "Google"];
 
+// El botón flotante "📸 Capturar comprobante" NO debe salir mientras uno simplemente
+// navega por la red social: solo cuando se ACTIVA la extensión. Abrir este popup en una
+// pestaña es justo eso, así que se lo avisamos al content script de esa pestaña.
+(async function activar_boton_captura_en_pestana_actual() {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab && tab.id) chrome.tabs.sendMessage(tab.id, { accion: "activarBotonCaptura" }, () => void chrome.runtime.lastError);
+  } catch (e) { /* la página no admite content scripts: nada que activar */ }
+})();
+
 // --- Marcas: base + las editadas/agregadas en Opciones − las eliminadas ---
 async function obtener_marcas() {
   const d = await new Promise((res) =>
@@ -203,6 +213,65 @@ if ($("quitar_urls")) {
 obtener_urls_guardadas().then((u) => pintar_estado_urls(u.length));
 
 // ===========================================================================
+//  URLs escritas A MANO (1 o 2). Para denunciar un enlace suelto sin tener que
+//  armar un Excel. Se guardan en storage para que las use TAMBIÉN el menú del
+//  clic derecho, y TIENEN PRIORIDAD sobre la lista del Excel: si hay alguna
+//  escrita, es la que se pone en los formularios y en los correos.
+//  Orden de prioridad general: clic derecho sobre un enlace > estas cajas > Excel.
+// ===========================================================================
+const CLAVE_URLS_MANUALES = "urls_manuales";
+
+function pintar_estado_urls_manuales(n) {
+  const e = $("estado_urls_manuales");
+  if (!e) return;
+  e.textContent = (n && n > 0)
+    ? (n + " URL" + (n === 1 ? "" : "s") + " a mano: se usa" + (n === 1 ? "" : "n") + " esta" + (n === 1 ? "" : "s") + " (el Excel se ignora)")
+    : "Vacías: se usará la lista del Excel";
+}
+
+// Lee las cajas, se queda con las que parecen URL y las guarda.
+function guardar_urls_manuales() {
+  const vals = ["caja_url_1", "caja_url_2"]
+    .map((id) => ($(id) ? normalizar_url($(id).value) : ""))
+    .filter(Boolean);
+  const unicas = vals.filter((u, i) => vals.indexOf(u) === i);
+  return new Promise((res) =>
+    chrome.storage.local.set({ [CLAVE_URLS_MANUALES]: unicas }, () => { pintar_estado_urls_manuales(unicas.length); res(unicas); }));
+}
+
+function obtener_urls_manuales() {
+  return new Promise((res) =>
+    chrome.storage.local.get([CLAVE_URLS_MANUALES], (x) =>
+      res(Array.isArray(x[CLAVE_URLS_MANUALES]) ? x[CLAVE_URLS_MANUALES] : [])));
+}
+
+// URLs que se usarán en esta denuncia: las escritas a mano si las hay, si no el Excel.
+async function obtener_urls_para_denuncia() {
+  const manuales = await obtener_urls_manuales();
+  if (manuales.length) return manuales;
+  return await obtener_urls_guardadas();
+}
+
+["caja_url_1", "caja_url_2"].forEach((id) => {
+  if ($(id)) $(id).addEventListener("input", () => { guardar_urls_manuales(); });
+});
+if ($("quitar_urls_manuales")) {
+  $("quitar_urls_manuales").addEventListener("click", () => {
+    ["caja_url_1", "caja_url_2"].forEach((id) => { if ($(id)) $(id).value = ""; });
+    chrome.storage.local.remove([CLAVE_URLS_MANUALES], () => {
+      pintar_estado_urls_manuales(0);
+      mostrar_estado("aviso", "URLs escritas a mano borradas.");
+    });
+  });
+}
+// Al abrir el popup, repinta lo que se escribió la última vez.
+obtener_urls_manuales().then((u) => {
+  if ($("caja_url_1")) $("caja_url_1").value = u[0] || "";
+  if ($("caja_url_2")) $("caja_url_2").value = u[1] || "";
+  pintar_estado_urls_manuales(u.length);
+});
+
+// ===========================================================================
 //  Registro automático de la denuncia (para no cargarla a mano)
 // ===========================================================================
 // Crea —o reutiliza— una entrada "pendiente" en `denuncias_registro` al iniciar
@@ -352,8 +421,10 @@ async function rellenar() {
   const justif = window.JUSTIF.conPolitica(window.JUSTIF.justificacion(form.cat, redCode, marca, pais, "en"), formKey, "en");
   const justif_es = window.JUSTIF.conPolitica(window.JUSTIF.justificacion(form.cat, redCode, marca, pais, "es"), formKey, "es");
 
-  // Lista de URLs (Excel) a autollenar en las cajas "Enlace 1..30" (vacío si no hay).
-  const urls = await obtener_urls_guardadas();
+  // URLs a denunciar: las escritas a mano en el popup si las hay; si no, la lista del
+  // Excel. Se usan tanto en los formularios (cajas "Enlace 1..30" / caja única) como en
+  // los correos (donde sustituyen al "[ Pega aquí el/los enlace(s) ]").
+  const urls = await obtener_urls_para_denuncia();
   const ctx = { marca: marca, datos: datos, justif: justif, justif_es: justif_es, correoPersona: window.CORREO_PERSONA, urls: urls };
 
   // Redes SIN formulario web (Telegram): se genera un CORREO en una pestaña aparte.

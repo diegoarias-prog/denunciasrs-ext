@@ -485,6 +485,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 //  web (regla del proyecto); en los correos se conserva el bilingüe en/es.
 // ============================================================================
 const CLAVE_URLS_CTX = "urls_denuncia";        // misma clave que el popup (CLAVE_URLS)
+const CLAVE_URLS_MANUALES_CTX = "urls_manuales"; // las 1-2 URLs escritas a mano en el popup
 const RS_CONTEXTS = ["page", "frame", "selection", "link", "image", "editable"];
 const rsEnc = (s) => encodeURIComponent(String(s)); // marca -> id de menú (nunca lleva '|')
 const rsDec = (s) => { try { return decodeURIComponent(s); } catch (e) { return s; } };
@@ -616,13 +617,22 @@ async function ctxArmar(marca, formKey, urlsOverride) {
     self.JUSTIF.justificacion(form.cat, redCode, marca, pais, esCorreo ? "en" : "es"), formKey, esCorreo ? "en" : "es");
   const justif_es = self.JUSTIF.conPolitica(
     self.JUSTIF.justificacion(form.cat, redCode, marca, pais, "es"), formKey, "es");
-  const g = await chrome.storage.local.get([CLAVE_URLS_CTX]);
+  const g = await chrome.storage.local.get([CLAVE_URLS_CTX, CLAVE_URLS_MANUALES_CTX]);
   const urlsExcel = Array.isArray(g[CLAVE_URLS_CTX]) ? g[CLAVE_URLS_CTX] : [];
-  // Si el usuario hizo clic derecho SOBRE un enlace (o imagen/selección con URL), ESE
-  // enlace es el que se denuncia; si no, se usan las URLs cargadas del Excel.
-  const urls = (Array.isArray(urlsOverride) && urlsOverride.length) ? urlsOverride : urlsExcel;
+  const urlsManuales = Array.isArray(g[CLAVE_URLS_MANUALES_CTX]) ? g[CLAVE_URLS_MANUALES_CTX] : [];
+  // Prioridad: 1) clic derecho SOBRE un enlace (o imagen/selección con URL) — ese enlace
+  // es el que se denuncia; 2) las URLs escritas a mano en el popup; 3) la lista del Excel.
+  const urls = (Array.isArray(urlsOverride) && urlsOverride.length) ? urlsOverride
+             : (urlsManuales.length ? urlsManuales : urlsExcel);
   const ctx = { marca, datos, justif, justif_es, correoPersona: self.CORREO_PERSONA, urls };
   return { ctx, form, datos };
+}
+
+// Avisa al content script de una pestaña de que la extensión se ha ACTIVADO ahí, para que
+// muestre el botón flotante de capturar comprobante. Silencioso si la página no lo tiene.
+function activarBotonCaptura(tabId) {
+  try { chrome.tabs.sendMessage(tabId, { accion: "activarBotonCaptura" }, () => void chrome.runtime.lastError); }
+  catch (e) { /* la pestaña no admite content scripts */ }
 }
 
 // Ejecuta un plan (APLICAR + clics reales + autorrelleno persistente) en una pestaña.
@@ -630,6 +640,9 @@ async function ctxArmar(marca, formKey, urlsOverride) {
 // avisa y no se sigue: sin él el formulario no deja avanzar y el usuario se queda con un
 // "This field is required" sin explicación.
 async function ctxEjecutarPlan(tabId, plan, marca, form, datos) {
+  // Denunciar en esta pestaña = activar la extensión aquí: se muestra el botón flotante
+  // de capturar comprobante (que por defecto está oculto mientras solo se navega).
+  activarBotonCaptura(tabId);
   if (datos && !(datos.pais || "").trim() && form && form.tipo !== "email") {
     ctxAvisar(tabId, "Denuncias RS: la marca «" + marca + "» no tiene PAÍS configurado y el formulario lo exige. " +
       "Ábrela en Marcas (⚙ Opciones), escribe el país y vuelve a intentarlo.", true);
