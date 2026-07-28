@@ -626,7 +626,15 @@ async function ctxArmar(marca, formKey, urlsOverride) {
 }
 
 // Ejecuta un plan (APLICAR + clics reales + autorrelleno persistente) en una pestaña.
-async function ctxEjecutarPlan(tabId, plan, marca, form) {
+// Si la marca no tiene PAÍS (campo obligatorio en los formularios de Meta y compañía) se
+// avisa y no se sigue: sin él el formulario no deja avanzar y el usuario se queda con un
+// "This field is required" sin explicación.
+async function ctxEjecutarPlan(tabId, plan, marca, form, datos) {
+  if (datos && !(datos.pais || "").trim() && form && form.tipo !== "email") {
+    ctxAvisar(tabId, "Denuncias RS: la marca «" + marca + "» no tiene PAÍS configurado y el formulario lo exige. " +
+      "Ábrela en Marcas (⚙ Opciones), escribe el país y vuelve a intentarlo.", true);
+    return;
+  }
   const r = await chrome.scripting.executeScript({ target: { tabId }, func: APLICAR, args: [plan.pasos] });
   const res = (r && r[0] && r[0].result) || { ok: 0, faltan: [], clicsReales: [] };
   if (res.clicsReales && res.clicsReales.length) { try { await hacerClics(tabId, res.clicsReales); } catch (e) {} }
@@ -657,7 +665,7 @@ async function ctxRellenarPagina(tab, marca, objetivo) {
   const a = await ctxArmar(marca, formKey, objetivo);
   if (!a) { ctxAvisar(tab.id, "Denuncias RS: no encuentro la marca «" + marca + "».", true); return; }
   await ctxRegistrarDenuncia(marca, a.form, (objetivo && objetivo[0]) || "");
-  try { await ctxEjecutarPlan(tab.id, a.form.construirPlan(a.ctx), marca, a.form); }
+  try { await ctxEjecutarPlan(tab.id, a.form.construirPlan(a.ctx), marca, a.form, a.datos); }
   catch (e) { ctxAvisar(tab.id, "Denuncias RS: no se pudo rellenar aquí (" + (e.message || e) + ").", true); }
 }
 
@@ -684,7 +692,7 @@ async function ctxAbrirDenuncia(tabOrigen, marca, formKey, objetivo) {
   try { nueva = await chrome.tabs.create({ url: plan.url, active: false }); } catch (e) { return; }
   await ctxEsperarCarga(nueva.id);
   await dormir(1800); // deja aparecer los campos
-  try { await ctxEjecutarPlan(nueva.id, plan, marca, form); }
+  try { await ctxEjecutarPlan(nueva.id, plan, marca, form, datos); }
   catch (e) { /* la pestaña abrió; el usuario puede rellenar con el clic derecho de nuevo */ }
 }
 

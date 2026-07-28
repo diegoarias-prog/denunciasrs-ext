@@ -265,8 +265,11 @@
       // "titular de los derechos" / "¿Dónde estás ejerciendo tus derechos?". Por eso se casa
       // por PALABRAS CLAVE cortas comunes a ambas, nunca por la frase completa.
       // -------- Paso 1: titular/propietario de los derechos --------
+      // El país sale del campo "🌎 País" de la marca (panel Marcas). Si está vacío o no
+      // coincide con la lista de Meta, `desc` hace que el aviso lo diga con claridad en vez
+      // de dejar el desplegable vacío en silencio ("This field is required").
       { tipo: "dropdown", pregunta: "defendiendo derechos|ejerciendo tus derechos|asserting rights",
-        opcion: d.pais, esperaMs: 1200 },
+        opcion: d.pais, desc: "el país de la marca", esperaMs: 1200 },
       { tipo: "radioPregunta", pregunta: "titular de los derechos|propietario de los derechos|rights owner",
         opcion: "si|yes", esperaMs: 1200 },
       { tipo: "fillLabel", label: "como se llama el titular|nombre del titular|nombre del propietario|name of the rights owner|rights owner name",

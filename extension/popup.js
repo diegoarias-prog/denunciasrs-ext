@@ -340,6 +340,14 @@ async function rellenar() {
   // Código de red para la justificación de difamación (fb/ig/tk).
   const redCode = { Facebook: "fb", Instagram: "ig", TikTok: "tk" }[form.red] || "";
   const pais = datos.pais || "";
+  // El PAÍS es obligatorio en casi todos los formularios (Meta lo pide como primer campo y
+  // sin él no deja avanzar). Se avisa ANTES de rellenar para no dejar al usuario delante de
+  // un formulario a medias con un "This field is required" sin explicación.
+  if (!pais.trim() && form.tipo !== "email") {
+    mostrar_estado("aviso", "La marca «" + marca + "» no tiene <b>país</b> configurado y el formulario lo exige. " +
+      "Ábrela en <b>⚙ Marcas</b>, escribe el país (ej. Ecuador) y vuelve a intentarlo.");
+    return;
+  }
   // Formularios web: justificación en INGLÉS. Para los correos también la versión española.
   const justif = window.JUSTIF.conPolitica(window.JUSTIF.justificacion(form.cat, redCode, marca, pais, "en"), formKey, "en");
   const justif_es = window.JUSTIF.conPolitica(window.JUSTIF.justificacion(form.cat, redCode, marca, pais, "es"), formKey, "es");
