@@ -6,7 +6,7 @@
 
 // Redes cuyos formularios se envían solos (sin captcha). En X/YouTube/LinkedIn hay captcha:
 // solo se rellena y captura, el usuario resuelve el captcha y envía.
-const REDES_AUTOENVIO_POPUP = ["Facebook", "Instagram", "WhatsApp", "TikTok"];
+const REDES_AUTOENVIO_POPUP = ["Facebook", "Instagram", "WhatsApp", "TikTok", "Google"];
 
 // --- Marcas: base + las editadas/agregadas en Opciones − las eliminadas ---
 async function obtener_marcas() {

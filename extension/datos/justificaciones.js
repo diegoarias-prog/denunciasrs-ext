@@ -108,7 +108,8 @@
     li_copy:      ["Política de Derechos de Autor de LinkedIn", "https://www.linkedin.com/legal/copyright-policy"],
     telegram_abuso: ["Condiciones del Servicio de Telegram", "https://telegram.org/tos"],
     yt_difam:     ["Normas de la Comunidad de YouTube", "https://www.youtube.com/howyoutubeworks/policies/community-guidelines/"],
-    yt_marca:     ["Política de marcas registradas de YouTube", "https://support.google.com/youtube/answer/6154218"]
+    yt_marca:     ["Política de marcas registradas de YouTube", "https://support.google.com/youtube/answer/6154218"],
+    go_ads:       ["Políticas de publicidad de Google — Tergiversación (estafas y phishing)", "https://support.google.com/adspolicy/answer/6020955"]
   };
 
   function justifES(cat, red, nombre, pais) {
@@ -158,6 +159,11 @@
     if (cat === "telegram") {
       const ley = M(LEY_MARCA, "la legislación de propiedad industrial y marcas aplicable");
       return "El canal, grupo o usuario reportado utiliza sin autorización el nombre, la marca y la identidad de " + nombre + " para suplantar a la entidad, difundir información falsa y promover fraudes o estafas en perjuicio de sus clientes. Esto infringe las Condiciones del Servicio de Telegram (que prohíben la suplantación de identidad, el spam y las estafas) y vulnera los derechos de marca de " + nombre + " conforme a " + ley + " y al Convenio de París. Solicitamos la eliminación inmediata del contenido y del canal o usuario infractor.";
+    }
+    // Publicidad maliciosa (Google Ads): anuncio fraudulento que suplanta a la marca.
+    if (cat === "malic") {
+      const ley = M(LEY_MARCA, "la legislación de propiedad industrial y marcas aplicable");
+      return "El anuncio reportado suplanta a " + nombre + ": utiliza sin autorización su nombre, logotipo e identidad de marca y dirige a un sitio fraudulento que imita al oficial para engañar a los usuarios y obtener sus credenciales y datos financieros (phishing). Es un anuncio engañoso y fraudulento que infringe las Políticas de publicidad de Google sobre tergiversación, prácticas comerciales engañosas y phishing, y vulnera los derechos de marca de " + nombre + " conforme a " + ley + en + " y al Convenio de París. Solicitamos la retirada inmediata del anuncio y la suspensión del anunciante.";
     }
     const ley = M(LEY_MARCA, "la legislación de propiedad industrial y marcas aplicable");
     return "El contenido reportado utiliza sin autorización la marca " + nombre + " (nombre, logotipo y signos distintivos) para hacerse pasar por la entidad e inducir a engaño a los usuarios, con riesgo de confusión y daño a su reputación. Infringe los derechos de marca de " + nombre + " y las políticas de propiedad intelectual de la plataforma. Conforme a " + ley + " y al Convenio de París, solicitamos su eliminación inmediata.";
