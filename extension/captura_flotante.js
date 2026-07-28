@@ -16,6 +16,10 @@
 
   var boton = null;
   var capturando = false;
+  // El botón NO se muestra por el simple hecho de navegar por la red social: solo
+  // aparece cuando el usuario ACTIVA la extensión en ESTA pestaña (abre el popup o
+  // manda rellenar/denunciar aquí). Al recargar o cambiar de página vuelve a ocultarse.
+  var activado = false;
 
   // ------------------------------------------------------------------------
   //  Redimensión: COPIA del método probado de popup.js (`redimensionar_imagen`).
@@ -91,9 +95,11 @@
     }
   }
 
-  // Muestra u oculta el botón según haya (o no) una denuncia en curso.
+  // Muestra u oculta el botón. Hacen falta DOS condiciones: que la extensión se haya
+  // activado en esta pestaña y que haya una denuncia en curso a la que adjuntar.
   function actualizar() {
     if (!boton) return;
+    if (!activado) { boton.style.display = "none"; return; }
     try {
       chrome.storage.local.get("ultima_denuncia_registro", function (x) {
         if (!boton) return;
@@ -101,7 +107,7 @@
         // no salir en la foto).
         if (capturando) return;
         var tiene = !!(x && x.ultima_denuncia_registro);
-        boton.style.display = tiene ? "block" : "none";
+        boton.style.display = (tiene && activado) ? "block" : "none";
       });
     } catch (e) { /* contexto de extensión no disponible */ }
   }
@@ -202,7 +208,17 @@
     chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
       // Solo mensajes de la propia extensión (defensa en profundidad).
       if (!sender || sender.id !== chrome.runtime.id) return;
+      // La extensión se ACTIVA en esta pestaña (se abrió el popup aquí, o se mandó
+      // rellenar/denunciar en esta página): a partir de ahora sí se ve el botón.
+      if (msg && msg.accion === "activarBotonCaptura") {
+        activado = true;
+        actualizar();
+        if (sendResponse) sendResponse({ ok: true });
+        return;
+      }
       if (msg && msg.accion === "disparaCaptura") {
+        activado = true; // el atajo de teclado también cuenta como activar
+        actualizar();
         hacer_captura();
         if (sendResponse) sendResponse({ ok: true });
       }
