@@ -260,29 +260,33 @@
     // si el perfil de la red aún no está configurado en "Marcas".
     var perfil = (this.red === "Instagram" ? (d.instagram || d.sitio) : (d.facebook || d.sitio)) || "";
     return { url: this.url, manual: this.manual, pasos: [
-      // -------- Paso 1: propietario de los derechos --------
-      { tipo: "dropdown", pregunta: "donde estas defendiendo derechos|defendiendo derechos|asserting rights",
+      // OJO CON LOS RÓTULOS: Meta cambia la redacción según el español regional. En es-419
+      // dice "propietario de los derechos" / "¿Dónde estás defendiendo derechos?" y en es-ES
+      // "titular de los derechos" / "¿Dónde estás ejerciendo tus derechos?". Por eso se casa
+      // por PALABRAS CLAVE cortas comunes a ambas, nunca por la frase completa.
+      // -------- Paso 1: titular/propietario de los derechos --------
+      { tipo: "dropdown", pregunta: "defendiendo derechos|ejerciendo tus derechos|asserting rights",
         opcion: d.pais, esperaMs: 1200 },
-      { tipo: "radioPregunta", pregunta: "eres el propietario de los derechos|are you the rights owner",
+      { tipo: "radioPregunta", pregunta: "titular de los derechos|propietario de los derechos|rights owner",
         opcion: "si|yes", esperaMs: 1200 },
-      { tipo: "fillLabel", label: "nombre del propietario de los derechos|name of the rights owner|rights owner name",
+      { tipo: "fillLabel", label: "como se llama el titular|nombre del titular|nombre del propietario|name of the rights owner|rights owner name",
         valor: marca, reintentos: 6 },
-      { tipo: "clickBoton", texto: "siguiente|next", esperaMs: 3000 },
+      { tipo: "clickBoton", texto: "siguiente|next", avanza: true, esperaMs: 2500 },
       // -------- Paso 2: contenido a denunciar (en ORDEN de aparición) --------
       // Todas las URLs del Excel en UNA sola caja, separadas por coma (tope 30 de Meta).
       { tipo: "fillUrlsUnaCaja",
-        label: "identificadores que lleven directamente al contenido|url o los identificadores|urls o identificadores|urls or identifiers",
+        label: "url o los identificadores|urls o identificadores|urls or identifiers",
         placeholder: "instagram.com|facebook.com", urls: (ctx.urls || []), separador: ", ", reintentos: 6 },
-      { tipo: "fillLabel", label: "ejemplo de tu obra con derechos de autor|example of your copyrighted work",
+      { tipo: "fillLabel", label: "ejemplo de tu obra|ejemplo de la obra|obra con derechos de autor|example of your copyrighted work",
         valor: perfil, reintentos: 6 },
-      { tipo: "fillLabel", label: "manera consideras que este contenido infringe|manera crees que este contenido infringe|believe this content infringes",
+      { tipo: "fillLabel", label: "derechos de propiedad intelectual|intellectual property rights",
         valor: ctx.justif, reintentos: 6 },
       { tipo: "fillLabel", label: "tu nombre completo|your full name", valor: marca, reintentos: 6 },
       { tipo: "fillLabel", label: "correo electronico|email address", valor: d.correo, reintentos: 6 },
       { tipo: "fillLabel", label: "confirmar correo electronico|confirm email", valor: d.correo, reintentos: 6 },
       { tipo: "fillLabel", label: "firma electronica|electronic signature", valor: marca, reintentos: 6 },
       // Re-marcar al final: React del portal nuevo revierte el radio al rellenar lo demás.
-      { tipo: "radioPregunta", pregunta: "eres el propietario de los derechos|are you the rights owner",
+      { tipo: "radioPregunta", pregunta: "titular de los derechos|propietario de los derechos|rights owner",
         opcion: "si|yes", opcional: true }
     ] };
   }

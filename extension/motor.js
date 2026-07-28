@@ -486,8 +486,21 @@ async function APLICAR(pasos, opciones) {
             t.indexOf("enviar") < 0 && t.indexOf("submit") < 0 &&
             kws.some((kw) => t === kw || t.indexOf(kw) >= 0);
         });
-        if (btn) { btn.click(); ok++; } else faltan.push("boton:" + p.texto);
-        if (p.esperaMs) await dur(p.esperaMs);
+        // p.avanza: el botón pasa a la SIGUIENTE página de un asistente (portal de Meta).
+        // No basta con pulsarlo: si faltaba un campo, la página NO avanza y el botón sigue
+        // ahí. Entonces el paso se marca como NO hecho para que el motor lo reintente en la
+        // siguiente pasada (cuando el campo que faltaba ya esté relleno). Y si el botón ya
+        // no está, es que YA avanzamos: el paso se da por hecho.
+        if (p.avanza) {
+          if (!btn) { ok++; }                       // ya no hay "Siguiente" => ya avanzamos
+          else {
+            btn.click();
+            await dur(p.esperaMs || 2000);
+            const sigue = btns.some((b) => { const r = b.getBoundingClientRect(); return b.isConnected && r.width > 1 && r.height > 1 && kws.some((kw) => norm(b.innerText || "").indexOf(kw) >= 0); });
+            if (sigue) faltan.push("boton:" + p.texto); else ok++;
+          }
+        } else if (btn) { btn.click(); ok++; } else faltan.push("boton:" + p.texto);
+        if (p.esperaMs && !p.avanza) await dur(p.esperaMs);
       } else if (p.tipo === "fillUrlList") {
         // Autollena las cajas "Enlace 1..30" de Meta (FB/IG) con la lista de URLs del
         // Excel. Si hay más URLs que cajas y existe el checkbox "Tengo enlaces
