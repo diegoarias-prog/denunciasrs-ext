@@ -232,7 +232,11 @@ async function APLICAR(pasos, opciones) {
       } else if (p.tipo === "dropdown") {
         // Menú-botón de TikTok: abre el desplegable (por su pregunta o índice) y
         // elige la opción cuyo texto contenga 'opcion'.
-        const ds = Array.prototype.slice.call(document.querySelectorAll('[aria-haspopup="listbox"],[role="combobox"]'));
+        // Sin valor que elegir (p.ej. la marca no tiene país configurado) NO se abre el
+        // menú: se avisa con un mensaje entendible en vez de dejarlo vacío en silencio.
+        const sinValor = !String(p.opcion || "").trim() && typeof p.opcionIndice !== "number";
+        const ds = sinValor ? [] : Array.prototype.slice.call(document.querySelectorAll('[aria-haspopup="listbox"],[role="combobox"]'));
+        if (sinValor) faltan.push(p.desc || "opcion vacia");
         // Preferimos los menús AÚN SIN SELECCIONAR (muestran "Select"/"Seleccionar"):
         // el siguiente a llenar es el primero sin selección.
         const sinSel = ds.filter((d) => {
@@ -253,14 +257,30 @@ async function APLICAR(pasos, opciones) {
         if (!btn) btn = pool[p.indice || 0] || pool[0];
         if (btn) {
           btn.click();
-          const ops = norm(p.opcion || "").split("|").filter(Boolean); // alternativas (es|en)
+          // Alternativas (es|en), con los espacios RECORTADOS: el país de la marca lo
+          // escribe el usuario a mano y puede traer espacios sobrantes ("Ecuador ").
+          const ops = norm(p.opcion || "").split("|").map((s) => s.trim()).filter(Boolean);
           // Coincidencia por PALABRAS CLAVE: una alternativa con "&" casa si TODAS sus
           // palabras están presentes (en cualquier orden). Así NO dependemos de la frase
           // exacta de TikTok, que cambia de redacción e idioma. Ej.: "marca&contenido"
           // casa con "Infracción de derechos de marca comercial en el contenido generado…".
-          const coincide = (t) => ops.some((kw) => kw.indexOf("&") >= 0
-            ? kw.split("&").every((tok) => (tok = tok.trim()) && t.indexOf(tok) >= 0)
-            : t.indexOf(kw) >= 0);
+          // Para lo demás se busca por PRIORIDAD: exacto -> empieza por -> contiene, para no
+          // coger un país que solo CONTENGA al buscado (p.ej. "Guinea" -> "Guinea Ecuatorial").
+          const elegirDe = (lista) => {
+            const textos = lista.map((x) => norm(x.innerText).replace(/\s+/g, " ").trim());
+            for (const kw of ops) {
+              if (kw.indexOf("&") >= 0) {
+                const i = textos.findIndex((t) => kw.split("&").every((tok) => (tok = tok.trim()) && t.indexOf(tok) >= 0));
+                if (i >= 0) return lista[i];
+                continue;
+              }
+              let i = textos.indexOf(kw);                              // exacto
+              if (i < 0) i = textos.findIndex((t) => t.indexOf(kw) === 0); // empieza por
+              if (i < 0) i = textos.findIndex((t) => t.indexOf(kw) >= 0); // contiene
+              if (i >= 0) return lista[i];
+            }
+            return null;
+          };
           // Lista solo las opciones REALMENTE visibles del menú abierto (evita <li> sueltos
           // de otros menús de la página); si no hay role=option/menuitem, cae a <li>.
           const listar = () => {
@@ -274,13 +294,19 @@ async function APLICAR(pasos, opciones) {
           for (let intento = 0; intento < 7 && !o; intento++) {
             await dur(400);
             lista = listar();
-            if (ops.length) o = lista.find((x) => coincide(norm(x.innerText)));
+            if (ops.length) o = elegirDe(lista);
           }
           // Respaldo por POSICIÓN: si no casó por texto (TikTok cambió la redacción) y el
           // paso indica la opción por orden, la tomamos por índice (p.ej. la 1.ª).
           if (!o && typeof p.opcionIndice === "number" && lista.length) o = lista[p.opcionIndice] || null;
-          if (o) { o.click(); ok++; } else { faltan.push("opcion:" + (p.opcion || p.opcionIndice)); try { document.body.click(); } catch (e) {} }
-        } else faltan.push("menu:" + (p.pregunta || p.indice));
+          if (o) { o.click(); ok++; }
+          else {
+            // Mensaje entendible: dice QUÉ se buscó y que no está en la lista.
+            faltan.push(p.desc ? (p.desc + " «" + p.opcion + "» no está en la lista")
+                               : ("opcion:" + (p.opcion || p.opcionIndice)));
+            try { document.body.click(); } catch (e) {}
+          }
+        } else if (!sinValor) faltan.push("menu:" + (p.pregunta || p.indice));
         if (p.esperaMs) await dur(p.esperaMs);
       } else if (p.tipo === "fillLabel") {
         // Rellena el primer campo VISIBLE y vacío cuyo texto cercano contenga la etiqueta.
