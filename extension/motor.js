@@ -45,6 +45,19 @@ async function APLICAR(pasos, opciones) {
     }
     return false;
   }
+  // Caché de texto NORMALIZADO por elemento. norm() (quitar acentos + minúsculas) es lo
+  // caro cuando hay que mirar miles de elementos, y el motor los recorre una vez por
+  // cada campo del plan. Se guarda junto al TAMAÑO del texto: si el elemento cambia
+  // (React repinta), el tamaño ya no cuadra y se vuelve a calcular.
+  const cacheTexto = new Map();
+  function textoNorm(el) {
+    const t0 = el.textContent || "";
+    const c = cacheTexto.get(el);
+    if (c && c.len === t0.length) return c.t;
+    const t = norm(t0);
+    cacheTexto.set(el, { len: t0.length, t: t });
+    return t;
+  }
   let ok = 0; const faltan = []; const clicsReales = [];
   // Etiqueta un radio/checkbox para que el service worker le dé un CLIC REAL después.
   function marcarParaClicReal(el) {
@@ -316,6 +329,23 @@ async function APLICAR(pasos, opciones) {
         if (p.valor != null && p.valor !== "") {
           const kws = (p.label || "").split("|").map(norm).filter(Boolean);
           let yaLleno = false; // el campo que coincide ya tenía valor (p.ej. correo verificado)
+          // La palabra clave debe aparecer como PALABRA, no dentro de otra: "firma" no
+          // puede casar con "CONFIRMA tu correo" (pasaba: la firma acababa en la caja de
+          // confirmar el correo). Delante y detrás debe haber algo que no sea letra/dígito.
+          const casa = (c, kw) => {
+            let i = c.indexOf(kw);
+            while (i >= 0) {
+              const antes = i === 0 ? " " : c.charAt(i - 1);
+              const desp = (i + kw.length >= c.length) ? " " : c.charAt(i + kw.length);
+              if (!/[a-z0-9]/.test(antes) && !/[a-z0-9]/.test(desp)) return true;
+              i = c.indexOf(kw, i + 1);
+            }
+            return false;
+          };
+          const casaAlguna = (c) => kws.some((kw) => casa(c, kw));
+          // Un TÍTULO de campo es corto y no es una frase acabada; un párrafo explicativo
+          // largo que termina en punto es PROSA y no rotula la caja que tenga al lado.
+          const esProsa = (t) => { const s = (t || "").trim(); return s.length > 90 && /[.!?]$/.test(s); };
           // Busca el campo cuyo rótulo coincide MÁS DE CERCA. Antes se cogía el primero
           // en orden del DOM, y como el "contexto" incluye los rótulos de las secciones
           // ANTERIORES (se sube por los ancestros), un campo de más abajo podía quedarse
@@ -327,32 +357,57 @@ async function APLICAR(pasos, opciones) {
           const buscarCampo = () => {
             const els = Array.prototype.slice.call(
               document.querySelectorAll('textarea,input[type=text],input[type=email],input[type=url],input[type=tel],input[type=number],input:not([type])'));
+            // Campos VISIBLES en orden de la página: sirven para exigir que entre un
+            // rótulo y su caja no haya OTRO campo (si lo hay, ese rótulo es de otro).
+            const visibles = els.filter((x) => { const q = x.getBoundingClientRect(); return q.width >= 2 && q.height >= 2; });
+            const hayCampoEntre = (rot, campo) => {
+              for (const f of visibles) {
+                if (f === campo) continue;
+                const a = rot.compareDocumentPosition(f), b = f.compareDocumentPosition(campo);
+                if ((a & Node.DOCUMENT_POSITION_FOLLOWING) && (b & Node.DOCUMENT_POSITION_FOLLOWING)) return true;
+              }
+              return false;
+            };
             let mejor = null, mejorDist = Infinity, mejorLleno = true;
             for (const e of els) {
               const r = e.getBoundingClientRect();
               if (r.width < 2 || r.height < 2) continue;
-              // Contexto por NIVELES, del más pegado al campo al más lejano.
+              // Contexto por NIVELES, del más pegado al campo al más lejano. La DISTANCIA
+              // es el nivel (0 = rótulo propio, 1 = hermanos del campo, 2 = hermanos del
+              // padre…), NO la posición en la lista: dos hermanos del mismo nivel están
+              // igual de cerca. Si no, un campo con texto de ayuda ("Verifica tu correo"
+              // + "Te enviaremos un código") quedaba "más lejos" de su título que otro
+              // campo sin ayuda, y ese otro le robaba el relleno.
               const niveles = [];
               let propio = " " + (e.placeholder || "") + " " + (e.getAttribute("aria-label") || "") + " ";
               if (e.id) { const lf = document.querySelector('label[for="' + e.id.replace(/"/g, '\\"') + '"]'); if (lf) propio += " " + (lf.innerText || ""); }
               // GitHub asocia el rótulo por aria-labelledby (referencia por id), no por label[for].
               const lblby = e.getAttribute("aria-labelledby");
               if (lblby) lblby.split(/\s+/).forEach(function (idr) { const le = document.getElementById(idr); if (le) propio += " " + (le.innerText || ""); });
-              niveles.push(propio);
+              niveles.push({ t: propio, n: 0, el: null });
               // El rótulo es un hermano ANTERIOR del campo (GitHub) o del ancestro que lo
               // envuelve (TikTok mete la caja en un <div> aparte). Se recogen, de dentro
               // hacia fuera, hasta 3 hermanos anteriores de cada nivel: así el título y su
               // texto de ayuda entran aunque la caja esté envuelta, y lo más cercano manda.
+              // OJO RENDIMIENTO: aquí se usa textContent, NUNCA innerText. innerText
+              // fuerza al navegador a recalcular el diseño en CADA lectura; en una
+              // página real (TikTok tiene miles de elementos) eso deja el formulario
+              // colgado y no se rellena nada. textContent no toca el diseño.
               let nodo = e, k = 0;
               while (nodo && k < 12) {
                 let ps = nodo.previousElementSibling, j = 0;
-                while (ps && j < 3) { niveles.push(ps.innerText || ""); ps = ps.previousElementSibling; j++; }
+                while (ps && j < 3) { niveles.push({ t: ps.textContent || "", n: k + 1, el: ps }); ps = ps.previousElementSibling; j++; }
                 nodo = nodo.parentElement; k++;
               }
               let dist = -1;
               for (let n = 0; n < niveles.length && dist < 0; n++) {
-                const c = norm(niveles[n]);
-                if (kws.some((kw) => c.indexOf(kw) >= 0)) dist = n;
+                const c = niveles[n].el ? textoNorm(niveles[n].el) : norm(niveles[n].t);
+                if (!casaAlguna(c) || esProsa(niveles[n].t)) continue;
+                // Regla clave: un texto solo rotula a ESTE campo si entre los dos no hay
+                // otro campo. Si lo hay, ese texto es el rótulo del otro (así un título de
+                // la sección anterior deja de "adoptar" la caja de la siguiente).
+                if (niveles[n].el && hayCampoEntre(niveles[n].el, e)) continue;
+                dist = niveles[n].n;
               }
               if (dist < 0) continue;
               const lleno = !!e.value;
@@ -370,27 +425,46 @@ async function APLICAR(pasos, opciones) {
           // envuelven la caja en varios <div>, y subiendo por ancestros no se llega al
           // título). Si el campo que sigue al rótulo YA tiene valor, no se toca nada.
           const CAMPOS_SEL = 'textarea,input[type=text],input[type=email],input[type=url],input[type=tel],input[type=number],input:not([type])';
+          // RESPALDO — solo si lo anterior NO encuentra el campo: se busca el RÓTULO
+          // visible en la página y se rellena la primera caja VACÍA que va debajo, en su
+          // misma sección. Sirve cuando el título y la caja no son vecinos en el DOM.
+          // Es CONSERVADOR a propósito: nunca da un paso por hecho (eso solo puede
+          // decidirlo la búsqueda principal) y prefiere elementos que parecen rótulos
+          // (en TikTok el título es <p class="field-title">, ver html_tk.json).
           const buscarPorRotulo = () => {
             const visible = (e) => { const r = e.getBoundingClientRect(); return r.width > 1 && r.height > 1; };
-            const rotulos = Array.prototype.slice.call(
-              document.querySelectorAll("label,legend,h1,h2,h3,h4,h5,p,span,div,strong,b"))
-              .filter((e) => {
-                const t = norm(e.innerText || "");
-                return t && t.length <= 300 && kws.some((kw) => t.indexOf(kw) >= 0) && visible(e);
-              });
-            // Nos quedamos con los más INTERNOS (el <div> de toda la sección también
-            // contiene el texto) y probamos del más CORTO al más largo: el título del
-            // campo es corto y concreto, mientras que un párrafo de introducción que
-            // mencione las mismas palabras de pasada es largo (y no debe ganar).
+            const pareceRotulo = (e) => {
+              const tag = e.tagName;
+              if (tag === "LABEL" || tag === "LEGEND" || tag[0] === "H") return true;
+              const cls = (e.getAttribute("class") || "").toLowerCase();
+              if (/label|title|titulo|field|campo|question|pregunta|caption/.test(cls)) return true;
+              return (e.textContent || "").length <= 120; // texto corto = título, no párrafo
+            };
+            // RENDIMIENTO: se criba con textContent (no recalcula el diseño); solo a los
+            // POCOS que casan se les mide tamaño.
+            const rotulos = [];
+            const todos = document.querySelectorAll("label,legend,h1,h2,h3,h4,h5,p,span,div,strong,b,li,td,th");
+            for (let i = 0; i < todos.length; i++) {
+              const e = todos[i], t0 = e.textContent;
+              if (!t0 || t0.length > 300) continue;
+              const t = textoNorm(e); // normalizado con caché (lo caro es normalizar)
+              if (!casaAlguna(t) || esProsa(t0)) continue;
+              if (!pareceRotulo(e) || !visible(e)) continue;
+              rotulos.push(e);
+            }
+            // Los más INTERNOS (el <div> de toda la sección también contiene el texto) y
+            // del más CORTO al más largo: el título del campo es corto y concreto.
             const internos = rotulos
               .filter((e) => !rotulos.some((o) => o !== e && e.contains(o)))
-              .sort((a, b) => (a.innerText || "").length - (b.innerText || "").length);
+              .sort((a, b) => (a.textContent || "").length - (b.textContent || "").length);
             const campos = Array.prototype.slice.call(document.querySelectorAll(CAMPOS_SEL));
+            let llenoVisto = false; // algún rótulo tenía su caja YA rellena
             for (const rot of internos) {
               for (const e of campos) {
                 const pos = rot.compareDocumentPosition(e);
                 // debe ir DESPUÉS del rótulo (o estar dentro de él)
                 if (!(pos & Node.DOCUMENT_POSITION_FOLLOWING) && !(pos & Node.DOCUMENT_POSITION_CONTAINED_BY)) continue;
+                if (e.value) { llenoVisto = true; break; } // la de ESTE rótulo ya está: probar otro
                 if (!visible(e)) continue;
                 // y estar en la MISMA sección: subiendo desde el campo, algún ancestro
                 // cercano debe contener también al rótulo (si no, es otra parte del
@@ -398,20 +472,24 @@ async function APLICAR(pasos, opciones) {
                 let anc = e.parentElement, k = 0, juntos = false;
                 while (anc && k < 12) { if (anc.contains(rot)) { juntos = true; break; } anc = anc.parentElement; k++; }
                 if (!juntos) continue;
-                if (e.value) { yaLleno = true; return null; } // el de este rótulo ya está lleno
                 return e;
               }
             }
+            // Ningún rótulo tiene una caja vacía y al menos uno la tiene ya rellena: el
+            // paso está HECHO. (Si no se marcara, se gastarían los reintentos en cada
+            // repetición del autorrelleno y el paso saldría como "no encontrado".)
+            if (llenoVisto) yaLleno = true;
             return null;
           };
-          // ORDEN: primero como lee una persona (rótulo -> caja de debajo), y solo si no
-          // se encuentra el rótulo se cae al contexto por cercanía. Al revés fallaba: un
-          // párrafo de introducción que mencione las mismas palabras deja la caja de al
-          // lado "pegadísima" al texto y le robaba el relleno al campo de verdad.
+          // ORDEN: primero la búsqueda de siempre (el rótulo más cercano al campo, que es
+          // como está montado el formulario real de TikTok: <p class="field-title"> justo
+          // encima de la caja) y, SOLO si no encuentra nada, el respaldo por rótulo. Al
+          // revés se corría el riesgo de dar por hecho un campo que no se había tocado y
+          // dejar el formulario entero en blanco.
           let hit = null;
           for (let intentoFL = 0; intentoFL < (p.reintentos || 1) && !hit && !yaLleno; intentoFL++) {
-            hit = buscarPorRotulo();
-            if (!hit && !yaLleno) hit = buscarCampo();
+            hit = buscarCampo();
+            if (!hit && !yaLleno) hit = buscarPorRotulo();
             if (!hit && !yaLleno) await dur(400);
           }
           if (hit) { setNative(hit, p.valor); ok++; }
@@ -512,9 +590,15 @@ async function APLICAR(pasos, opciones) {
           const cands = Array.prototype.slice.call(
             document.querySelectorAll("label,span,div,p,button,li,[role=radio],[role=checkbox]"))
             .filter((e) => {
-              const t = norm(e.innerText || e.textContent || "");
+              // Criba BARATA primero (textContent no recalcula el diseño); solo a los
+              // pocos que sobreviven se les mide tamaño. Con innerText sobre toda la
+              // página, un formulario grande se arrastra y no llega a marcar nada.
+              const t0 = e.textContent;
+              if (!t0 || t0.length > 40) return false;
+              const t = norm(t0);
+              if (!(t && t.length < 32 && kws.some((kw) => t === kw))) return false;
               const r = e.getBoundingClientRect();
-              return t && t.length < 32 && r.width > 1 && r.height > 1 && kws.some((kw) => t === kw);
+              return r.width > 1 && r.height > 1;
             });
           // el más interno (sin hijos con el mismo texto) para no clicar el contenedor
           const el = cands.find((e) => !cands.some((o) => o !== e && e.contains(o))) || cands[0];
