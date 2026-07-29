@@ -613,7 +613,10 @@
           { tipo: "fillLabel", label: "firma de forma electronica|firma|signature|electronic signature", valor: marca },
           { tipo: "checkVarios", etiquetas: "buena fe|good faith|correcta|exacta|accurate|perjurio|penalty of perjury|reconozco|acknowledge|acepto que toda la informacion|se reenvie|reenvie a la persona|se comparta con la persona|i acknowledge|i agree", max: 3 },
           { tipo: "clickBoton", texto: "siguiente|next|continuar|continue", esperaMs: 1500, opcional: true },
-          { tipo: "fillUrlsUnaCaja", urls: (ctx.urls || []), label: "introduce la url del contenido que quieres denunciar|introduce la url del contenido|url del contenido que quieres denunciar|url of the content you want to report|enter the url of the content", placeholder: "tiktok.com/@|e.g.https|e.g. https" }
+          // URLs A DENUNCIAR. 'excluir' protege la caja del material original (comparte el
+          // placeholder de ejemplo "e.g.https://www.tiktok.com/@…"): sin eso, si esa caja
+          // quedaba vacía se llevaba estas URLs, que son justo lo contrario.
+          { tipo: "fillUrlsUnaCaja", urls: (ctx.urls || []), label: "introduce la url del contenido que quieres denunciar|introduce la url del contenido|url del contenido que quieres denunciar|url of the content you want to report|enter the url of the content", placeholder: "tiktok.com/@|e.g.https|e.g. https", excluir: "material original con copyright|original copyrighted material" }
         ] };
       }
     },

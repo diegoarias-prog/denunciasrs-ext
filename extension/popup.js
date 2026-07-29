@@ -264,12 +264,13 @@ if ($("quitar_urls_manuales")) {
     });
   });
 }
-// Al abrir el popup, repinta lo que se escribió la última vez.
-obtener_urls_manuales().then((u) => {
-  if ($("caja_url_1")) $("caja_url_1").value = u[0] || "";
-  if ($("caja_url_2")) $("caja_url_2").value = u[1] || "";
-  pintar_estado_urls_manuales(u.length);
-});
+// Al abrir el popup, las cajas de URL a mano salen SIEMPRE EN BLANCO: son de la
+// denuncia que se está haciendo AHORA, no de la anterior. Si se quedaban con lo
+// escrito la vez pasada, la siguiente denuncia se llevaba por error los enlaces
+// viejos (lo pidió el usuario). Se borra también lo guardado en storage para que
+// ni el menú contextual ni un Rellenar posterior los reutilicen.
+["caja_url_1", "caja_url_2"].forEach((id) => { if ($(id)) $(id).value = ""; });
+chrome.storage.local.remove([CLAVE_URLS_MANUALES], () => { pintar_estado_urls_manuales(0); });
 
 // ===========================================================================
 //  Registro automático de la denuncia (para no cargarla a mano)

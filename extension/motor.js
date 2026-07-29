@@ -344,7 +344,7 @@ async function APLICAR(pasos, opciones) {
               // hacia fuera, hasta 3 hermanos anteriores de cada nivel: así el título y su
               // texto de ayuda entran aunque la caja esté envuelta, y lo más cercano manda.
               let nodo = e, k = 0;
-              while (nodo && k < 7) {
+              while (nodo && k < 12) {
                 let ps = nodo.previousElementSibling, j = 0;
                 while (ps && j < 3) { niveles.push(ps.innerText || ""); ps = ps.previousElementSibling; j++; }
                 nodo = nodo.parentElement; k++;
@@ -364,9 +364,54 @@ async function APLICAR(pasos, opciones) {
             if (mejorLleno) { yaLleno = true; return null; } // el que toca ya tiene valor
             return mejor;
           };
+          // PLAN B — como lo haría una persona: buscar en la página el RÓTULO (el texto
+          // visible) y rellenar el primer campo vacío que venga DESPUÉS de él. Sirve
+          // cuando el título y la caja no son vecinos en el DOM (TikTok y otros SPA
+          // envuelven la caja en varios <div>, y subiendo por ancestros no se llega al
+          // título). Si el campo que sigue al rótulo YA tiene valor, no se toca nada.
+          const CAMPOS_SEL = 'textarea,input[type=text],input[type=email],input[type=url],input[type=tel],input[type=number],input:not([type])';
+          const buscarPorRotulo = () => {
+            const visible = (e) => { const r = e.getBoundingClientRect(); return r.width > 1 && r.height > 1; };
+            const rotulos = Array.prototype.slice.call(
+              document.querySelectorAll("label,legend,h1,h2,h3,h4,h5,p,span,div,strong,b"))
+              .filter((e) => {
+                const t = norm(e.innerText || "");
+                return t && t.length <= 300 && kws.some((kw) => t.indexOf(kw) >= 0) && visible(e);
+              });
+            // Nos quedamos con los más INTERNOS (el <div> de toda la sección también
+            // contiene el texto) y probamos del más CORTO al más largo: el título del
+            // campo es corto y concreto, mientras que un párrafo de introducción que
+            // mencione las mismas palabras de pasada es largo (y no debe ganar).
+            const internos = rotulos
+              .filter((e) => !rotulos.some((o) => o !== e && e.contains(o)))
+              .sort((a, b) => (a.innerText || "").length - (b.innerText || "").length);
+            const campos = Array.prototype.slice.call(document.querySelectorAll(CAMPOS_SEL));
+            for (const rot of internos) {
+              for (const e of campos) {
+                const pos = rot.compareDocumentPosition(e);
+                // debe ir DESPUÉS del rótulo (o estar dentro de él)
+                if (!(pos & Node.DOCUMENT_POSITION_FOLLOWING) && !(pos & Node.DOCUMENT_POSITION_CONTAINED_BY)) continue;
+                if (!visible(e)) continue;
+                // y estar en la MISMA sección: subiendo desde el campo, algún ancestro
+                // cercano debe contener también al rótulo (si no, es otra parte del
+                // formulario que solo menciona esas palabras de pasada).
+                let anc = e.parentElement, k = 0, juntos = false;
+                while (anc && k < 12) { if (anc.contains(rot)) { juntos = true; break; } anc = anc.parentElement; k++; }
+                if (!juntos) continue;
+                if (e.value) { yaLleno = true; return null; } // el de este rótulo ya está lleno
+                return e;
+              }
+            }
+            return null;
+          };
+          // ORDEN: primero como lee una persona (rótulo -> caja de debajo), y solo si no
+          // se encuentra el rótulo se cae al contexto por cercanía. Al revés fallaba: un
+          // párrafo de introducción que mencione las mismas palabras deja la caja de al
+          // lado "pegadísima" al texto y le robaba el relleno al campo de verdad.
           let hit = null;
           for (let intentoFL = 0; intentoFL < (p.reintentos || 1) && !hit && !yaLleno; intentoFL++) {
-            hit = buscarCampo();
+            hit = buscarPorRotulo();
+            if (!hit && !yaLleno) hit = buscarCampo();
             if (!hit && !yaLleno) await dur(400);
           }
           if (hit) { setNative(hit, p.valor); ok++; }
@@ -383,8 +428,14 @@ async function APLICAR(pasos, opciones) {
         } else {
           const etiquetas = (p.label || "").split("|").map(norm).filter(Boolean);
           const placeholders = (p.placeholder || "").split("|").map(norm).filter(Boolean);
+          // Cajas PROHIBIDAS: otras del mismo formulario que comparten el placeholder de
+          // ejemplo (en TikTok, "URL al material original con copyright" también trae
+          // "e.g.https://www.tiktok.com/@..."). Sin esto, si esa caja quedaba vacía se
+          // llevaba las URLs a DENUNCIAR, que es justo lo contrario de lo que va ahí.
+          const prohibidas = (p.excluir || "").split("|").map(norm).filter(Boolean);
           const texto = urls.join(p.separador || "\n");
           const buscarCaja = () => {
+            let candidatoPh = null; // mejor coincidencia SOLO por placeholder (respaldo)
             const campos = Array.prototype.slice.call(
               document.querySelectorAll("textarea, input[type=text], input:not([type])"));
             for (const e of campos) {
@@ -401,11 +452,15 @@ async function APLICAR(pasos, opciones) {
               let par = e.parentElement, k = 0;
               while (par && k < 6) { const ps = par.previousElementSibling; if (ps) ctx += " " + (ps.innerText || ""); ctx += " " + (par.getAttribute("aria-label") || ""); par = par.parentElement; k++; }
               const c = norm(ctx);
+              if (prohibidas.some((kw) => c.indexOf(kw) >= 0)) continue; // caja de otro campo
               const porEtiqueta = etiquetas.some((kw) => c.indexOf(kw) >= 0);
               const porPlaceholder = placeholders.some((kw) => ph.indexOf(kw) >= 0);
-              if (porEtiqueta || porPlaceholder) return e;
+              // El RÓTULO manda: solo si ninguna caja casa por rótulo se acepta una por
+              // placeholder (varias cajas comparten el mismo ejemplo "e.g.https://…").
+              if (porEtiqueta) return e;
+              if (porPlaceholder && !candidatoPh) candidatoPh = e;
             }
-            return null;
+            return candidatoPh || null;
           };
           let hit = null;
           for (let itUC = 0; itUC < (p.reintentos || 1) && !hit; itUC++) {
