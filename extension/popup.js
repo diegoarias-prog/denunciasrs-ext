@@ -417,9 +417,17 @@ async function rellenar() {
       "Ábrela en <b>⚙ Marcas</b>, escribe el país (ej. Ecuador) y vuelve a intentarlo.");
     return;
   }
-  // Formularios web: justificación en INGLÉS. Para los correos también la versión española.
-  const justif = window.JUSTIF.conPolitica(window.JUSTIF.justificacion(form.cat, redCode, marca, pais, "en"), formKey, "en");
-  const justif_es = window.JUSTIF.conPolitica(window.JUSTIF.justificacion(form.cat, redCode, marca, pais, "es"), formKey, "es");
+  // Formularios web: justificación en ESPAÑOL (regla del proyecto, igual que en el menú
+  // contextual); los correos van en inglés con la versión española de referencia. Toda
+  // descripción termina con la política infringida + el PERFIL OFICIAL de la marca en la
+  // red que se denuncia, para que la plataforma sepa cuál es la cuenta auténtica.
+  const lang = form.tipo === "email" ? "en" : "es";
+  const justif = window.JUSTIF.conPerfilOficial(
+    window.JUSTIF.conPolitica(window.JUSTIF.justificacion(form.cat, redCode, marca, pais, lang), formKey, lang),
+    form.red, marca, datos, lang);
+  const justif_es = window.JUSTIF.conPerfilOficial(
+    window.JUSTIF.conPolitica(window.JUSTIF.justificacion(form.cat, redCode, marca, pais, "es"), formKey, "es"),
+    form.red, marca, datos, "es");
 
   // URLs a denunciar: las escritas a mano en el popup si las hay; si no, la lista del
   // Excel. Se usan tanto en los formularios (cajas "Enlace 1..30" / caja única) como en
@@ -466,6 +474,12 @@ async function rellenar() {
     await esperar_carga(objetivoTabId);
     await new Promise((r) => setTimeout(r, 1800)); // tiempo para que aparezcan los campos
   }
+  // La pestaña del FORMULARIO queda marcada como pestaña de denuncia: ahí sí debe verse
+  // el botón flotante "📸 Capturar comprobante" (es la prueba de que se hizo la denuncia),
+  // y debe seguir viéndose aunque el formulario avance de paso y recargue la página.
+  // Sin esto el botón no aparecía nunca en la pestaña nueva. Ver background.js.
+  try { await chrome.runtime.sendMessage({ accion: "activarCaptura", tabId: objetivoTabId }); }
+  catch (e) { /* si el service worker no responde, queda el botón del popup */ }
   mostrar_estado("aviso", "Rellenando…");
   try {
     const res = await chrome.scripting.executeScript({

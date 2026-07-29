@@ -471,6 +471,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (tabId && AUTORRELLENO[tabId]) AUTORRELLENO[tabId].cancelar = true;
     return;
   }
+  // El popup abrió/rellenó una denuncia en esta pestaña: queda MARCADA como pestaña de
+  // denuncia para que el botón "📸 Capturar comprobante" se vea aquí (y siga viéndose
+  // al avanzar el formulario, que recarga la página). Ver marcarPestanaDeDenuncia.
+  if (msg && msg.accion === "activarCaptura") {
+    const tabId = msg.tabId || (sender && sender.tab && sender.tab.id);
+    if (tabId) marcarPestanaDeDenuncia(tabId);
+    sendResponse({ ok: true });
+    return;
+  }
 });
 
 // ============================================================================
@@ -613,10 +622,16 @@ async function ctxArmar(marca, formKey, urlsOverride) {
   const redCode = { Facebook: "fb", Instagram: "ig", TikTok: "tk" }[form.red] || "";
   const pais = datos.pais || "";
   const esCorreo = form.tipo === "email";
-  const justif = self.JUSTIF.conPolitica(
-    self.JUSTIF.justificacion(form.cat, redCode, marca, pais, esCorreo ? "en" : "es"), formKey, esCorreo ? "en" : "es");
-  const justif_es = self.JUSTIF.conPolitica(
-    self.JUSTIF.justificacion(form.cat, redCode, marca, pais, "es"), formKey, "es");
+  // Toda descripción lleva: justificación + política infringida + PERFIL OFICIAL de la
+  // marca en la red que se está denunciando (para que la plataforma sepa cuál es la
+  // cuenta auténtica). Ver JUSTIF.conPerfilOficial.
+  const lang = esCorreo ? "en" : "es";
+  const justif = self.JUSTIF.conPerfilOficial(
+    self.JUSTIF.conPolitica(self.JUSTIF.justificacion(form.cat, redCode, marca, pais, lang), formKey, lang),
+    form.red, marca, datos, lang);
+  const justif_es = self.JUSTIF.conPerfilOficial(
+    self.JUSTIF.conPolitica(self.JUSTIF.justificacion(form.cat, redCode, marca, pais, "es"), formKey, "es"),
+    form.red, marca, datos, "es");
   const g = await chrome.storage.local.get([CLAVE_URLS_CTX, CLAVE_URLS_MANUALES_CTX]);
   const urlsExcel = Array.isArray(g[CLAVE_URLS_CTX]) ? g[CLAVE_URLS_CTX] : [];
   const urlsManuales = Array.isArray(g[CLAVE_URLS_MANUALES_CTX]) ? g[CLAVE_URLS_MANUALES_CTX] : [];
@@ -628,12 +643,70 @@ async function ctxArmar(marca, formKey, urlsOverride) {
   return { ctx, form, datos };
 }
 
+// ============================================================================
+//  BOTÓN FLOTANTE "📸 Capturar comprobante": pestañas de DENUNCIA
+//  El botón NO debe salir mientras uno solo navega por la red social, pero SÍ
+//  durante toda la denuncia (es la prueba de que se hizo). Por eso la pestaña
+//  donde se abre/rellena un formulario queda MARCADA: se le avisa al content
+//  script ahora y CADA VEZ que esa pestaña termine de cargar, porque el
+//  formulario navega entre pasos y cada carga reinyecta el content script (que
+//  arranca oculto). La marca vive en storage.session para sobrevivir a que el
+//  service worker se duerma, y se borra al cerrar la pestaña.
+// ============================================================================
+const CLAVE_PESTANAS_DENUNCIA = "pestanas_de_denuncia";
+
+async function pestanasDeDenuncia() {
+  try {
+    const g = await chrome.storage.session.get([CLAVE_PESTANAS_DENUNCIA]);
+    return Array.isArray(g[CLAVE_PESTANAS_DENUNCIA]) ? g[CLAVE_PESTANAS_DENUNCIA] : [];
+  } catch (e) { return []; }
+}
+
 // Avisa al content script de una pestaña de que la extensión se ha ACTIVADO ahí, para que
 // muestre el botón flotante de capturar comprobante. Silencioso si la página no lo tiene.
-function activarBotonCaptura(tabId) {
-  try { chrome.tabs.sendMessage(tabId, { accion: "activarBotonCaptura" }, () => void chrome.runtime.lastError); }
-  catch (e) { /* la pestaña no admite content scripts */ }
+// Se reintenta un par de veces: si la página acaba de cargar, el content script puede
+// tardar un instante en registrar su listener (run_at: document_idle).
+function activarBotonCaptura(tabId, intentos) {
+  const quedan = (typeof intentos === "number") ? intentos : 3;
+  try {
+    chrome.tabs.sendMessage(tabId, { accion: "activarBotonCaptura" }, () => {
+      const err = chrome.runtime.lastError; // aún sin content script escuchando
+      if (err && quedan > 0) setTimeout(() => activarBotonCaptura(tabId, quedan - 1), 700);
+    });
+  } catch (e) { /* la pestaña no admite content scripts */ }
 }
+
+// Marca la pestaña como "pestaña de denuncia" y muestra ya el botón en ella.
+async function marcarPestanaDeDenuncia(tabId) {
+  if (!tabId) return;
+  activarBotonCaptura(tabId);
+  try {
+    const lista = await pestanasDeDenuncia();
+    if (lista.indexOf(tabId) < 0) {
+      lista.push(tabId);
+      await chrome.storage.session.set({ [CLAVE_PESTANAS_DENUNCIA]: lista });
+    }
+  } catch (e) { /* sin storage.session: el botón igual se activó arriba */ }
+}
+
+// Cada vez que una pestaña MARCADA termina de cargar (el formulario avanza de paso,
+// se recarga o se navega dentro del asistente), se vuelve a mostrar el botón.
+chrome.tabs.onUpdated.addListener((tabId, info) => {
+  if (info.status !== "complete") return;
+  pestanasDeDenuncia().then((lista) => {
+    if (lista.indexOf(tabId) >= 0) activarBotonCaptura(tabId);
+  });
+});
+
+// Al cerrar la pestaña se olvida (los ids de pestaña se reutilizan).
+chrome.tabs.onRemoved.addListener((tabId) => {
+  pestanasDeDenuncia().then((lista) => {
+    const i = lista.indexOf(tabId);
+    if (i < 0) return;
+    lista.splice(i, 1);
+    try { chrome.storage.session.set({ [CLAVE_PESTANAS_DENUNCIA]: lista }); } catch (e) {}
+  });
+});
 
 // Ejecuta un plan (APLICAR + clics reales + autorrelleno persistente) en una pestaña.
 // Si la marca no tiene PAÍS (campo obligatorio en los formularios de Meta y compañía) se
@@ -641,8 +714,9 @@ function activarBotonCaptura(tabId) {
 // "This field is required" sin explicación.
 async function ctxEjecutarPlan(tabId, plan, marca, form, datos) {
   // Denunciar en esta pestaña = activar la extensión aquí: se muestra el botón flotante
-  // de capturar comprobante (que por defecto está oculto mientras solo se navega).
-  activarBotonCaptura(tabId);
+  // de capturar comprobante (que por defecto está oculto mientras solo se navega) y la
+  // pestaña queda marcada para que el botón siga visible al avanzar el formulario.
+  marcarPestanaDeDenuncia(tabId);
   if (datos && !(datos.pais || "").trim() && form && form.tipo !== "email") {
     ctxAvisar(tabId, "Denuncias RS: la marca «" + marca + "» no tiene PAÍS configurado y el formulario lo exige. " +
       "Ábrela en Marcas (⚙ Opciones), escribe el país y vuelve a intentarlo.", true);
