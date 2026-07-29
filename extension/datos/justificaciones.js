@@ -244,6 +244,68 @@
     return (k && BASE_MARCAS[k]) ? BASE_MARCAS[k] : OMPI_BASE_MARCAS;
   }
 
+  // ==========================================================================
+  //  PERFIL OFICIAL DE LA MARCA EN LA RED QUE SE ESTÁ DENUNCIANDO (obligatorio)
+  //  Regla del proyecto: TODA descripción de denuncia (formulario o correo) debe
+  //  decir cuál es el perfil AUTÉNTICO de la marca en esa MISMA red, para que la
+  //  plataforma pueda comparar la cuenta denunciada con la oficial. Ej.: si se
+  //  denuncia en TikTok va el TikTok oficial de la marca; si es Instagram, su
+  //  Instagram oficial. Si la marca todavía no tiene guardado el perfil de esa
+  //  red (⚙ Marcas), se cita como referencia su sitio web oficial.
+  // ==========================================================================
+  // Red -> campo de la marca donde vive su perfil oficial. Se aceptan tanto el
+  // nombre visible del formulario ("Facebook", "X / Twitter") como el código corto
+  // que usan las justificaciones (fb/ig/tk).
+  const RED_A_CAMPO = {
+    facebook: "facebook", fb: "facebook",
+    instagram: "instagram", ig: "instagram",
+    tiktok: "tiktok", tk: "tiktok",
+    x: "x", twitter: "x", "x / twitter": "x", "x (twitter)": "x",
+    youtube: "youtube", yt: "youtube",
+    linkedin: "linkedin", li: "linkedin"
+  };
+  const NOMBRE_DE_RED = { fb: "Facebook", ig: "Instagram", tk: "TikTok", x: "X",
+    yt: "YouTube", li: "LinkedIn", twitter: "X" };
+
+  // Nombre presentable de la red ("tk" -> "TikTok"); si ya viene el nombre largo
+  // ("Facebook", "WhatsApp"), se devuelve tal cual.
+  function nombreDeRed(red) {
+    const k = norm(red);
+    return NOMBRE_DE_RED[k] || (red || "").toString().trim();
+  }
+
+  // Devuelve {url, esPerfil} con el perfil oficial de la marca en esa red, o el
+  // sitio web oficial si esa red no tiene perfil guardado. null si no hay ninguno.
+  function perfilOficialDe(datos, red) {
+    const campo = RED_A_CAMPO[norm(red)];
+    const perfil = (campo && datos && datos[campo]) ? String(datos[campo]).trim() : "";
+    if (perfil) return { url: perfil, esPerfil: true };
+    const sitio = (datos && datos.sitio) ? String(datos.sitio).trim() : "";
+    return sitio ? { url: sitio, esPerfil: false } : null;
+  }
+
+  // Agrega al final del texto la línea del perfil oficial (es/en). Si la marca no
+  // tiene ni perfil de esa red ni sitio web, devuelve el texto sin tocar.
+  function conPerfilOficial(texto, red, marcaNombre, datos, lang) {
+    const p = perfilOficialDe(datos, red);
+    if (!p) return texto;
+    const r = nombreDeRed(red);
+    if (lang === "en") {
+      return texto + "\n\n" + (p.esPerfil
+        ? "Official " + r + " profile of " + marcaNombre + ": " + p.url +
+          " — this is the ONLY authentic " + r + " account of " + marcaNombre +
+          "; the reported content has no relationship with it."
+        : "Official website of " + marcaNombre + ": " + p.url +
+          " — it is its only official channel; the reported content is not authorized by the brand.");
+    }
+    return texto + "\n\n" + (p.esPerfil
+      ? "Perfil oficial de " + marcaNombre + " en " + r + ": " + p.url +
+        " — es la ÚNICA cuenta auténtica de " + marcaNombre + " en " + r +
+        "; el contenido denunciado no tiene ninguna relación con ella."
+      : "Sitio web oficial de " + marcaNombre + ": " + p.url +
+        " — el contenido denunciado no tiene ninguna relación con él.");
+  }
+
   // Agrega la línea de política infringida según la clave de formulario (es/en).
   function conPolitica(texto, formKey, lang) {
     const p = POLITICAS[formKey];
@@ -258,6 +320,10 @@
     // con fallback a la OMPI (Global Brand Database). Se usan para el campo TM_URL del
     // formulario de Marca Registrada de Facebook/Instagram.
     BASE_MARCAS: BASE_MARCAS, baseMarcasDe: baseMarcasDe,
-    justificacion: justificacion, conPolitica: conPolitica, leyPenal: leyPenal
+    justificacion: justificacion, conPolitica: conPolitica, leyPenal: leyPenal,
+    // Perfil oficial de la marca en la red denunciada: perfilOficialDe devuelve
+    // {url, esPerfil} y conPerfilOficial agrega la línea al final de la descripción.
+    perfilOficialDe: perfilOficialDe, conPerfilOficial: conPerfilOficial,
+    nombreDeRed: nombreDeRed
   };
 })();

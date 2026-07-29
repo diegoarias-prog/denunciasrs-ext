@@ -49,13 +49,16 @@
     });
   }
 
-  // Devuelve la URL del perfil OFICIAL de la marca en la red indicada (campo
-  // dedicado por red en los datos de la marca). "" si no hay. Se incluye en los
-  // correos para que la red identifique la cuenta AUTÉNTICA frente al impostor.
-  function perfilDeRed(d, redNombre) {
-    var map = { "Facebook": "facebook", "Instagram": "instagram", "TikTok": "tiktok", "X": "x", "YouTube": "youtube", "LinkedIn": "linkedin" };
-    var k = map[redNombre];
-    return (k && d && d[k]) ? String(d[k]).trim() : "";
+  // Párrafo con el perfil OFICIAL de la marca en la red que se está denunciando
+  // (o su sitio web oficial si esa red aún no tiene perfil guardado en ⚙ Marcas).
+  // Va en TODA denuncia para que la plataforma identifique la cuenta AUTÉNTICA
+  // frente al impostor. La redacción vive en JUSTIF.conPerfilOficial (un solo
+  // sitio para formularios y correos); aquí solo se le añade el salto de párrafo.
+  function lineaPerfilOficial(d, redNombre, marca, lang) {
+    var t = "";
+    try { t = window.JUSTIF.conPerfilOficial("", redNombre, marca, d, lang) || ""; } catch (e) { return ""; }
+    t = t.replace(/^\n+/, "");
+    return t ? (t + "\n\n") : "";
   }
 
   // Correo de denuncia (propiedad intelectual / suplantación) para una red social,
@@ -74,7 +77,7 @@
         ? "\n\nEste contenido infringe las políticas y normas comunitarias de " + redNombre + ", incluyendo:\n" +
           pols.map(function (p) { return "- " + p.t + ": " + p.u; }).join("\n")
         : "";
-      var lineaPerfilE = (function(){ var p = perfilDeRed(d, redNombre); return p ? ("El perfil oficial de " + marca + " en " + redNombre + " es: " + p + "\n\n") : ""; })();
+      var lineaPerfilE = lineaPerfilOficial(d, redNombre, marca, "es");
       var cuerpoE =
         "Hola,\n\n" + quienesE + "\n\n" +
         "Reportamos contenido en " + redNombre + " que infringe la propiedad intelectual y los derechos de marca de " + marca + ".\n\n" +
@@ -98,7 +101,7 @@
       ? "\n\nThis content violates " + redNombre + "'s policies and community standards, including:\n" +
         pols.map(function (p) { return "- " + p.t + ": " + p.u; }).join("\n")
       : "";
-    var lineaPerfil = (function(){ var p = perfilDeRed(d, redNombre); return p ? ("The official " + redNombre + " profile of " + marca + " is: " + p + "\n\n") : ""; })();
+    var lineaPerfil = lineaPerfilOficial(d, redNombre, marca, "en");
     var cuerpo =
       "Hello,\n\n" + quienes + "\n\n" +
       "We are reporting content on " + redNombre + " that infringes the intellectual property and brand rights of " + marca + ".\n\n" +
@@ -137,7 +140,7 @@
           ", en particular sus normas sobre suplantación de identidad, información falsa o engañosa y acoso u hostigamiento, incluyendo:\n" +
           pols.map(function (p) { return "- " + p.t + ": " + p.u; }).join("\n")
         : "";
-      var lineaPerfilE = (function(){ var p = perfilDeRed(d, redNombre); return p ? ("El perfil oficial de " + marca + " en " + redNombre + " es: " + p + "\n\n") : ""; })();
+      var lineaPerfilE = lineaPerfilOficial(d, redNombre, marca, "es");
       var cuerpoE =
         "Hola,\n\n" + quienesE + "\n\n" +
         "Reportamos contenido difamatorio publicado en " + redNombre + " en contra de " + marca + ". Solicitamos su eliminación inmediata por las siguientes razones:\n" +
@@ -163,7 +166,7 @@
         "'s policies and community standards, in particular its rules on impersonation, false or misleading information and harassment or bullying, including:\n" +
         pols.map(function (p) { return "- " + p.t + ": " + p.u; }).join("\n")
       : "";
-    var lineaPerfil = (function(){ var p = perfilDeRed(d, redNombre); return p ? ("The official " + redNombre + " profile of " + marca + " is: " + p + "\n\n") : ""; })();
+    var lineaPerfil = lineaPerfilOficial(d, redNombre, marca, "en");
     var cuerpo =
       "Hello,\n\n" + quienes + "\n\n" +
       "We are reporting defamatory content published on " + redNombre + " against " + marca + ". We request its immediate removal for the following reasons:\n" +
@@ -569,9 +572,12 @@
     tk_copy: {
       red: "TikTok", nombre: "Derechos de autor", cat: "autor",
       url: "https://www.tiktok.com/legal/report/Copyright",
-      manual: "Con UN solo clic en Rellenar basta: no vuelvas a pulsarlo. La extensión marca 'Tipo de obra'='Logotipo' y 'Origen'='Mi cuenta de TikTok personal', rellena las DOS URLs de la cuenta personal (la cuenta que posees y el contenido publicado originalmente) con el perfil de TikTok de la marca, y rellena la 'Descripción' sola en cuanto aparece. Si la marca no tiene perfil de TikTok configurado en 'Marcas', esas dos URLs quedarán vacías para que las llenes a mano. Si TikTok te pide verificar tu correo, hazlo con calma: la extensión sigue marcando y rellenando sola los campos que aparezcan después (Tipo de obra, Origen, las dos URLs, Descripción y casillas) durante varios minutos, sin volver a pulsar Rellenar. Deja ESTA pestaña abierta mientras verificas el correo. Si tu caso es otro tipo de obra (video, foto…), cámbialo tú con un clic. Revisa la URL antes de Enviar.",
+      manual: "Con UN solo clic en Rellenar basta: no vuelvas a pulsarlo. La extensión marca 'Tipo de obra'='Logotipo' y 'Origen de la obra'='Fuera de TikTok', pone el PERFIL OFICIAL de la marca en 'URL al material original con copyright' y rellena la 'Descripción de la obra' sola en cuanto aparece. Si la marca no tiene perfil de TikTok configurado en 'Marcas', se usa su sitio web oficial. Si TikTok te pide verificar tu correo, hazlo con calma: la extensión sigue marcando y rellenando sola los campos que aparezcan después (Tipo de obra, Origen, las dos URLs, Descripción y casillas) durante varios minutos, sin volver a pulsar Rellenar. Deja ESTA pestaña abierta mientras verificas el correo. Si tu caso es otro tipo de obra (video, foto…), cámbialo tú con un clic. Revisa la URL antes de Enviar.",
       construirPlan: function (ctx) {
         var d = ctx.datos, marca = ctx.marca;
+        // Perfil OFICIAL de la marca en TikTok (respaldo: su sitio web oficial). Es lo que se
+        // pone como "URL al material original con copyright".
+        var perfilTikTok = (d.tiktok || d.sitio || "").trim();
         return { url: this.url, manual: this.manual, autorepetir: true, pasos: [
           // Palabras clave en ESPAÑOL (el form siempre sale en español) + respaldo por posición.
           { tipo: "dropdown", opcion: "autor&contenido|copyright&contenido|derechos de autor|infraccion de copyright", opcionIndice: 0, esperaMs: 2500 },
@@ -586,22 +592,24 @@
           { tipo: "fillLabel", label: "tu direccion de correo electronico|direccion de correo|your email address|email address", valor: d.correo },
           // La extensión MARCA por texto visible (TikTok ya no usa 'name'): "Tipo de obra"
           // = Logotipo (al marcarlo aparece la Descripción) y "Origen de la obra con copyright"
-          // = "Mi cuenta de TikTok personal". Al marcar el Origen, TikTok revela DOS campos de
-          // URL (la cuenta que posees y el contenido que publicaste originalmente); ambos se
-          // rellenan con el perfil oficial de TikTok de la marca (d.tiktok) en los dos fillLabel
-          // de más abajo. Si la marca no tiene perfil de TikTok, esos dos campos quedan vacíos.
+          // = "FUERA DE TIKTOK" (la obra —el logotipo y la identidad de la marca— es anterior
+          // y ajena a TikTok). Al marcar ese Origen, TikTok revela UNA caja de URL opcional:
+          // "Si está disponible, proporciona la URL al material original con copyright", que se
+          // rellena con el PERFIL OFICIAL de la marca (su TikTok; si no lo tiene, su sitio).
           { tipo: "clickOpcion", texto: "logotipo|logo", esperaMs: 600, vigilar: true },
-          { tipo: "clickOpcion", texto: "mi cuenta de tiktok personal|my personal tiktok account|personal tiktok account", esperaMs: 300, vigilar: true },
-          // Dos URLs que aparecen SOLO al marcar "Mi cuenta de TikTok personal". Ambas van con
-          // el perfil oficial de la marca (d.tiktok). Deben ir ANTES de fillUrlsUnaCaja: al
-          // quedar NO vacías, fillUrlsUnaCaja las salta (comprueba e.value) y no les mete por
-          // error las URLs a denunciar, aunque compartan el placeholder "tiktok.com/@".
-          { tipo: "fillLabel", label: "url directa a la cuenta de tiktok que posees|cuenta de tiktok que posees y gestionas|la cuenta de tiktok que posees|direct url to the tiktok account you own|tiktok account you own and currently manage|account you own and manage", valor: d.tiktok, opcional: true, tardio: true, vigilar: true },
-          { tipo: "fillLabel", label: "url del contenido que publicaste originalmente en tiktok|contenido que publicaste originalmente|que publicaste originalmente en tiktok|url of the content you originally posted on tiktok|content you originally posted|originally posted on tiktok", valor: d.tiktok, opcional: true, tardio: true, vigilar: true },
+          { tipo: "clickOpcion", texto: "fuera de tiktok|no esta en tiktok|outside of tiktok|off tiktok|outside tiktok", esperaMs: 600, vigilar: true },
+          // URL del material original. Debe ir ANTES de fillUrlsUnaCaja: al quedar NO vacía,
+          // fillUrlsUnaCaja la salta (comprueba e.value) y no le mete por error las URLs a
+          // denunciar, aunque compartan el placeholder "e.g.https://www.tiktok.com/@...".
+          { tipo: "fillLabel", label: "url al material original con copyright|proporciona la url al material original|material original con copyright|url to the original copyrighted material|original copyrighted material",
+            valor: perfilTikTok, reintentos: 8, opcional: true, tardio: true, vigilar: true },
           // Campo TARDÍO: "Descripción de la obra con copyright" aparece SOLO al marcar el
-          // 'Tipo de obra'. Lo llena el VIGILANTE (ver popup.js) en cuanto surge. La
-          // justificación ya trae la política infringida citada (skill citar-politica-violada).
-          { tipo: "fillLabel", label: "descripcion de la obra con copyright|descripcion de la obra|describe la obra con copyright|description of the copyrighted work|describe your copyrighted work|descripcion de tu obra", valor: ctx.justif, opcional: true, tardio: true, vigilar: true },
+          // 'Tipo de obra'. Lo llena el VIGILANTE (ver popup.js) en cuanto surge. Se busca
+          // también por su texto de ayuda ("Incluye una descripción clara y completa…"), que
+          // está pegado a la caja, para no depender de una sola redacción. La justificación ya
+          // trae la política infringida y el perfil oficial (skill citar-politica-violada).
+          { tipo: "fillLabel", label: "descripcion de la obra con copyright|incluye una descripcion clara y completa|descripcion clara y completa de tu obra|describe la obra con copyright|descripcion de la obra|descripcion de tu obra|description of the copyrighted work|describe your copyrighted work|clear and complete description",
+            valor: ctx.justif, reintentos: 8, opcional: true, tardio: true, vigilar: true },
           { tipo: "fillLabel", label: "firma de forma electronica|firma|signature|electronic signature", valor: marca },
           { tipo: "checkVarios", etiquetas: "buena fe|good faith|correcta|exacta|accurate|perjurio|penalty of perjury|reconozco|acknowledge|acepto que toda la informacion|se reenvie|reenvie a la persona|se comparta con la persona|i acknowledge|i agree", max: 3 },
           { tipo: "clickBoton", texto: "siguiente|next|continuar|continue", esperaMs: 1500, opcional: true },

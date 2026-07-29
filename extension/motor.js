@@ -316,34 +316,53 @@ async function APLICAR(pasos, opciones) {
         if (p.valor != null && p.valor !== "") {
           const kws = (p.label || "").split("|").map(norm).filter(Boolean);
           let yaLleno = false; // el campo que coincide ya tenía valor (p.ej. correo verificado)
+          // Busca el campo cuyo rótulo coincide MÁS DE CERCA. Antes se cogía el primero
+          // en orden del DOM, y como el "contexto" incluye los rótulos de las secciones
+          // ANTERIORES (se sube por los ancestros), un campo de más abajo podía quedarse
+          // con el texto de otro: en TikTok, la caja "URL del material original" se comía
+          // la coincidencia y la "Descripción de la obra con copyright" quedaba vacía (o al
+          // revés, la Descripción se llenaba con la URL). Ahora cada coincidencia guarda su
+          // DISTANCIA (0 = rótulo propio, 1..4 = hermanos anteriores, 5+ = ancestros) y gana
+          // la más cercana; a igual distancia, se prefiere el campo VACÍO.
           const buscarCampo = () => {
             const els = Array.prototype.slice.call(
               document.querySelectorAll('textarea,input[type=text],input[type=email],input[type=url],input[type=tel],input[type=number],input:not([type])'));
+            let mejor = null, mejorDist = Infinity, mejorLleno = true;
             for (const e of els) {
               const r = e.getBoundingClientRect();
               if (r.width < 2 || r.height < 2) continue;
-              let ctx = " " + (e.placeholder || "") + " " + (e.getAttribute("aria-label") || "") + " ";
-              if (e.id) { const lf = document.querySelector('label[for="' + e.id.replace(/"/g, '\\"') + '"]'); if (lf) ctx += " " + (lf.innerText || ""); }
+              // Contexto por NIVELES, del más pegado al campo al más lejano.
+              const niveles = [];
+              let propio = " " + (e.placeholder || "") + " " + (e.getAttribute("aria-label") || "") + " ";
+              if (e.id) { const lf = document.querySelector('label[for="' + e.id.replace(/"/g, '\\"') + '"]'); if (lf) propio += " " + (lf.innerText || ""); }
               // GitHub asocia el rótulo por aria-labelledby (referencia por id), no por label[for].
               const lblby = e.getAttribute("aria-labelledby");
-              if (lblby) lblby.split(/\s+/).forEach(function (idr) { const le = document.getElementById(idr); if (le) ctx += " " + (le.innerText || ""); });
-              // El rótulo suele ser un hermano ANTERIOR directo del campo (formularios de GitHub).
-              let prevE = e.previousElementSibling, je = 0;
-              while (prevE && je < 4) { ctx += " " + (prevE.innerText || ""); prevE = prevE.previousElementSibling; je++; }
-              // En TikTok el título del campo suele ser el hermano ANTERIOR de un ancestro.
-              let par = e.parentElement, k = 0;
-              while (par && k < 6) {
-                const ps = par.previousElementSibling;
-                if (ps) ctx += " " + (ps.innerText || "");
-                par = par.parentElement; k++;
+              if (lblby) lblby.split(/\s+/).forEach(function (idr) { const le = document.getElementById(idr); if (le) propio += " " + (le.innerText || ""); });
+              niveles.push(propio);
+              // El rótulo es un hermano ANTERIOR del campo (GitHub) o del ancestro que lo
+              // envuelve (TikTok mete la caja en un <div> aparte). Se recogen, de dentro
+              // hacia fuera, hasta 3 hermanos anteriores de cada nivel: así el título y su
+              // texto de ayuda entran aunque la caja esté envuelta, y lo más cercano manda.
+              let nodo = e, k = 0;
+              while (nodo && k < 7) {
+                let ps = nodo.previousElementSibling, j = 0;
+                while (ps && j < 3) { niveles.push(ps.innerText || ""); ps = ps.previousElementSibling; j++; }
+                nodo = nodo.parentElement; k++;
               }
-              const c = norm(ctx);
-              if (kws.some((kw) => c.indexOf(kw) >= 0)) {
-                if (e.value) { yaLleno = true; continue; } // coincide pero ya tiene valor
-                return e;
+              let dist = -1;
+              for (let n = 0; n < niveles.length && dist < 0; n++) {
+                const c = norm(niveles[n]);
+                if (kws.some((kw) => c.indexOf(kw) >= 0)) dist = n;
+              }
+              if (dist < 0) continue;
+              const lleno = !!e.value;
+              if (dist < mejorDist || (dist === mejorDist && mejorLleno && !lleno)) {
+                mejor = e; mejorDist = dist; mejorLleno = lleno;
               }
             }
-            return null;
+            if (!mejor) return null;
+            if (mejorLleno) { yaLleno = true; return null; } // el que toca ya tiene valor
+            return mejor;
           };
           let hit = null;
           for (let intentoFL = 0; intentoFL < (p.reintentos || 1) && !hit && !yaLleno; intentoFL++) {
