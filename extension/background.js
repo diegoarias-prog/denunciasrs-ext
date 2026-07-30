@@ -474,6 +474,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // El popup abrió/rellenó una denuncia en esta pestaña: queda MARCADA como pestaña de
   // denuncia para que el botón "📸 Capturar comprobante" se vea aquí (y siga viéndose
   // al avanzar el formulario, que recarga la página). Ver marcarPestanaDeDenuncia.
+  // El popup pregunta si esta PC/navegador tiene la última versión (y fuerza la
+  // comprobación al abrirse, para no esperar a la ronda de cada hora).
+  if (msg && msg.accion === "comprobarActualizacion") {
+    comprobarActualizacion("popup").then(
+      () => chrome.storage.local.get("estado_version").then((g) => sendResponse(g.estado_version || null)),
+      () => sendResponse(null));
+    return true; // respuesta asíncrona
+  }
   if (msg && msg.accion === "activarCaptura") {
     const tabId = msg.tabId || (sender && sender.tab && sender.tab.id);
     if (tabId) marcarPestanaDeDenuncia(tabId);
@@ -722,8 +730,18 @@ async function ctxEjecutarPlan(tabId, plan, marca, form, datos) {
       "Ábrela en Marcas (⚙ Opciones), escribe el país y vuelve a intentarlo.", true);
     return;
   }
-  const r = await chrome.scripting.executeScript({ target: { tabId }, func: APLICAR, args: [plan.pasos] });
+  // {informe:true}: guarda también el paso a paso para el botón "📋 Copiar informe"
+  // del popup, igual que cuando se rellena desde ahí (aquí se llega por el clic derecho).
+  const r = await chrome.scripting.executeScript({ target: { tabId }, func: APLICAR, args: [plan.pasos, { informe: true }] });
   const res = (r && r[0] && r[0].result) || { ok: 0, faltan: [], clicsReales: [] };
+  try {
+    const inf = res.informe || {};
+    chrome.storage.local.set({ ultimo_informe: {
+      fecha: new Date().toLocaleString(), version: chrome.runtime.getManifest().version,
+      form: (form.red || "") + " · " + (form.nombre || "") + " (clic derecho)", marca: marca,
+      ok: res.ok, faltan: res.faltan || [], pasos: inf.pasos || [], inventario: inf.inventario || null
+    } });
+  } catch (e) { /* el informe es solo ayuda */ }
   if (res.clicsReales && res.clicsReales.length) { try { await hacerClics(tabId, res.clicsReales); } catch (e) {} }
   const autoenv = permiteAutoenvio(form);
   if (plan.autorepetir) {
@@ -846,4 +864,120 @@ chrome.runtime.onStartup.addListener(ctxConstruirMenus);
 chrome.storage.onChanged.addListener((cambios, area) => {
   if (area !== "local") return;
   if (cambios.marcas_usuario || cambios.marcas_eliminadas) ctxConstruirMenus();
+});
+
+// ============================================================================
+//  ACTUALIZACIÓN AUTOMÁTICA — "lo que cambie llega solo a TODOS los navegadores
+//  y a TODAS las computadoras".
+//
+//  Cómo funciona el conjunto (3 piezas):
+//   1) Al publicar un cambio, los archivos van al repo PÚBLICO denunciasrs-ext.
+//   2) En cada PC, DENUNCIAS_RS.bat (tarea programada: al iniciar sesión y cada
+//      hora) descarga ese repo y REEMPLAZA la carpeta DenunciasRS_extension. Como
+//      Chrome, Edge, Brave… cargan TODOS esa MISMA carpeta, el archivo nuevo les
+//      llega a los tres a la vez.
+//   3) Falta que el navegador RELEA esos archivos: hasta ahora eso solo pasaba al
+//      reiniciarlo (por eso se veían cambios "que no llegaban"). De eso se encarga
+//      este bloque: cada hora compara la versión que está corriendo con la
+//      PUBLICADA y, cuando hay una nueva, recarga la extensión sola.
+//
+//  Seguridad: solo se LEE un archivo público del repo (la versión). No se descarga
+//  ni se ejecuta código desde la red: el código lo instala el .bat en el disco, y
+//  chrome.runtime.reload() se limita a releer la carpeta local ya instalada.
+// ============================================================================
+const URL_VERSION_PUBLICADA =
+  "https://raw.githubusercontent.com/diegoarias-prog/denunciasrs-ext/main/extension/manifest.json";
+
+// Compara "1.2.10" vs "1.2.9" por NÚMERO de cada parte (no como texto: "1.2.10"
+// es MENOR que "1.2.9" al comparar cadenas, y nunca se actualizaría).
+function versionMayor(a, b) {
+  const pa = String(a || "0").split("."), pb = String(b || "0").split(".");
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const na = parseInt(pa[i] || "0", 10) || 0, nb = parseInt(pb[i] || "0", 10) || 0;
+    if (na !== nb) return na > nb;
+  }
+  return false;
+}
+
+// ¿Está la extensión ocupada rellenando una denuncia? Nunca se recarga en medio de
+// un formulario a medio llenar (se perdería el autorrelleno de la 2.ª etapa).
+function ocupadaRellenando() {
+  return Object.keys(AUTORRELLENO).some((t) => AUTORRELLENO[t] && !AUTORRELLENO[t].cancelar);
+}
+
+// Versión que hay AHORA MISMO en la carpeta del disco. Para una extensión cargada
+// "descomprimida", los archivos se sirven del disco, así que si el .bat ya copió lo
+// nuevo, aquí se ve la versión nueva aunque la que corre siga siendo la vieja: es la
+// señal exacta de "ya se puede recargar". Si el navegador lo sirviera de memoria,
+// devolverá la versión vieja y no pasa nada: queda el reintento por hora de abajo.
+async function versionEnDisco() {
+  try {
+    const r = await fetch(chrome.runtime.getURL("version.json"), { cache: "no-store" });
+    if (!r.ok) return "";
+    return (await r.json()).version || "";
+  } catch (e) { return ""; }
+}
+
+async function comprobarActualizacion(motivo) {
+  const propia = chrome.runtime.getManifest().version;
+  let publicada = "";
+  try {
+    const r = await fetch(URL_VERSION_PUBLICADA, { cache: "no-store" });
+    if (r.ok) publicada = (await r.json()).version || "";
+  } catch (e) { /* sin internet: se reintenta en la próxima ronda */ }
+
+  const enDisco = await versionEnDisco();
+  const hayNueva = !!publicada && versionMayor(publicada, propia);
+  const listaEnDisco = !!enDisco && versionMayor(enDisco, propia); // ya bajada por el .bat
+
+  await chrome.storage.local.set({
+    estado_version: {
+      propia: propia, publicada: publicada, enDisco: enDisco,
+      hayNueva: hayNueva, listaEnDisco: listaEnDisco,
+      revisado: Date.now(), motivo: motivo || ""
+    }
+  });
+  // Aviso visible en el icono: "↑" = hay una versión más nueva esperando.
+  try {
+    await chrome.action.setBadgeText({ text: hayNueva ? "↑" : "" });
+    await chrome.action.setBadgeBackgroundColor({ color: "#e8402a" });
+  } catch (e) {}
+
+  if (!hayNueva && !listaEnDisco) return;
+  if (ocupadaRellenando()) return; // se aplicará en la siguiente ronda
+
+  // Con la versión nueva YA en el disco, recargar la aplica al instante.
+  // Si aún no está (el .bat no ha corrido), se prueba igualmente una vez por hora:
+  // la recarga es inofensiva (si los archivos siguen igual, se queda como estaba) y
+  // así no depende de que el usuario reinicie el navegador.
+  const g = await chrome.storage.local.get("reintento_recarga");
+  const prev = g.reintento_recarga || {};
+  const ahora = Date.now();
+  const clave = publicada || enDisco;                 // versión a la que se quiere llegar
+  const mismos = prev.version === clave;
+  const veces = mismos ? (prev.veces || 0) : 0;
+  // TOPES para no acabar recargando sin parar si algo impidiera aplicar la versión
+  // nueva (la recarga solo sirve si los archivos nuevos ya están en la carpeta).
+  if (listaEnDisco) {
+    if (veces >= 3) return;                           // ya está en disco: 3 intentos bastan
+  } else {
+    if (mismos && (ahora - (prev.cuando || 0)) < 55 * 60 * 1000) return; // como mucho, uno por hora
+    if (veces >= 24) return;                          // ~un día insistiendo: parar
+  }
+  await chrome.storage.local.set({
+    reintento_recarga: { version: clave, cuando: ahora, veces: veces + 1 }
+  });
+  chrome.runtime.reload(); // relee la carpeta del disco: aplica lo nuevo sin reiniciar el navegador
+}
+
+chrome.alarms.create("buscar_actualizacion", { delayInMinutes: 1, periodInMinutes: 60 });
+chrome.alarms.onAlarm.addListener((a) => {
+  if (a && a.name === "buscar_actualizacion") comprobarActualizacion("ronda por hora");
+});
+chrome.runtime.onStartup.addListener(() => comprobarActualizacion("arranque del navegador"));
+chrome.runtime.onInstalled.addListener(() => {
+  // Tras aplicarse una versión nueva: se limpia el aviso y se vuelve a comprobar.
+  chrome.storage.local.remove("reintento_recarga");
+  try { chrome.action.setBadgeText({ text: "" }); } catch (e) {}
+  comprobarActualizacion("instalacion/actualizacion");
 });

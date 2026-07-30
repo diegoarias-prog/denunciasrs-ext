@@ -102,6 +102,74 @@ chrome.storage.local.get(["ultima_denuncia_registro"], (x) => {
 });
 
 // ===========================================================================
+//  VERSIÓN de esta PC/navegador. Cada vez que se abre el popup se comprueba
+//  contra la publicada: así se ve de un vistazo si este equipo está al día (y
+//  si no lo está, la extensión ya se está encargando sola). Ver background.js.
+// ===========================================================================
+function pintar_version(est) {
+  const e = $("txt_version");
+  if (!e) return;
+  const propia = chrome.runtime.getManifest().version;
+  if (!est || !est.publicada) { e.textContent = "v" + propia; e.title = "Versión instalada en este navegador"; return; }
+  if (est.hayNueva) {
+    e.textContent = "v" + propia + " → v" + est.publicada + " (actualizando…)";
+    e.title = "Hay una versión más nueva publicada. La extensión se actualiza sola: " +
+      "se aplica en cuanto el actualizador la deje en la carpeta (como mucho, al reiniciar el navegador).";
+  } else {
+    e.textContent = "v" + propia + " · al día";
+    e.title = "Este navegador tiene la última versión publicada.";
+  }
+}
+chrome.storage.local.get("estado_version", (g) => pintar_version(g.estado_version)); // lo último que se sepa
+try {
+  chrome.runtime.sendMessage({ accion: "comprobarActualizacion" }, (est) => {
+    if (chrome.runtime.lastError) return; // el service worker estaba dormido: queda lo pintado
+    pintar_version(est);
+  });
+} catch (e) { /* sin service worker: se queda el valor guardado */ }
+
+// ===========================================================================
+//  INFORME DE DIAGNÓSTICO del último relleno: qué campo buscó, con qué rótulo lo
+//  reconoció, qué escribió y qué NO encontró. Sirve para saber por qué un campo
+//  quedó vacío sin tener que adivinar cómo cambió la web.
+// ===========================================================================
+function texto_del_informe(g) {
+  const d = g && g.ultimo_informe;
+  if (!d) return "";
+  const L = [];
+  L.push("INFORME Denuncias RS v" + (d.version || "?"));
+  L.push("Fecha: " + (d.fecha || "") + "   Formulario: " + (d.form || "") + "   Marca: " + (d.marca || ""));
+  if (d.inventario) L.push("Página: " + (d.inventario.titulo || "") + "  " + (d.inventario.url || ""));
+  L.push("Rellenados: " + (d.ok || 0) + (d.faltan && d.faltan.length ? "   NO ENCONTRADOS: " + d.faltan.join(" | ") : ""));
+  L.push("");
+  L.push("--- PASO A PASO ---");
+  (d.pasos || []).forEach((p) => {
+    L.push("[" + p.estado + "] " + p.paso);
+    (p.hizo || []).forEach((h) => L.push("      " + h));
+  });
+  if (d.inventario && d.inventario.campos) {
+    L.push("");
+    L.push("--- CAMPOS DE LA PÁGINA (rótulo = lo que quedó escrito) ---");
+    d.inventario.campos.forEach((c) => L.push("  · " + c.rotulo + " = " + (c.valor || "(vacío)") + (c.bloqueado ? "  [bloqueado por la web]" : "")));
+    (d.inventario.opciones || []).forEach((o) => L.push("  " + (o.marcado ? "[x]" : "[ ]") + " " + o.rotulo));
+  }
+  return L.join("\n");
+}
+$("copiar_informe").addEventListener("click", async (e) => {
+  e.preventDefault();
+  const g = await new Promise((r) => chrome.storage.local.get("ultimo_informe", r));
+  const txt = texto_del_informe(g);
+  if (!txt) { mostrar_estado("aviso", "Todavía no hay informe: pulsa <b>Rellenar formulario</b> una vez y vuelve a intentarlo."); return; }
+  try {
+    await navigator.clipboard.writeText(txt);
+    mostrar_estado("ok", "📋 Informe copiado. Pégalo donde lo quieras revisar (son " + txt.split("\n").length + " líneas).");
+  } catch (err) {
+    mostrar_estado("aviso", "No pude copiarlo solo. Selecciónalo y cópialo:<br><textarea style='width:100%;height:120px'>" +
+      txt.replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c])) + "</textarea>");
+  }
+});
+
+// ===========================================================================
 //  Lista de URLs a denunciar (Excel) — se autollenan en las cajas "Enlace 1..30"
 // ===========================================================================
 const CLAVE_URLS = "urls_denuncia";
@@ -486,9 +554,21 @@ async function rellenar() {
     const res = await chrome.scripting.executeScript({
       target: { tabId: objetivoTabId },
       func: APLICAR,
-      args: [plan.pasos]
+      // {informe:true} => además de rellenar, devuelve el paso a paso y el inventario
+      // de campos de la página. Solo en este primer clic (el bucle del service worker
+      // NO lo pide: recorrer la página entera en cada repetición sería lento).
+      args: [plan.pasos, { informe: true }]
     });
     const r = (res && res[0] && res[0].result) || { ok: 0, faltan: [], clicsReales: [] };
+    // Se guarda el informe para el botón "📋 Copiar informe" del popup.
+    try {
+      const inf = r.informe || {};
+      chrome.storage.local.set({ ultimo_informe: {
+        fecha: new Date().toLocaleString(), version: chrome.runtime.getManifest().version,
+        form: form.red + " · " + form.nombre, marca: marca,
+        ok: r.ok, faltan: r.faltan || [], pasos: inf.pasos || [], inventario: inf.inventario || null
+      } });
+    } catch (e) { /* el informe es solo ayuda: nunca debe romper el relleno */ }
     // Clics REALES de los radios/casillas (los sintéticos no "pegan" en React).
     if (r.clicsReales && r.clicsReales.length) {
       mostrar_estado("aviso", "Marcando opciones…");
@@ -518,7 +598,8 @@ async function rellenar() {
     let html = "✓ <b>" + r.ok + "</b> campo(s) rellenado(s)." +
       (objetivoTabId !== tab.id ? " El formulario se abrió en una <b>pestaña aparte</b>." : "");
     if (form.manual) html += "<br><br>📌 " + form.manual;
-    if (r.faltan && r.faltan.length) html += "<br><br>No se encontraron (revisa a mano): " + r.faltan.join(", ");
+    if (r.faltan && r.faltan.length) html += "<br><br>No se encontraron (revisa a mano): " + r.faltan.join(", ") +
+      "<br>👉 Si algo quedó vacío, pulsa <b>📋 Copiar informe</b> (abajo) y mándamelo: dice exactamente qué campos vio y con qué rótulo.";
     if (autoEnviable) {
       html += plan.autorepetir
         ? "<br><br>🚀 Cuando el formulario quede completo, la extensión <b>capturará el comprobante y lo enviará sola</b> (5 s para cancelar en la pestaña del formulario)."

@@ -581,7 +581,12 @@
         return { url: this.url, manual: this.manual, autorepetir: true, pasos: [
           // Palabras clave en ESPAÑOL (el form siempre sale en español) + respaldo por posición.
           { tipo: "dropdown", opcion: "autor&contenido|copyright&contenido|derechos de autor|infraccion de copyright", opcionIndice: 0, esperaMs: 2500 },
-          { tipo: "dropdown", opcion: "propietari&autor|propietari&copyright|titular&autor|soy propietario", opcionIndice: 0, esperaMs: 2000 },
+          // "¿Puedes verificar a quién afecta esta infracción?" -> "TENGO AUTORIZACIÓN del
+          // propietario del copyright para actuar en su nombre" (es lo que somos: agente
+          // autorizado de la marca, no el titular). Las alternativas van EN ORDEN: antes
+          // ganaba "propietari&autor", que casaba de rebote porque "autorización" contiene
+          // "autor"; ahora la opción correcta se elige a propósito y no por casualidad.
+          { tipo: "dropdown", opcion: "autorizacion&nombre|tengo autorizacion|autorizacion del propietario|actuar en su nombre|represento|agente|propietari&autor|propietari&copyright", opcionIndice: 0, esperaMs: 2000 },
           { tipo: "fillLabel", label: "enter your email|verify your email|email address|verifica tu correo|correo electronico|introduce tu correo", valor: d.correo },
           { tipo: "fillLabel", label: "tu nombre completo|nombre completo|full name", valor: marca },
           { tipo: "fillLabel", label: "nombre del titular de los derechos de autor|titular de los derechos de autor|name of the copyright owner|copyright owner", valor: marca },
@@ -611,7 +616,13 @@
           { tipo: "fillLabel", label: "descripcion de la obra con copyright|incluye una descripcion clara y completa|descripcion clara y completa de tu obra|describe la obra con copyright|descripcion de la obra|descripcion de tu obra|description of the copyrighted work|describe your copyrighted work|clear and complete description",
             valor: ctx.justif, reintentos: 8, opcional: true, tardio: true, vigilar: true },
           { tipo: "fillLabel", label: "firma de forma electronica|firma|signature|electronic signature", valor: marca },
-          { tipo: "checkVarios", etiquetas: "buena fe|good faith|correcta|exacta|accurate|perjurio|penalty of perjury|reconozco|acknowledge|acepto que toda la informacion|se reenvie|reenvie a la persona|se comparta con la persona|i acknowledge|i agree", max: 3 },
+          // Las 3 casillas de "Declaración" (TikTok exige LAS TRES para poder enviar).
+          { tipo: "checkVarios", etiquetas: "buena fe|good faith|correcta|exacta|accurate|perjurio|penalty of perjury|reconozco|acknowledge|acepto que toda la informacion|se reenvie|reenvie a la persona|se comparta con la persona|i acknowledge|i agree", max: 3, reintentos: 4 },
+          // Casilla de REINCIDENCIA: "Evita que en el futuro aparezcan copias de estos
+          // vídeos en TikTok". Va como paso PROPIO porque interesa marcarla (impide que
+          // vuelvan a subir el mismo contenido) y porque antes se marcaba por accidente,
+          // gastando uno de los 3 cupos de la Declaración y dejando la 3.ª sin marcar.
+          { tipo: "checkLabel", texto: "evita que en el futuro|copias de estos videos|futuras copias|prevent future copies|future copies", opcional: true, tardio: true },
           { tipo: "clickBoton", texto: "siguiente|next|continuar|continue", esperaMs: 1500, opcional: true },
           // URLs A DENUNCIAR. 'excluir' protege la caja del material original (comparte el
           // placeholder de ejemplo "e.g.https://www.tiktok.com/@…"): sin eso, si esa caja
