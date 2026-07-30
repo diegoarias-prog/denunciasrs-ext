@@ -9,11 +9,38 @@ async function APLICAR(pasos, opciones) {
   opciones = opciones || {}; // { unaPasada: true } => una sola pasada (para el bucle del service worker)
   const dur = (ms) => new Promise((r) => setTimeout(r, ms));
   const norm = (s) => (s || "").toString().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+  // ---------------------------------------------------------------------------
+  //  INFORME DE DIAGNÓSTICO. Anota QUÉ campo se rellenó/marcó y con qué rótulo lo
+  //  reconoció, para poder ver desde el popup por qué un campo quedó vacío sin
+  //  tener que adivinar el HTML de la web. Se acumula siempre (es barato); el
+  //  INVENTARIO completo de la página solo se arma si lo piden (opciones.informe).
+  // ---------------------------------------------------------------------------
+  const registro = [];
+  // Rótulo VISIBLE de un campo, tal como lo vería una persona: su etiqueta propia y,
+  // si no tiene, el texto que lleva justo encima. Recortado (es solo para el informe).
+  function rotuloDe(el) {
+    if (!el) return "?";
+    let t = (el.getAttribute && (el.getAttribute("aria-label") || "")) || "";
+    try { if (!t && el.id) { const lf = document.querySelector('label[for="' + (window.CSS ? CSS.escape(el.id) : el.id) + '"]'); if (lf) t = lf.textContent || ""; } } catch (e) {}
+    try { if (!t && el.closest) { const lc = el.closest("label"); if (lc) t = lc.textContent || ""; } } catch (e) {}
+    let nodo = el, k = 0;
+    while (!t.trim() && nodo && k < 4) {
+      let ps = nodo.previousElementSibling, j = 0;
+      while (ps && j < 3 && !t.trim()) { const x = (ps.textContent || "").trim(); if (x && x.length < 200) t = x; ps = ps.previousElementSibling; j++; }
+      nodo = nodo.parentElement; k++;
+    }
+    if (!t.trim()) t = (el.placeholder || el.name || el.id || el.tagName || "?");
+    return (t + "").replace(/\s+/g, " ").trim().slice(0, 90);
+  }
+  function anotar(accion, el, extra) {
+    try { registro.push({ accion: accion, rotulo: rotuloDe(el), detalle: extra || "" }); } catch (e) {}
+  }
   function setNative(el, v) {
     const proto = el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
     Object.getOwnPropertyDescriptor(proto, "value").set.call(el, v);
     el.dispatchEvent(new Event("input", { bubbles: true }));
     el.dispatchEvent(new Event("change", { bubbles: true }));
+    anotar("escribio", el, (v == null ? "" : (v + "")).replace(/\s+/g, " ").slice(0, 70));
   }
   // Marca un radio/checkbox de forma robusta (sirve para formularios React de FB/IG/
   // WhatsApp/TikTok): secuencia de puntero + clic + setter nativo de 'checked' + eventos.
@@ -32,6 +59,7 @@ async function APLICAR(pasos, opciones) {
     } catch (e) { try { target.checked = true; } catch (e2) {} }
     target.dispatchEvent(new Event("input", { bubbles: true }));
     target.dispatchEvent(new Event("change", { bubbles: true }));
+    anotar("marco", target, target.checked ? "quedo marcado" : "NO quedo marcado (falta el clic real)");
     return !!target.checked;
   }
   function setSelect(name, texto, suf) {
@@ -58,6 +86,25 @@ async function APLICAR(pasos, opciones) {
     cacheTexto.set(el, { len: t0.length, t: t });
     return t;
   }
+  // RÓTULO AJUSTADO de una casilla/radio: su aria-label, su <label>, su hermano
+  // siguiente y los ancestros CERCANOS Y CORTOS. El tope de tamaño es lo importante:
+  // sin él se acaba subiendo hasta el <form>, cuyo texto contiene TODAS las frases del
+  // formulario, y entonces cualquier casilla "coincide" con cualquier etiqueta.
+  function etiquetaCasilla(c) {
+    let t = " " + (c.getAttribute("aria-label") || "") + " ";
+    const lb = c.getAttribute("aria-labelledby");
+    if (lb) lb.split(/\s+/).forEach(function (idr) { const le = document.getElementById(idr); if (le) t += " " + (le.textContent || ""); });
+    try { if (c.id) { const lf = document.querySelector('label[for="' + (window.CSS ? CSS.escape(c.id) : c.id) + '"]'); if (lf) t += " " + (lf.textContent || ""); } } catch (e) {}
+    try { const lc = c.closest && c.closest("label"); if (lc) t += " " + (lc.textContent || ""); } catch (e) {}
+    if (c.nextElementSibling) t += " " + (c.nextElementSibling.textContent || "");
+    let par = c.parentElement, k = 0;
+    while (par && k < 4) {
+      const tp = par.textContent || "";
+      if (tp.length <= 400) t += " " + tp;   // > 400 = ya no es el rótulo, es la sección/formulario
+      par = par.parentElement; k++;
+    }
+    return norm(t);
+  }
   let ok = 0; const faltan = []; const clicsReales = [];
   // Etiqueta un radio/checkbox para que el service worker le dé un CLIC REAL después.
   function marcarParaClicReal(el) {
@@ -74,6 +121,14 @@ async function APLICAR(pasos, opciones) {
   // "Siguiente", que ya no existe en el formulario de una sola página) NO bloquean ni
   // se reportan si no aparecen.
   let pendientes = pasos.slice();
+  // Informe por PASO (el último intento de cada uno; se sobrescribe en cada pasada).
+  const informePasos = new Map();
+  const describirPaso = (p) => {
+    const busca = p.label || p.texto || p.etiquetas || p.pregunta || p.opcion || p.name || p.css || p.dominio || "";
+    let d = p.tipo + (busca ? " «" + (busca + "").slice(0, 110) + "»" : "");
+    if (p.valor != null && p.valor !== "") d += " -> " + (p.valor + "").replace(/\s+/g, " ").slice(0, 45);
+    return d;
+  };
   const t0Pasadas = Date.now();
   for (let pasada = 0; pendientes.length; pasada++) {
     if (pasada > 0) {
@@ -84,6 +139,7 @@ async function APLICAR(pasos, opciones) {
     const reintentar = [];
     for (const p of pendientes) {
     const antesFaltan = faltan.length;
+    const antesOk = ok, antesReg = registro.length;
     try {
       if (p.tipo === "select" || p.tipo === "selectPais") {
         const texto = p.tipo === "selectPais" ? p.valor : p.texto;
@@ -312,7 +368,7 @@ async function APLICAR(pasos, opciones) {
           // Respaldo por POSICIÓN: si no casó por texto (TikTok cambió la redacción) y el
           // paso indica la opción por orden, la tomamos por índice (p.ej. la 1.ª).
           if (!o && typeof p.opcionIndice === "number" && lista.length) o = lista[p.opcionIndice] || null;
-          if (o) { o.click(); ok++; }
+          if (o) { o.click(); anotar("eligio", btn, (o.textContent || "").replace(/\s+/g, " ").trim().slice(0, 70)); ok++; }
           else {
             // Mensaje entendible: dice QUÉ se buscó y que no está en la lista.
             faltan.push(p.desc ? (p.desc + " «" + p.opcion + "» no está en la lista")
@@ -410,7 +466,10 @@ async function APLICAR(pasos, opciones) {
                 dist = niveles[n].n;
               }
               if (dist < 0) continue;
-              const lleno = !!e.value;
+              // Un campo BLOQUEADO (el correo que TikTok ya trae puesto y pinta en gris)
+              // cuenta como "ya lleno": no se puede escribir en él y no hay que buscarle
+              // sustituto ni marcar el paso como fallido.
+              const lleno = !!e.value || e.disabled || e.readOnly;
               if (dist < mejorDist || (dist === mejorDist && mejorLleno && !lleno)) {
                 mejor = e; mejorDist = dist; mejorLleno = lleno;
               }
@@ -464,7 +523,7 @@ async function APLICAR(pasos, opciones) {
                 const pos = rot.compareDocumentPosition(e);
                 // debe ir DESPUÉS del rótulo (o estar dentro de él)
                 if (!(pos & Node.DOCUMENT_POSITION_FOLLOWING) && !(pos & Node.DOCUMENT_POSITION_CONTAINED_BY)) continue;
-                if (e.value) { llenoVisto = true; break; } // la de ESTE rótulo ya está: probar otro
+                if (e.value || e.disabled || e.readOnly) { llenoVisto = true; break; } // la de ESTE rótulo ya está (o está bloqueada): probar otro
                 if (!visible(e)) continue;
                 // y estar en la MISMA sección: subiendo desde el campo, algún ancestro
                 // cercano debe contener también al rótulo (si no, es otra parte del
@@ -519,6 +578,7 @@ async function APLICAR(pasos, opciones) {
             for (const e of campos) {
               const r = e.getBoundingClientRect();
               if (r.width <= 2 || r.height <= 2) continue;
+              if (e.disabled || e.readOnly) continue;                     // caja bloqueada por la web
               if (e.value) { if (e.value === texto) return e; continue; } // ya la llenamos antes
               const ph = norm(e.placeholder || "");
               let ctx = " " + (e.placeholder || "") + " " + (e.getAttribute("aria-label") || "") + " ";
@@ -605,6 +665,7 @@ async function APLICAR(pasos, opciones) {
           if (el) {
             try { el.scrollIntoView({ block: "center" }); } catch (e) {}
             el.click();
+            anotar("clic", el, (el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 40));
             marcarParaClicReal(el); // además, clic REAL (trusted) para que React de TikTok lo fije
             okC = true;
           }
@@ -623,14 +684,16 @@ async function APLICAR(pasos, opciones) {
           let n = 0;
           for (const c of cbs) {
             if (n >= max) break;
+            const ct = etiquetaCasilla(c);
+            // Solo cuentan (y solo se marcan) las casillas que DE VERDAD son de este
+            // paso. Antes se contaba cualquier casilla ya marcada y se subía por los
+            // ancestros sin límite: en TikTok, la casilla "Evita que en el futuro
+            // aparezcan copias…" heredaba el texto del formulario ENTERO (que contiene
+            // "buena fe", "perjurio"…), se llevaba un cupo de los 3 y la TERCERA
+            // casilla de la Declaración quedaba SIN MARCAR -> TikTok no deja enviar.
+            if (!kws.some((kw) => ct.indexOf(kw) >= 0)) continue;
             if (c.checked) { n++; continue; }
-            let t = " " + (c.getAttribute("aria-label") || "") + " ";
-            let par = c.parentElement, k = 0;
-            while (par && k < 4) { t += " " + (par.innerText || ""); par = par.parentElement; k++; }
-            const ct = norm(t);
-            if (kws.some((kw) => ct.indexOf(kw) >= 0)) {
-              marcarRadioEl(c); marcarParaClicReal(c); ok++; n++;
-            }
+            marcarRadioEl(c); marcarParaClicReal(c); ok++; n++;
           }
           return n;
         };
@@ -646,18 +709,17 @@ async function APLICAR(pasos, opciones) {
         // confundirse con casillas vecinas que comparten contenedor (formularios GitHub).
         const kws = (p.texto || "").split("|").map(norm).filter(Boolean);
         const cbs = Array.prototype.slice.call(document.querySelectorAll('input[type=checkbox]'));
-        let el = null;
+        let el = null, yaMarcada = false;
         for (const c of cbs) {
-          if (c.checked) continue;
-          let lab = " " + (c.getAttribute("aria-label") || "") + " ";
-          const lb = c.getAttribute("aria-labelledby");
-          if (lb) lb.split(/\s+/).forEach(function (idr) { const le = document.getElementById(idr); if (le) lab += " " + (le.innerText || ""); });
-          if (c.id) { const lf = document.querySelector('label[for="' + c.id.replace(/"/g, '\\"') + '"]'); if (lf) lab += " " + (lf.innerText || ""); }
-          if (c.parentElement && (c.parentElement.innerText || "").length < 240) lab += " " + (c.parentElement.innerText || "");
-          if (c.nextElementSibling) lab += " " + (c.nextElementSibling.innerText || "");
-          if (kws.some((kw) => norm(lab).indexOf(kw) >= 0)) { el = c; break; }
+          // Mismo rótulo AJUSTADO que checkVarios (ver etiquetaCasilla): sin tope de
+          // tamaño se subía hasta el formulario entero y se marcaba la casilla que no era.
+          if (!kws.some((kw) => etiquetaCasilla(c).indexOf(kw) >= 0)) continue;
+          if (c.checked) { yaMarcada = true; continue; } // ya estaba: paso hecho
+          el = c; break;
         }
-        if (el) { marcarRadioEl(el); marcarParaClicReal(el); ok++; } else faltan.push("checkLabel:" + p.texto);
+        if (el) { marcarRadioEl(el); marcarParaClicReal(el); ok++; }
+        else if (yaMarcada) ok++;
+        else faltan.push("checkLabel:" + p.texto);
       } else if (p.tipo === "clickBoton") {
         // Pulsa un botón por su texto (p. ej. "Siguiente"/"Next"). Evita Enviar/Submit.
         const kws = norm(p.texto).split("|").filter(Boolean);
@@ -824,19 +886,57 @@ async function APLICAR(pasos, opciones) {
         if (urls.length > urlInputs.length) faltan.push("difam_urls:" + puestasU + "/" + urls.length);
       }
     } catch (e) { faltan.push((p.name || p.css || "?") + ": " + e.message); }
-      if (faltan.length > antesFaltan) {
+      let fallo = faltan.length > antesFaltan;
+      if (fallo) {
         // Pasos opcionales (p.ej. botón "Siguiente" inexistente en el form de una
         // página, o campos "tardíos" que llena el vigilante): ni bloquean ni se reportan.
         if (p.opcional || p.tardio) faltan.length = antesFaltan;
         else reintentar.push(p); // no se completó: reintentar en la próxima pasada
       }
+      // Anotación del paso para el INFORME (se queda el último intento de cada paso).
+      informePasos.set(p, {
+        paso: describirPaso(p),
+        estado: fallo ? (p.opcional || p.tardio ? "no aparece todavia (opcional)" : "NO ENCONTRADO")
+                      : (ok > antesOk ? "hecho" : "sin cambios"),
+        hizo: registro.slice(antesReg).map((r) => r.accion + " «" + r.rotulo + "»" + (r.detalle ? " = " + r.detalle : "")),
+        pasada: pasada + 1
+      });
     }
     pendientes = reintentar;
     if (opciones.unaPasada) break; // el service worker repite APLICAR cada pocos segundos
   }
   // (El relleno de campos TARDÍOS de la 2.ª etapa lo repite el service worker llamando
   //  a APLICAR con { unaPasada:true } cada pocos segundos; ver autorelleno() en background.js.)
-  return { ok: ok, faltan: faltan, clicsReales: clicsReales };
+  // INVENTARIO de la página: qué campos hay AHORA MISMO, con el rótulo que la extensión
+  // les reconoce y lo que tienen escrito. Es lo que permite ver de un vistazo si un
+  // campo quedó vacío porque la web cambió el rótulo. Solo se arma si lo piden
+  // (el popup en el primer clic), nunca en las repeticiones del service worker.
+  let inventario = null;
+  if (opciones.informe) {
+    inventario = { campos: [], opciones: [] };
+    try {
+      const visible = (e) => { const r = e.getBoundingClientRect(); return r.width > 2 && r.height > 2; };
+      Array.prototype.slice.call(document.querySelectorAll('textarea,input,select')).forEach(function (e) {
+        const t = (e.type || "").toLowerCase();
+        if (t === "hidden" || !visible(e)) return;
+        if (t === "radio" || t === "checkbox") {
+          inventario.opciones.push({ rotulo: rotuloDe(e), tipo: t, marcado: !!e.checked });
+        } else {
+          inventario.campos.push({
+            rotulo: rotuloDe(e), tag: e.tagName.toLowerCase(),
+            valor: ((e.value || "") + "").replace(/\s+/g, " ").slice(0, 70),
+            bloqueado: !!(e.disabled || e.readOnly)
+          });
+        }
+      });
+      inventario.titulo = (document.title || "").slice(0, 120);
+      inventario.url = (location.href || "").slice(0, 200);
+    } catch (e) { inventario = { error: e.message }; }
+  }
+  return {
+    ok: ok, faltan: faltan, clicsReales: clicsReales,
+    informe: { pasos: Array.from(informePasos.values()), inventario: inventario }
+  };
 }
 
 // Exponer APLICAR como global para importScripts() del service worker y para el popup.

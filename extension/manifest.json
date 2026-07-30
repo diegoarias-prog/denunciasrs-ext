@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Denuncias RS · Autollenado",
-  "version": "1.2.77",
+  "version": "1.2.78",
   "update_url": "https://diegoarias-prog.github.io/denunciasrs-ext/update.xml",
   "description": "Rellena los formularios de denuncia (Facebook, Instagram, TikTok, WhatsApp, X, LinkedIn) con los datos de la marca seleccionada. Funciona en tu navegador con tu sesión.",
   "permissions": [
@@ -11,7 +11,8 @@
     "activeTab",
     "debugger",
     "identity",
-    "contextMenus"
+    "contextMenus",
+    "alarms"
   ],
   "background": {
     "service_worker": "background.js"
@@ -28,7 +29,8 @@
     "https://support.google.com/*",
     "https://*.youtube.com/*",
     "https://support.github.com/*",
-    "https://gmail.googleapis.com/*"
+    "https://gmail.googleapis.com/*",
+    "https://raw.githubusercontent.com/*"
   ],
   "action": {
     "default_popup": "popup.html",
