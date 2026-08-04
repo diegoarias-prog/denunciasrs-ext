@@ -78,6 +78,41 @@ function formatear_fecha(iso) {
   return p(f.getDate()) + "/" + p(f.getMonth() + 1) + "/" + f.getFullYear() + " " + p(f.getHours()) + ":" + p(f.getMinutes());
 }
 
+// ----------------------------------------------------------------------------
+//  "Enviado a": A QUÉ SITIO concreto se mandó la denuncia. La columna Plataforma
+//  solo dice el tipo de denuncia ("Apps maliciosas"), no si fue a Softonic, a
+//  AppBrain o a Uptodown. Esto lo resuelve de un vistazo.
+//  Orden: 1) lo escrito a mano en la denuncia, 2) el dominio de la(s) URL(s)
+//  denunciada(s), 3) el dominio de los correos destinatarios. Si no hay nada, "—".
+// ----------------------------------------------------------------------------
+function correos_destino_de(d) {
+  const to = (d && d.correo && d.correo.to) || "";
+  return window.CORREOS_DENUNCIA ? window.CORREOS_DENUNCIA.lista_correos(to) : [];
+}
+
+function destino_de(d) {
+  const escrito = (d && d.destino ? String(d.destino) : "").trim();
+  if (escrito) return escrito;
+  const CD = window.CORREOS_DENUNCIA;
+  if (!CD) return "";
+  const doms = CD.dominios_de(String((d && d.url_denunciada) || "").split(/[\s,;]+/));
+  if (doms.length) return doms.slice(0, 3).join(", ") + (doms.length > 3 ? " (+" + (doms.length - 3) + ")" : "");
+  // Sin URL: al menos el dominio de a quién se le escribió.
+  const dominios_correo = correos_destino_de(d)
+    .map((c) => c.split("@")[1] || "")
+    .filter((v, i, a) => v && a.indexOf(v) === i);
+  return dominios_correo.slice(0, 2).join(", ");
+}
+
+// Texto del tooltip de la celda: los correos exactos y la URL denunciada.
+function detalle_destino_de(d) {
+  const partes = [];
+  const correos = correos_destino_de(d);
+  if (correos.length) partes.push("Correo(s): " + correos.join(", "));
+  if (d && d.url_denunciada) partes.push("URL denunciada: " + d.url_denunciada);
+  return partes.length ? partes.join("\n") : "Sin datos del destinatario";
+}
+
 function llenar_select(sel, items, opcion_inicial) {
   sel.innerHTML = "";
   if (opcion_inicial != null) {
@@ -123,7 +158,9 @@ function denuncias_filtradas() {
     if (fPlat && d.plataforma !== fPlat) return false;
     if (fEstado && d.estado !== fEstado) return false;
     if (q) {
-      const heno = ((d.numero_caso || "") + " " + (d.marca || "") + " " + (d.url_denunciada || "")).toLowerCase();
+      // El buscador incluye el destino (softonic.com…) y los correos a los que se envió.
+      const heno = ((d.numero_caso || "") + " " + (d.marca || "") + " " + (d.url_denunciada || "") + " " +
+        destino_de(d) + " " + correos_destino_de(d).join(" ")).toLowerCase();
       if (heno.indexOf(q) < 0) return false;
     }
     return true;
@@ -159,6 +196,8 @@ function pintar_tabla() {
       '<td>' + escapar_html(formatear_fecha(d.fecha)) + '</td>' +
       '<td>' + escapar_html(d.marca) + '</td>' +
       '<td>' + escapar_html(d.plataforma) + '</td>' +
+      '<td class="celda_destino" title="' + escapar_html(detalle_destino_de(d)) + '">' +
+        escapar_html(destino_de(d) || "—") + '</td>' +
       '<td>' + escapar_html(TIPOS_REGISTRO[d.tipo] || d.tipo || "") + '</td>' +
       '<td>' + escapar_html(d.categoria) + '</td>' +
       '<td>' + escapar_html(d.numero_caso) + '</td>' +
@@ -192,6 +231,7 @@ function limpiar_formulario() {
   $("campo_categoria").value = "";
   $("campo_estado").value = "enviada";
   $("campo_numero_caso").value = "";
+  $("campo_destino").value = "";
   $("campo_url_denunciada").value = "";
   $("campo_notas").value = "";
   comprobante_img_actual = "";
@@ -269,6 +309,8 @@ function cargar_para_editar(id) {
   $("campo_categoria").value = d.categoria || "";
   $("campo_estado").value = d.estado || "enviada";
   $("campo_numero_caso").value = d.numero_caso || "";
+  // Si no se escribió a mano, se muestra el destino deducido para poder corregirlo.
+  $("campo_destino").value = d.destino || destino_de(d) || "";
   $("campo_url_denunciada").value = d.url_denunciada || "";
   $("campo_notas").value = d.notas || "";
   comprobante_img_actual = d.comprobante_img || "";
@@ -292,6 +334,7 @@ async function guardar_denuncia() {
     plataforma: plataforma,
     tipo: $("campo_tipo").value,
     categoria: $("campo_categoria").value.trim(),
+    destino: $("campo_destino").value.trim(),
     url_denunciada: $("campo_url_denunciada").value.trim(),
     numero_caso: $("campo_numero_caso").value.trim(),
     estado: $("campo_estado").value,
@@ -347,6 +390,8 @@ function abrir_comprobante(id) {
     ["N.º consecutivo", d.consecutivo],
     ["Fecha", formatear_fecha(d.fecha)],
     ["Plataforma", d.plataforma],
+    ["Enviado a", destino_de(d) || "—"],
+    ["Correo(s) destinatario(s)", correos_destino_de(d).join(", ") || "—"],
     ["Tipo", TIPOS_REGISTRO[d.tipo] || d.tipo],
     ["Categoría", d.categoria || "—"],
     ["URL denunciada", d.url_denunciada || "—"],
