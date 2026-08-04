@@ -349,13 +349,21 @@ chrome.storage.local.remove([CLAVE_URLS_MANUALES], () => { pintar_estado_urls_ma
 // marca+plataforma+categoria, la reutiliza (pulsar Rellenar varias veces para la
 // misma denuncia NO llena el registro). Devuelve el id de la entrada y guarda
 // `ultima_denuncia_registro` para que la captura sepa a cuál adjuntar.
-async function registrar_denuncia_auto(marca, form) {
+async function registrar_denuncia_auto(marca, form, urls) {
   const CLAVE = "denuncias_registro";
   const lista = await new Promise((res) =>
     chrome.storage.local.get([CLAVE], (x) => res(Array.isArray(x[CLAVE]) ? x[CLAVE] : [])));
   const plataforma = form.red;
   const tipo = form.tipo === "email" ? "correo" : "formulario";
   const categoria = form.nombre;
+
+  // "Enviado a": el SITIO concreto al que va la denuncia (softonic.com, appbrain.com…).
+  // La plataforma sola ("Apps maliciosas") no permite distinguirlas en el Registro.
+  const lista_urls = Array.isArray(urls) ? urls.filter(Boolean) : [];
+  const dominios = window.CORREOS_DENUNCIA ? window.CORREOS_DENUNCIA.dominios_de(lista_urls) : [];
+  const destino = dominios.slice(0, 3).join(", ") + (dominios.length > 3 ? " (+" + (dominios.length - 3) + ")" : "");
+  // La URL solo se guarda cuando es UNA (con 30 del Excel no cabe en la columna).
+  const url_denunciada = lista_urls.length === 1 ? lista_urls[0] : "";
 
   // Anti DOBLE-CLIC (no anti-duplicado general): solo reutiliza una pendiente
   // idéntica creada hace MUY POCO (ventana corta). Antes fusionaba TODAS las
@@ -370,7 +378,11 @@ async function registrar_denuncia_auto(marca, form) {
     d.plataforma === plataforma && d.categoria === categoria &&
     (ahora - new Date(d.fecha).getTime()) < VENTANA_ANTIDOBLE_MS);
   if (existente) {
-    await new Promise((res) => chrome.storage.local.set({ ultima_denuncia_registro: existente.id }, res));
+    // Completa lo que faltara (p. ej. si la 1.ª vez aún no había URLs cargadas).
+    if (destino && !existente.destino) existente.destino = destino;
+    if (url_denunciada && !existente.url_denunciada) existente.url_denunciada = url_denunciada;
+    await new Promise((res) =>
+      chrome.storage.local.set({ [CLAVE]: lista, ultima_denuncia_registro: existente.id }, res));
     return existente.id;
   }
 
@@ -380,7 +392,8 @@ async function registrar_denuncia_auto(marca, form) {
   const id = Date.now() + "_" + Math.random().toString(36).slice(2, 8);
   lista.push({
     id: id, marca: marca, plataforma: plataforma, tipo: tipo, categoria: categoria,
-    url_denunciada: "", numero_caso: "", estado: "pendiente", consecutivo: consecutivo,
+    destino: destino, url_denunciada: url_denunciada, numero_caso: "",
+    estado: "pendiente", consecutivo: consecutivo,
     notas: "", fecha: new Date().toISOString()
   });
   await new Promise((res) =>
@@ -508,7 +521,7 @@ async function rellenar() {
   // Redes SIN formulario web (Telegram): se genera un CORREO en una pestaña aparte.
   if (form.tipo === "email") {
     const em = form.construirEmail(ctx);
-    const idDen = await registrar_denuncia_auto(marca, form);
+    const idDen = await registrar_denuncia_auto(marca, form, urls);
     await guardar_correo_en_denuncia(idDen, em); // adjunta el contenido para verlo/copiarlo en el Registro
     $("boton_capturar").disabled = false;
     // 'from' = correo de contacto de la marca; si es una cuenta de Google Workspace
@@ -531,7 +544,7 @@ async function rellenar() {
   if (!tab || !tab.id) { mostrar_estado("error", "No encuentro la pestaña activa."); return; }
 
   // La acción procede: registramos la denuncia como pendiente (anti-duplicado).
-  await registrar_denuncia_auto(marca, form);
+  await registrar_denuncia_auto(marca, form, urls);
   $("boton_capturar").disabled = false;
 
   // ¿Estamos ya en el formulario correcto? Si SÍ, se rellena esta misma pestaña.

@@ -221,6 +221,15 @@ async function actualizar_correo_denuncia(enviado) {
     if (!d) return;
     const cuerpo_en = ER.html_a_texto_plano(ER.sanitizar_html($("cuerpo_en").innerHTML));
     const cuerpo_es = ER.html_a_texto_plano(ER.sanitizar_html($("cuerpo_es").innerHTML));
+    // "Enviado a" del Registro: el sitio concreto (softonic.com…) o, si no hay
+    // enlaces, el dominio de a quién se le escribió. Solo si aún no lo tiene.
+    if (!d.destino && CD) {
+      const doms = CD.dominios_de(REPORTE.urls);
+      const correos = CD.lista_correos($("para").value);
+      d.destino = doms.length
+        ? doms.slice(0, 3).join(", ")
+        : correos.map((c) => c.split("@")[1]).filter((v, i, a) => v && a.indexOf(v) === i).slice(0, 2).join(", ");
+    }
     d.correo = Object.assign({}, d.correo, {
       to: $("para").value || "", asunto: $("asunto_en").value || "", cuerpo: cuerpo_en,
       asunto_es: $("asunto_es").value || "", cuerpo_es: cuerpo_es,

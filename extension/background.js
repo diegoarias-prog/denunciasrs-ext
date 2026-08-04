@@ -557,19 +557,22 @@ async function ctxRegistrarDenuncia(marca, form, urlDen) {
   const plataforma = form.red;
   const tipo = form.tipo === "email" ? "correo" : "formulario";
   const categoria = form.nombre;
+  // "Enviado a" (columna del Registro): el sitio concreto del enlace denunciado.
+  const destino = (self.CORREOS_DENUNCIA && urlDen) ? self.CORREOS_DENUNCIA.dominio_de(urlDen) : "";
   const VENTANA = 60 * 1000, ahora = Date.now();
   const existente = lista.find((d) =>
     d.estado === "pendiente" && d.marca === marca && d.plataforma === plataforma &&
     d.categoria === categoria && (ahora - new Date(d.fecha).getTime()) < VENTANA);
   if (existente) {
     if (urlDen && !existente.url_denunciada) existente.url_denunciada = urlDen; // guarda el enlace clicado
+    if (destino && !existente.destino) existente.destino = destino;
     await chrome.storage.local.set({ [CLAVE]: lista, ultima_denuncia_registro: existente.id });
     return existente.id;
   }
   const consecutivo = lista.filter((d) => d.marca === marca)
     .reduce((m, d) => Math.max(m, parseInt(d.consecutivo, 10) || 0), 0) + 1;
   const id = Date.now() + "_" + Math.random().toString(36).slice(2, 8);
-  lista.push({ id, marca, plataforma, tipo, categoria, url_denunciada: urlDen || "", numero_caso: "",
+  lista.push({ id, marca, plataforma, tipo, categoria, destino, url_denunciada: urlDen || "", numero_caso: "",
     estado: "pendiente", consecutivo, notas: "", fecha: new Date().toISOString() });
   await chrome.storage.local.set({ [CLAVE]: lista, ultima_denuncia_registro: id });
   return id;

@@ -46,6 +46,7 @@
   table.tabla_registro_denuncias th, table.tabla_registro_denuncias td { border: 1px solid #e5e7eb; padding: 8px 10px; font-size: 13px; text-align: left; vertical-align: middle; }
   table.tabla_registro_denuncias th { background: #f8fafc; white-space: nowrap; }
   td.celda_accion { white-space: nowrap; text-align: center; }
+  td.celda_destino { max-width: 190px; word-break: break-word; font-weight: 600; color: #1e40af; }
   .celda_accion .boton { margin: 0 1px; }
   .etiqueta_estado { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; }
   .etiqueta_estado.pendiente { background: #fef3c7; color: #92400e; }
@@ -144,6 +145,10 @@
         <input id="campo_numero_caso" placeholder="Respuesta de la red (opcional)">
       </div>
       <div class="campo_alta ancho_total">
+        <label for="campo_destino">Enviado a (sitio o correo)</label>
+        <input id="campo_destino" placeholder="softonic.com, appbrain.com… (si lo dejas vacío se deduce de la URL denunciada o del correo)">
+      </div>
+      <div class="campo_alta ancho_total">
         <label for="campo_url_denunciada">URL denunciada</label>
         <input id="campo_url_denunciada" placeholder="https://…">
       </div>
@@ -181,7 +186,7 @@
   <div class="barra_filtros_registro">
     <div class="campo_filtro">
       <label for="filtro_busqueda">Buscar</label>
-      <input type="search" id="filtro_busqueda" placeholder="N.º de caso, marca o URL…">
+      <input type="search" id="filtro_busqueda" placeholder="N.º de caso, marca, sitio o URL…">
     </div>
     <div class="campo_filtro">
       <label for="filtro_marca">Marca</label>
@@ -207,7 +212,9 @@
     <table class="tabla_registro_denuncias">
       <thead>
         <tr>
-          <th>#</th><th>Fecha</th><th>Marca</th><th>Plataforma</th><th>Tipo</th>
+          <th>#</th><th>Fecha</th><th>Marca</th><th>Plataforma</th>
+          <th title="Sitio o correo concreto al que se envió la denuncia (softonic.com, appbrain.com…)">Enviado a</th>
+          <th>Tipo</th>
           <th>Categoría</th><th>N.º de caso</th><th>Estado</th><th title="Adjuntos: 📎 comprobante · 💬 respuesta de la red">📎💬</th><th class="celda_accion">Acción</th>
         </tr>
       </thead>
@@ -267,6 +274,7 @@
   </div>
 
   <script src="datos/marcas.js"></script>
+  <script src="datos/correos_denuncia.js"></script>
   <script src="registro.js"></script>
 </body>
 </html>
