@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Memoria de correos · Denuncias RS</title>
+<style>
+  body { font-family: "Segoe UI", Arial, sans-serif; max-width: 1050px; margin: 24px auto; color: #1f2937; padding: 0 16px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  p.sub { color: #6b7280; font-size: 13px; margin: 0 0 16px; }
+  h2 { font-size: 14px; margin: 22px 0 10px; border-bottom: 2px solid #1d4ed8; padding-bottom: 4px; }
+  label { display: block; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .3px; color: #374151; margin: 0 0 4px; }
+  input, textarea { width: 100%; box-sizing: border-box; border: 1px solid #cbd5e1; border-radius: 7px; padding: 8px 10px; font-size: 13px; font-family: inherit; background: #fff; }
+  textarea { min-height: 60px; line-height: 1.5; resize: vertical; }
+
+  .formulario_alta_correo { border: 1px solid #e5e7eb; border-radius: 9px; padding: 14px 16px; background: #f8fafc; }
+  .rejilla_campos_correo { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; }
+  .campo_correo.ancho_total { grid-column: 1 / -1; }
+
+  .barra { margin-top: 12px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .boton { padding: 8px 14px; border: 0; border-radius: 7px; background: #1d4ed8; color: #fff; font-weight: 600; cursor: pointer; font-size: 13px; }
+  .boton:hover { background: #1741b6; }
+  .boton.sec { background: #e5e7eb; color: #111827; }
+  .boton.sec:hover { background: #d1d5db; }
+  .boton.del { background: #ef4444; }
+  .boton.mini { padding: 4px 9px; font-size: 12px; }
+  #aviso { color: #065f46; font-size: 13px; margin-left: auto; font-weight: 600; }
+
+  .barra_buscador_correos { display: flex; gap: 10px; align-items: end; margin-top: 8px; }
+  .barra_buscador_correos input[type="search"] { min-width: 280px; }
+
+  table.tabla_memoria_correos { width: 100%; border-collapse: separate; border-spacing: 0; margin-top: 12px; }
+  table.tabla_memoria_correos th, table.tabla_memoria_correos td { border: 1px solid #e5e7eb; padding: 8px 10px; font-size: 13px; text-align: left; vertical-align: top; }
+  table.tabla_memoria_correos th { background: #f8fafc; white-space: nowrap; }
+  td.celda_accion_correo { white-space: nowrap; text-align: center; }
+  .correo_guardado { display: block; }
+  .correo_guardado .veces { color: #6b7280; font-size: 11px; }
+  .etiqueta_base { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; background: #e0e7ff; color: #3730a3; }
+  .vacio_tabla { color: #6b7280; font-size: 13px; padding: 16px 4px; }
+  .sitio_clave { font-weight: 700; }
+</style>
+</head>
+<body>
+  <h1>📒 Memoria de correos de denuncia</h1>
+  <p class="sub">
+    Aquí queda apuntado <b>a qué correo se denunció cada sitio</b>. Cada vez que envías un reporte,
+    la extensión guarda sola el destinatario junto al dominio del sitio denunciado; la próxima vez
+    que denuncies algo de ese mismo sitio, el correo aparece puesto y ya no hay que buscarlo en su
+    web oficial. También puedes agregarlos o corregirlos a mano aquí.
+  </p>
+
+  <h2>Agregar / editar un sitio</h2>
+  <div class="formulario_alta_correo">
+    <div class="rejilla_campos_correo">
+      <div class="campo_correo">
+        <label for="campo_sitio">Sitio (dominio)</label>
+        <input id="campo_sitio" placeholder="softonic.com (o pega una URL y se extrae el dominio)">
+      </div>
+      <div class="campo_correo">
+        <label for="campo_nombre">Nombre (opcional)</label>
+        <input id="campo_nombre" placeholder="Softonic">
+      </div>
+      <div class="campo_correo ancho_total">
+        <label for="campo_correos">Correos de denuncia (separados por comas)</label>
+        <input id="campo_correos" placeholder="dmca.softonic@delevitagent.com, abuse@softonic.com">
+      </div>
+      <div class="campo_correo ancho_total">
+        <label for="campo_nota">Nota (opcional: para qué tipo de denuncia sirve)</label>
+        <textarea id="campo_nota" placeholder="DMCA / apps no oficiales que suplantan a la marca"></textarea>
+      </div>
+    </div>
+    <div class="barra">
+      <button class="boton" id="guardar_sitio">💾 Guardar</button>
+      <button class="boton sec" id="limpiar_form">Limpiar</button>
+      <span id="aviso"></span>
+    </div>
+  </div>
+
+  <h2>Sitios guardados</h2>
+  <div class="barra_buscador_correos">
+    <div>
+      <label for="buscador">Buscar</label>
+      <input type="search" id="buscador" placeholder="sitio, correo o nota…">
+    </div>
+  </div>
+  <table class="tabla_memoria_correos">
+    <thead>
+      <tr>
+        <th>Sitio</th><th>Nombre</th><th>Correos de denuncia</th><th>Nota</th><th>Acciones</th>
+      </tr>
+    </thead>
+    <tbody id="cuerpo_tabla"></tbody>
+  </table>
+  <p class="vacio_tabla" id="vacio" style="display:none;">Todavía no hay correos guardados.</p>
+
+  <script src="datos/correos_denuncia.js"></script>
+  <script src="memoria_correos.js"></script>
+</body>
+</html>

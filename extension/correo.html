@@ -30,6 +30,15 @@
   .boton.gm { background: #ea4335; }
   #aviso { color: #065f46; font-size: 13px; margin-left: auto; }
   .nota { margin-top: 12px; font-size: 12px; color: #6b7280; }
+  /* --- Memoria de correos (destinatarios ya usados para este mismo sitio) --- */
+  .caja_memoria_correos { margin-top: 10px; border: 1px solid #bfdbfe; background: #eff6ff; border-radius: 9px; padding: 10px 12px; }
+  .caja_memoria_correos .titulo_memoria { font-size: 12px; font-weight: 700; color: #1e40af; margin-bottom: 6px; }
+  .caja_memoria_correos .lista_memoria { display: flex; flex-wrap: wrap; gap: 6px; }
+  .ficha_correo_memoria { display: inline-flex; align-items: center; gap: 6px; background: #fff; border: 1px solid #93c5fd; color: #1e3a8a; border-radius: 999px; padding: 4px 10px; font-size: 12px; cursor: pointer; font-family: inherit; }
+  .ficha_correo_memoria:hover { background: #dbeafe; }
+  .ficha_correo_memoria .veces_memoria { color: #6b7280; font-size: 11px; }
+  .caja_memoria_correos .pie_memoria { margin-top: 7px; font-size: 11px; color: #475569; }
+  .caja_memoria_correos a { color: #1d4ed8; }
 </style>
 </head>
 <body>
@@ -46,6 +55,14 @@
     <span id="aviso"></span>
   </div>
   <p class="nota" id="de_info" style="display:none;color:#065f46;font-weight:600;"></p>
+
+  <!-- Memoria de correos: destinatarios que YA se usaron para denunciar a este mismo
+       sitio. Se rellenan solos si el "Para" viene vacío; si no, se añaden con un clic. -->
+  <div class="caja_memoria_correos" id="caja_memoria" style="display:none;">
+    <div class="titulo_memoria" id="titulo_memoria">📒 Correos que ya usaste para este sitio</div>
+    <div class="lista_memoria" id="lista_memoria"></div>
+    <div class="pie_memoria">Haz clic en un correo para añadirlo al campo “Para”. Los correos que envíes se guardan solos aquí. <a href="#" id="abrir_memoria">🗂 Ver / editar la memoria de correos</a></div>
+  </div>
 
   <h2>🇬🇧 Inglés — esto es lo que se envía</h2>
   <label for="asunto_en">Asunto</label>
@@ -86,6 +103,7 @@
   <p class="nota">Recuerda pegar el/los enlace(s) a denunciar donde dice <b>[ ... ]</b> antes de enviar. Si "Abrir en mi correo" recorta el texto, usa "Copiar cuerpo (inglés)" y pégalo a mano.</p>
 
   <script src="datos/config_gmail.js"></script>
+  <script src="datos/correos_denuncia.js"></script>
   <script src="editor_rico.js"></script>
   <script src="correo.js"></script>
 </body>

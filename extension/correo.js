@@ -24,9 +24,18 @@ function es_workspace(correo) {
   return !!CLIENT_ID && DOMINIOS_WORKSPACE.indexOf(dominio_de(correo)) >= 0;
 }
 
+// Datos del reporte que se está redactando (red, categoría y enlaces denunciados).
+// Los usa la MEMORIA DE CORREOS para proponer y recordar destinatarios.
+const CD = window.CORREOS_DENUNCIA;
+let REPORTE = { red: "", cat: "", urls: [] };
+
 chrome.storage.local.get("email_reporte", (d) => {
   const e = d.email_reporte || {};
-  $("para").value = e.to || "";
+  REPORTE = { red: e.red || "", cat: e.cat || "", urls: Array.isArray(e.urls) ? e.urls : [] };
+  // Destinos FIJOS de la red (p. ej. TikTok: sus tres buzones de propiedad
+  // intelectual). Van SIEMPRE, aunque el correo se hubiera generado antes.
+  $("para").value = CD ? CD.unir_correos(e.to || "", CD.fijos_de_red(REPORTE.red)) : (e.to || "");
+  pintar_memoria_correos();
   $("asunto_en").value = e.asunto || "";
   // Los cuerpos son editores con formato: el prefill (texto plano con saltos) se
   // convierte a HTML seguro (escapado, con <br>) para verse bien y ser editable.
@@ -42,6 +51,75 @@ chrome.storage.local.get("email_reporte", (d) => {
     b.style.display = "";
   }
 });
+
+// ---------------------------------------------------------------------------
+//  MEMORIA DE CORREOS: qué correo se usó la última vez para denunciar a ESTE
+//  mismo sitio (softonic.com, mediafire.com…). Evita tener que buscar otra vez
+//  en la web oficial de la plataforma el buzón de denuncias.
+//  - Si el "Para" viene vacío, se rellena solo con lo que ya funcionó.
+//  - Si viene con algo, los correos recordados se ofrecen con un clic.
+//  - Al enviar (o abrir en Gmail / en el cliente de correo) se apunta lo usado.
+// ---------------------------------------------------------------------------
+function anadir_a_para(correo) {
+  if (!CD) return;
+  $("para").value = CD.unir_correos($("para").value, correo);
+  aviso("✓ " + correo + " añadido al campo \"Para\"");
+}
+
+function pintar_memoria_correos() {
+  if (!CD || !$("caja_memoria")) return;
+  CD.sugerencias(REPORTE.red, REPORTE.urls, (lista, claves) => {
+    const caja = $("caja_memoria"), cont = $("lista_memoria");
+    cont.textContent = "";
+    if (!lista.length) { caja.style.display = "none"; return; }
+    // Si el "Para" está vacío, se ponen solos los correos del sitio más probable.
+    if (!CD.lista_correos($("para").value).length) {
+      const mejor = lista[0].clave;
+      const del_sitio = lista.filter((s) => s.clave === mejor).map((s) => s.correo);
+      $("para").value = CD.unir_correos(del_sitio);
+      $("titulo_memoria").textContent =
+        "📒 Puesto solo: correo(s) que ya usaste para denunciar a " + mejor;
+    } else {
+      $("titulo_memoria").textContent =
+        "📒 Correos que ya usaste para " + claves.join(", ");
+    }
+    // Fichas con un clic para añadir (textContent: nada de HTML desde datos guardados).
+    lista.forEach((s) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "ficha_correo_memoria";
+      b.title = (s.nombre ? s.nombre + " · " : "") + s.clave + (s.nota ? " · " + s.nota : "");
+      const t = document.createElement("span");
+      t.textContent = s.correo;
+      b.appendChild(t);
+      const v = document.createElement("span");
+      v.className = "veces_memoria";
+      v.textContent = s.veces ? "· usado " + s.veces + "×" : "· sugerido";
+      b.appendChild(v);
+      b.addEventListener("click", () => anadir_a_para(s.correo));
+      cont.appendChild(b);
+    });
+    caja.style.display = "";
+  });
+}
+
+// Apunta en la memoria los correos que quedaron en el "Para" (los del sitio
+// denunciado). Nunca debe bloquear el envío.
+function recordar_correos_usados() {
+  try {
+    if (!CD) return;
+    const claves = CD.claves_de(REPORTE.red, REPORTE.urls);
+    if (!claves.length) return;
+    CD.recordar_uso(claves, $("para").value, { nombre: REPORTE.red || "" });
+  } catch (e) { /* la memoria nunca bloquea el envío */ }
+}
+
+if ($("abrir_memoria")) {
+  $("abrir_memoria").addEventListener("click", (ev) => {
+    ev.preventDefault();
+    chrome.tabs.create({ url: chrome.runtime.getURL("memoria_correos.html") });
+  });
+}
 
 // Cablea la barra de formato de cada editor (inglés y español).
 ER.montar_barra_formato($("cuerpo_en"), {
@@ -179,6 +257,7 @@ async function enviar_directo() {
     }
     aviso("✅ Correo ENVIADO desde " + REMITENTE);
     b.textContent = "✅ Enviado";   // se deja deshabilitado para no reenviar
+    recordar_correos_usados();              // memoria: este correo sirvió para este sitio
     await actualizar_correo_denuncia(true); // deja en el Registro el correo enviado (texto final)
   } catch (e) {
     b.disabled = false; b.textContent = etiqueta;
@@ -191,6 +270,7 @@ $("enviar_directo").addEventListener("click", enviar_directo);
 $("mailto").addEventListener("click", () => {
   // mailto no soporta HTML: se manda el texto plano (con saltos) del cuerpo.
   const cuerpo_plano = ER.html_a_texto_plano(ER.sanitizar_html($("cuerpo_en").innerHTML));
+  recordar_correos_usados();        // memoria: destinatario recordado para este sitio
   actualizar_correo_denuncia(true); // registra el correo usado (texto final)
   window.location.href = "mailto:" + encodeURIComponent($("para").value) +
     "?subject=" + encodeURIComponent($("asunto_en").value) +
@@ -204,6 +284,7 @@ $("gmail").addEventListener("click", () => {
     : "https://mail.google.com/mail/?view=cm&fs=1&tf=1";
   // El compositor web de Gmail (view=cm) no acepta HTML: se manda texto plano.
   const cuerpo_plano = ER.html_a_texto_plano(ER.sanitizar_html($("cuerpo_en").innerHTML));
+  recordar_correos_usados();        // memoria: destinatario recordado para este sitio
   actualizar_correo_denuncia(true); // registra el correo usado (texto final)
   window.open(base +
     "&to=" + encodeURIComponent($("para").value) +
