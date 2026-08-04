@@ -1,4 +1,4 @@
 {
-  "version": "1.2.78",
+  "version": "1.2.79",
   "_nota": "Copia de la version del manifest. La extension lee ESTE archivo del disco para saber si el actualizador (DENUNCIAS_RS.bat) ya dejo una version nueva en la carpeta y puede recargarse sola. Lo genera empaquetar_extension.py: no editar a mano."
 }

@@ -92,6 +92,7 @@ $("abrir_opciones").addEventListener("click", (e) => { e.preventDefault(); chrom
 $("abrir_politicas").addEventListener("click", (e) => { e.preventDefault(); chrome.tabs.create({ url: chrome.runtime.getURL("politicas.html") }); });
 $("abrir_plantilla").addEventListener("click", (e) => { e.preventDefault(); chrome.tabs.create({ url: chrome.runtime.getURL("plantilla.html") }); });
 $("abrir_registro").addEventListener("click", (e) => { e.preventDefault(); chrome.tabs.create({ url: chrome.runtime.getURL("registro.html") }); });
+$("abrir_memoria_correos").addEventListener("click", (e) => { e.preventDefault(); chrome.tabs.create({ url: chrome.runtime.getURL("memoria_correos.html") }); });
 
 $("boton_rellenar").addEventListener("click", rellenar);
 $("boton_capturar").addEventListener("click", capturar_pantalla);
@@ -512,7 +513,11 @@ async function rellenar() {
     $("boton_capturar").disabled = false;
     // 'from' = correo de contacto de la marca; si es una cuenta de Google Workspace
     // propia, correo.html abre el borrador de Gmail DESDE esa cuenta (envío directo).
-    chrome.storage.local.set({ email_reporte: Object.assign({}, em, { from: datos.correo || "" }) }, () => {
+    // 'red'/'cat'/'urls' viajan para la MEMORIA DE CORREOS: correo.html propone los
+    // destinatarios que ya se usaron para ese mismo sitio y apunta los nuevos.
+    chrome.storage.local.set({ email_reporte: Object.assign({}, em, {
+      from: datos.correo || "", red: form.red || "", cat: form.cat || "", urls: urls || []
+    }) }, () => {
       chrome.tabs.create({ url: chrome.runtime.getURL("correo.html") });
     });
     mostrar_estado("ok", "Correo de " + form.red + " generado: revisa la pestaña, pega el/los enlace(s) y envíalo." +

@@ -943,8 +943,10 @@
     },
     tk_correo_difam: {
       red: "TikTok", nombre: "Por correo (difamación)", cat: "difam", tipo: "email",
+      // El 'destino' lo pone solo el bloque de DESTINOS FIJOS del final de este
+      // archivo: TODO correo a TikTok va a sus tres buzones de propiedad intelectual.
       destino: "",
-      manual: "El 'Para' va vacío: escribe el correo legal/de contacto correcto (TikTok no tiene un buzón público de difamación). Donde dice [ ... ] pega el/los enlace(s) de TikTok a denunciar, revisa y envía.",
+      manual: "El 'Para' ya viene con los tres buzones de TikTok (copyright@ / ip-reports@ / ip_reports@). Donde dice [ ... ] pega el/los enlace(s) de TikTok a denunciar, revisa y envía.",
       construirEmail: function (ctx) { return bilingue(emailDifamacion(ctx, "TikTok", this.destino, "en"), emailDifamacion(ctx, "TikTok", this.destino, "es")); }
     },
     // ============= Studocu (NO tiene form web: es por CORREO, en español) =============
@@ -1246,4 +1248,27 @@
       }
     }
   };
+
+  // ==========================================================================
+  //  DESTINOS FIJOS POR RED
+  //  Hay redes con buzones de denuncia únicos: TODO correo dirigido a esa red
+  //  —de cualquier marca, de cualquier categoría (propiedad intelectual,
+  //  difamación, apps, lo que sea) y en cualquier formato— tiene que salir a
+  //  esos correos. En vez de repetirlos formulario por formulario (y olvidarlos
+  //  al crear uno nuevo), se aplican aquí de una vez a TODOS los formularios de
+  //  tipo "email" de esa red. La lista vive en datos/correos_denuncia.js.
+  //  Hoy: TikTok -> copyright@tiktok.com, ip-reports@tiktok.com, ip_reports@tiktok.com.
+  // ==========================================================================
+  (function aplicar_destinos_fijos_por_red() {
+    var CD = window.CORREOS_DENUNCIA;
+    if (!CD) return;   // sin la agenda cargada, cada formulario conserva su destino
+    Object.keys(window.FORMULARIOS).forEach(function (clave) {
+      var f = window.FORMULARIOS[clave];
+      if (!f || f.tipo !== "email") return;
+      var fijos = CD.fijos_de_red(f.red);
+      if (!fijos.length) return;
+      // Se SUMAN a lo que ya tuviera ese formulario (sin repetir correos).
+      f.destino = CD.unir_correos(f.destino || "", fijos);
+    });
+  })();
 })();

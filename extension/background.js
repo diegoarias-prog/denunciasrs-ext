@@ -20,6 +20,7 @@ importScripts(
   "datos/marcas.js",           // window.MARCAS_BASE, window.CORREO_PERSONA
   "datos/justificaciones.js",  // window.JUSTIF
   "datos/politicas_generales.js", // window.POLITICAS_GENERALES
+  "datos/correos_denuncia.js", // window.CORREOS_DENUNCIA (destinos fijos + memoria de correos)
   "datos/formularios.js"       // window.FORMULARIOS (usa JUSTIF y POLITICAS al ejecutar)
 );
 
@@ -785,7 +786,11 @@ async function ctxAbrirDenuncia(tabOrigen, marca, formKey, objetivo) {
     const em = form.construirEmail(ctx);
     const idDen = await ctxRegistrarDenuncia(marca, form, urlDen);
     await ctxGuardarCorreo(idDen, em);
-    await chrome.storage.local.set({ email_reporte: Object.assign({}, em, { from: datos.correo || "" }) });
+    // red/cat/urls viajan para la MEMORIA DE CORREOS (ver datos/correos_denuncia.js).
+    await chrome.storage.local.set({ email_reporte: Object.assign({}, em, {
+      from: datos.correo || "", red: form.red || "", cat: form.cat || "",
+      urls: (ctx.urls || []).concat(urlDen && (ctx.urls || []).indexOf(urlDen) < 0 ? [urlDen] : [])
+    }) });
     chrome.tabs.create({ url: chrome.runtime.getURL("correo.html") });
     return;
   }
