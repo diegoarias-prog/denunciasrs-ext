@@ -244,25 +244,102 @@
   // URL de la base de datos de marcas del país (campo TM_URL); OMPI como fallback.
   function baseMarcasDe(pais) { try { return window.JUSTIF.baseMarcasDe(pais); } catch (e) { return "https://branddb.wipo.int/"; } }
 
+  // Enlace de EJEMPLO a la obra protegida ("Añade un enlace a la obra protegida por
+  // derechos de autor"). Es OBLIGATORIO en los dos formularios de Meta: sin él no deja
+  // enviar. Se busca por orden: perfil OFICIAL de la marca en ESA red -> sitio web ->
+  // dominio legítimo -> ficha oficial en Google Play -> ficha oficial en App Store. Casi
+  // ninguna marca tiene los cinco vacíos, y así el campo deja de quedarse en blanco.
+  // Devuelve {url, que} para poder decir en la descripción QUÉ es ese enlace.
+  function obraEjemploDe(d, red) {
+    var cand = [
+      { u: (red === "Instagram" ? d.instagram : d.facebook), q: "perfil oficial en " + red },
+      { u: d.sitio,    q: "sitio web oficial" },
+      { u: d.dominio ? ("https://" + String(d.dominio).replace(/^https?:\/\//i, "")) : "", q: "sitio web oficial" },
+      { u: d.play,     q: "aplicación oficial en Google Play" },
+      { u: d.appstore, q: "aplicación oficial en la App Store" }
+    ];
+    for (var i = 0; i < cand.length; i++) {
+      var u = (cand[i].u || "").toString().trim();
+      if (u) return { url: u, que: cand[i].q };
+    }
+    return { url: "", que: "" };
+  }
+
   // Constructores de plan para los formularios de Meta (Facebook/Instagram), que
   // comparten estructura y nombres de campo. 'this' es el objeto del formulario.
-  // DERECHOS DE AUTOR de Facebook/Instagram: Meta RETIRÓ los formularios antiguos
-  // (facebook.com/help/contact/1758255661104383 y help.instagram.com/contact/552695131608132):
-  // al elegir el país redirigían al portal NUEVO help.meta.com/requests/1523801815366035.
-  // El formulario nuevo es un ASISTENTE DE 2 PASOS, sus campos NO tienen atributo `name`
-  // (se localizan por su rótulo en español) y las URLs van TODAS en UNA sola caja
-  // (hasta 30, separadas por coma), ya no en las cajas "Enlace 1..30".
-  //   Paso 1 - "Danos más detalles sobre el propietario de los derechos de autor":
-  //            país (desplegable) + "¿Eres el propietario de los derechos?" = Sí + nombre
-  //            del propietario -> botón "Siguiente".
-  //   Paso 2 - "Danos más detalles sobre lo que quieres reportar y envía el reporte":
-  //            URLs, ejemplo de la obra, descripción, nombre, correo (x2) y firma.
+  //
+  // DERECHOS DE AUTOR de Facebook/Instagram: Meta sirve DOS formularios distintos para
+  // lo mismo, y cuál te toca depende del día, del país y de la cuenta. El plan lleva LAS
+  // DOS VARIANTES y el motor ejecuta solo la que de verdad está en pantalla (pasos con
+  // `siHay`/`siNoHay`, ver la GUARDA DE VARIANTE en motor.js). Antes el plan solo cubría
+  // el portal nuevo: cuando salía el clásico no se rellenaba NADA.
+  //
+  //  A) CLÁSICO — facebook.com/help/contact/1758255661104383 y
+  //     help.instagram.com/contact/552695131608132. Todo en UNA página, campos con
+  //     atributo `name` IDÉNTICOS en Facebook y en Instagram (volcados reales en
+  //     estructura_fb_da.json / estructura_ig_copyright.json) y las URL en las cajas
+  //     "Enlace 1..30" (+ casilla "Tengo enlaces adicionales" para las 11..30).
+  //     Se reconoce porque existe el radio [name="copyright_owner"].
+  //
+  //  B) PORTAL NUEVO — help.meta.com/requests/1523801815366035. ASISTENTE DE 2 PASOS,
+  //     los campos NO tienen `name` (se localizan por su rótulo en español) y las URLs
+  //     van TODAS en UNA sola caja (hasta 30, separadas por coma).
+  //       Paso 1 - "Danos más detalles sobre el propietario de los derechos de autor":
+  //                país + "¿Eres el propietario de los derechos?" = Sí + nombre del
+  //                propietario -> botón "Siguiente".
+  //       Paso 2 - "Danos más detalles sobre lo que quieres reportar y envía el reporte":
+  //                URLs, ejemplo de la obra, descripción de la obra, cómo infringe,
+  //                nombre, correo (x2), declaración y firma.
+  // Instructivo que ve el usuario: sirve para las DOS variantes de Meta (ver planCopyright).
+  var META_COPY_MANUAL = "Meta usa dos formularios distintos para esto y la extensión rellena el que te toque: " +
+    "si sale el CLÁSICO (todo en una página), llena también las cajas «Enlace 1..30»; si sale el PORTAL NUEVO " +
+    "(asistente de 2 pasos), las URL van todas en una sola caja (tope 30). Comprueba el enlace de ejemplo a tu obra " +
+    "y las casillas de la Declaración, y pulsa Enviar.";
+
   function planCopyright(ctx) {
-    var d = ctx.datos, marca = ctx.marca;
-    // Perfil OFICIAL de la marca en esta red (Instagram/Facebook), con fallback a d.sitio
-    // si el perfil de la red aún no está configurado en "Marcas".
-    var perfil = (this.red === "Instagram" ? (d.instagram || d.sitio) : (d.facebook || d.sitio)) || "";
-    return { url: this.url, manual: this.manual, pasos: [
+    var d = ctx.datos, marca = ctx.marca, red = this.red;
+    var obra = obraEjemploDe(d, red), perfil = obra.url;
+    // DESCRIPCIÓN DE LA OBRA. Es un campo DISTINTO del de "cómo infringe" (ctx.justif):
+    // aquí Meta pregunta QUÉ es la obra y de quién es, no qué hace el infractor.
+    var descObra = "Logotipo, nombre comercial, imágenes y materiales gráficos originales de " + marca +
+      ", obra protegida por derechos de autor cuya titularidad corresponde en exclusiva a " + marca + "." +
+      (perfil ? " Puede verse en su " + obra.que + ": " + perfil + "." : "");
+    var avisos = [];
+    if (!perfil) avisos.push("La marca «" + marca + "» no tiene <b>perfil de " + red + "</b>, <b>sitio web</b>, " +
+      "<b>dominio</b> ni <b>app</b> guardados, y Meta exige un enlace de ejemplo a la obra. " +
+      "Añade uno en <b>⚙ Marcas</b> o pégalo a mano antes de enviar.");
+    var C = '[name="copyright_owner"]'; // marca de agua del formulario CLÁSICO
+    return { url: this.url, manual: this.manual, avisos: avisos, pasos: [
+      // ================= A) Formulario CLÁSICO (campos con `name`) =================
+      { tipo: "radio", siHay: C, name: "copyright_owner",
+        texto: "soy el propietario|i am the rights owner", esperaMs: 800 },
+      { tipo: "fillName", siHay: C, name: "your_name", valor: marca },
+      { tipo: "fillName", siHay: C, name: "email", valor: d.correo },
+      { tipo: "fillName", siHay: C, name: "confirm_email", valor: d.correo },
+      // "Nombre del propietario de los derechos" (puede ser la organización representada).
+      { tipo: "fillName", siHay: C, name: "reporter_name", valor: marca },
+      // "¿Cuál de estas afirmaciones describe mejor la obra?" -> Foto/Photo (el logotipo y
+      // los materiales gráficos de la marca son obra visual; opciones: Foto/Vídeo/Texto/Otro).
+      { tipo: "select", siHay: C, name: "describe_copyrighted_work_me", texto: "foto|photo", esperaMs: 400 },
+      { tipo: "fillName", siHay: C, name: "copyright_url", valor: perfil },
+      { tipo: "fillName", siHay: C, name: "describe_copyrighted_work_me_URLs", valor: descObra },
+      // "¿Qué tipo de contenido quieres denunciar?" -> Foto, vídeo o publicación.
+      { tipo: "check", siHay: C, name: "Content_type[]", texto: "foto, video o publicacion|photo, video or post" },
+      // Cajas "Enlace 1..30" con las URL del Excel (marca sola "Tengo enlaces adicionales").
+      { tipo: "fillUrlList", siHay: C, dominio: (red === "Instagram" ? "instagram.com" : "facebook.com"),
+        checkLabel: "enlaces adicionales|additional links to report|enlaces adicionales que denunciar",
+        urls: (ctx.urls || []) },
+      { tipo: "fillName", siHay: C, name: "why_reporting_other", valor: ctx.justif },
+      // Dirección postal: en derechos de autor va oculta salvo en algunos países.
+      { tipo: "fillName", siHay: C, name: "Address", valor: postalDe(d.pais), opcional: true },
+      { tipo: "fillName", siHay: C, name: "Electronic_sig", valor: marca },
+      // El PAÍS va al final a propósito: en el formulario clásico, elegirlo es lo que a
+      // veces te manda al portal nuevo; así el resto ya quedó escrito antes del salto.
+      { tipo: "select", siHay: C, name: "rights_owner_country_routing", texto: d.pais },
+      { tipo: "radio", siHay: C, name: "copyright_owner",
+        texto: "soy el propietario|i am the rights owner", opcional: true }, // re-marcar al final
+
+      // ================= B) Portal NUEVO help.meta.com (por rótulo) =================
       // OJO CON LOS RÓTULOS: Meta cambia la redacción según el español regional. En es-419
       // dice "propietario de los derechos" / "¿Dónde estás defendiendo derechos?" y en es-ES
       // "titular de los derechos" / "¿Dónde estás ejerciendo tus derechos?". Por eso se casa
@@ -271,28 +348,44 @@
       // El país sale del campo "🌎 País" de la marca (panel Marcas). Si está vacío o no
       // coincide con la lista de Meta, `desc` hace que el aviso lo diga con claridad en vez
       // de dejar el desplegable vacío en silencio ("This field is required").
-      { tipo: "dropdown", pregunta: "defendiendo derechos|ejerciendo tus derechos|asserting rights",
+      { tipo: "dropdown", siNoHay: C, pregunta: "defendiendo derechos|ejerciendo tus derechos|asserting rights",
         opcion: d.pais, desc: "el país de la marca", esperaMs: 1200 },
-      { tipo: "radioPregunta", pregunta: "titular de los derechos|propietario de los derechos|rights owner",
+      { tipo: "radioPregunta", siNoHay: C, pregunta: "titular de los derechos|propietario de los derechos|rights owner",
         opcion: "si|yes", esperaMs: 1200 },
-      { tipo: "fillLabel", label: "como se llama el titular|nombre del titular|nombre del propietario|name of the rights owner|rights owner name",
+      { tipo: "fillLabel", siNoHay: C, label: "como se llama el titular|nombre del titular|nombre del propietario|name of the rights owner|rights owner name",
         valor: marca, reintentos: 6 },
-      { tipo: "clickBoton", texto: "siguiente|next", avanza: true, esperaMs: 2500 },
+      { tipo: "clickBoton", siNoHay: C, texto: "siguiente|next", avanza: true, esperaMs: 2500 },
       // -------- Paso 2: contenido a denunciar (en ORDEN de aparición) --------
       // Todas las URLs del Excel en UNA sola caja, separadas por coma (tope 30 de Meta).
-      { tipo: "fillUrlsUnaCaja",
-        label: "url o los identificadores|urls o identificadores|urls or identifiers",
-        placeholder: "instagram.com|facebook.com", urls: (ctx.urls || []), separador: ", ", reintentos: 6 },
-      { tipo: "fillLabel", label: "ejemplo de tu obra|ejemplo de la obra|obra con derechos de autor|example of your copyrighted work",
+      // `excluir`: la caja del "ejemplo de tu obra" comparte el ejemplo facebook.com/… y sin
+      // esto se llevaba las URL a denunciar, que es justo lo contrario.
+      { tipo: "fillUrlsUnaCaja", siNoHay: C,
+        label: "url o los identificadores|urls o identificadores|urls or identifiers|contenido que quieres reportar|contenido que quieres denunciar",
+        placeholder: "instagram.com|facebook.com", excluir: "ejemplo de tu obra|obra protegida|copyrighted work",
+        urls: (ctx.urls || []), separador: ", ", reintentos: 6 },
+      { tipo: "selectLabel", siNoHay: C, label: "describe mejor la obra|describes the copyrighted work|tipo de obra",
+        opcion: "foto|photo", opcional: true },
+      { tipo: "fillLabel", siNoHay: C, label: "ejemplo de tu obra|ejemplo de la obra|obra con derechos de autor|obra protegida por derechos de autor|enlace a la obra|example of your copyrighted work",
         valor: perfil, reintentos: 6 },
-      { tipo: "fillLabel", label: "derechos de propiedad intelectual|intellectual property rights",
+      { tipo: "fillLabel", siNoHay: C, label: "describe tu obra|describe la obra|descripcion de la obra|describe your copyrighted work",
+        valor: descObra, opcional: true, reintentos: 3 },
+      { tipo: "checkLabel", siNoHay: C, texto: "foto, video o publicacion|photo, video or post", opcional: true },
+      { tipo: "fillLabel", siNoHay: C, label: "derechos de propiedad intelectual|intellectual property rights|de que manera crees|describe como crees|how you believe this content",
         valor: ctx.justif, reintentos: 6 },
-      { tipo: "fillLabel", label: "tu nombre completo|your full name", valor: marca, reintentos: 6 },
-      { tipo: "fillLabel", label: "correo electronico|email address", valor: d.correo, reintentos: 6 },
-      { tipo: "fillLabel", label: "confirmar correo electronico|confirm email", valor: d.correo, reintentos: 6 },
-      { tipo: "fillLabel", label: "firma electronica|electronic signature", valor: marca, reintentos: 6 },
+      { tipo: "fillLabel", siNoHay: C, label: "tu nombre completo|nombre y apellidos|your full name", valor: marca, reintentos: 6 },
+      { tipo: "fillLabel", siNoHay: C, label: "correo electronico|email address", valor: d.correo, reintentos: 6 },
+      // OJO: el rótulo real es "Confirmar DIRECCIÓN de correo electrónico", así que
+      // "confirmar correo electronico" (todo seguido) NO casa. Se listan las redacciones
+      // que de verdad usa Meta; basta con que una case.
+      { tipo: "fillLabel", siNoHay: C, label: "confirmar direccion|confirma tu direccion|confirmar tu direccion|confirmar correo|confirma tu correo|confirm email|confirm your email",
+        valor: d.correo, reintentos: 6 },
+      { tipo: "fillLabel", siNoHay: C, label: "direccion postal|mailing address", valor: postalDe(d.pais), opcional: true },
+      // Casillas de la "Declaración" (buena fe / bajo pena de perjurio / autorización).
+      { tipo: "checkVarios", siNoHay: C, etiquetas: "buena fe|perjurio|good faith|penalty of perjury|autorizacion para actuar|authorized to act",
+        max: 4, opcional: true, reintentos: 3 },
+      { tipo: "fillLabel", siNoHay: C, label: "firma electronica|electronic signature", valor: marca, reintentos: 6 },
       // Re-marcar al final: React del portal nuevo revierte el radio al rellenar lo demás.
-      { tipo: "radioPregunta", pregunta: "titular de los derechos|propietario de los derechos|rights owner",
+      { tipo: "radioPregunta", siNoHay: C, pregunta: "titular de los derechos|propietario de los derechos|rights owner",
         opcion: "si|yes", opcional: true }
     ] };
   }
@@ -467,8 +560,8 @@
     },
     // ================= Facebook / Instagram (motor Meta) =================
     // Derechos de autor: portal NUEVO de Meta (el antiguo help/contact ya solo redirige aquí).
-    fb_da:        { red: "Facebook",  nombre: "Derechos de autor", cat: "autor", url: "https://help.meta.com/requests/1523801815366035?claim_type=IP_COPYRIGHT&platform_copyright=FACEBOOK_CORE",  manual: "Formulario de 2 pasos. Las URL van todas en una sola caja (tope 30). Revisa y pulsa Enviar.", construirPlan: planCopyright },
-    ig_copyright: { red: "Instagram", nombre: "Derechos de autor", cat: "autor", url: "https://help.meta.com/requests/1523801815366035?claim_type=IP_COPYRIGHT&platform_copyright=INSTAGRAM_CORE", manual: "Formulario de 2 pasos. Las URL van todas en una sola caja (tope 30). Revisa y pulsa Enviar.", construirPlan: planCopyright },
+    fb_da:        { red: "Facebook",  nombre: "Derechos de autor", cat: "autor", url: "https://help.meta.com/requests/1523801815366035?claim_type=IP_COPYRIGHT&platform_copyright=FACEBOOK_CORE",  manual: META_COPY_MANUAL, construirPlan: planCopyright },
+    ig_copyright: { red: "Instagram", nombre: "Derechos de autor", cat: "autor", url: "https://help.meta.com/requests/1523801815366035?claim_type=IP_COPYRIGHT&platform_copyright=INSTAGRAM_CORE", manual: META_COPY_MANUAL, construirPlan: planCopyright },
     fb_marca:     { red: "Facebook",  nombre: "Marca registrada",  cat: "marca", url: "https://www.facebook.com/help/contact/1057530390957243", manual: "Pega las URL del contenido infractor y el N.º de registro si lo tienes. Revisa antes de enviar.", construirPlan: planMarca },
     ig_marca:     { red: "Instagram", nombre: "Marca registrada",  cat: "marca", url: "https://help.instagram.com/contact/230197320740525",        manual: "Pega las URL del contenido infractor. Revisa antes de enviar.", construirPlan: planMarca },
     fb_difam:     { red: "Facebook",  nombre: "Difamación",        cat: "difam", url: "https://www.facebook.com/help/contact/430253071144967", manual: "Selecciona cuántas URL y pega cada enlace con su motivo. Revisa antes de enviar.", construirPlan: planDifam },

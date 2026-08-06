@@ -62,14 +62,25 @@ async function APLICAR(pasos, opciones) {
     anotar("marco", target, target.checked ? "quedo marcado" : "NO quedo marcado (falta el clic real)");
     return !!target.checked;
   }
+  // Elige una opción de un <select> por su TEXTO. Dos detalles importantes:
+  //  - Acepta ALTERNATIVAS separadas por "|" ("foto|photo"), como el resto del motor:
+  //    el mismo paso vale con el formulario en español o en inglés.
+  //  - Busca por PRIORIDAD (exacto -> empieza por -> contiene) para no quedarse con una
+  //    opción que solo CONTENGA a la buscada (el caso clásico: "Guinea" cogía "Guinea
+  //    Ecuatorial", y así el país del reporte salía mal).
   function setSelect(name, texto, suf) {
     const s = document.querySelector('select[name' + (suf ? "$" : "") + '="' + (name + "").replace(/"/g, '\\"') + '"]');
     if (!s) return false;
-    const t = norm(texto);
-    for (let i = 0; i < s.options.length; i++) {
-      if (norm(s.options[i].text).indexOf(t) >= 0) {
-        s.selectedIndex = i; s.dispatchEvent(new Event("change", { bubbles: true })); return true;
-      }
+    const alts = norm(texto).split("|").map((x) => x.trim()).filter(Boolean);
+    if (!alts.length) return false;
+    const textos = [];
+    for (let i = 0; i < s.options.length; i++) textos.push(norm(s.options[i].text).replace(/\s+/g, " ").trim());
+    const elegir = (i) => { s.selectedIndex = i; s.dispatchEvent(new Event("change", { bubbles: true })); return true; };
+    for (const t of alts) {
+      let i = textos.indexOf(t);                                // exacto
+      if (i < 0) i = textos.findIndex((x) => x.indexOf(t) === 0); // empieza por
+      if (i < 0) i = textos.findIndex((x) => x.indexOf(t) >= 0);  // contiene
+      if (i >= 0) return elegir(i);
     }
     return false;
   }
@@ -140,6 +151,28 @@ async function APLICAR(pasos, opciones) {
     for (const p of pendientes) {
     const antesFaltan = faltan.length;
     const antesOk = ok, antesReg = registro.length;
+    // -----------------------------------------------------------------------
+    //  GUARDA DE VARIANTE DE FORMULARIO (siHay / siNoHay)
+    //  Una misma denuncia puede tener DOS formularios distintos según lo que
+    //  sirva la web ese día. Meta es el caso claro de Derechos de autor: el
+    //  formulario CLÁSICO (facebook.com/help/contact/…, campos con atributo
+    //  `name`, todo en una página, cajas "Enlace 1..30") y el PORTAL NUEVO
+    //  (help.meta.com/requests/…, asistente de 2 pasos, sin `name`, una sola
+    //  caja de URLs). Un paso puede llevar un selector CSS en `siHay` (solo se
+    //  ejecuta si ese campo existe en la página) o en `siNoHay` (solo si NO
+    //  existe). El paso que no le toca se SALTA: ni cuenta como hecho, ni se
+    //  reporta como fallo, ni se reintenta. Así el plan lleva las dos variantes
+    //  y siempre se rellena la que de verdad esté delante, sin adivinar.
+    // -----------------------------------------------------------------------
+    let noAplica = false;
+    try {
+      if (p.siHay && !document.querySelector(p.siHay)) noAplica = true;
+      if (p.siNoHay && document.querySelector(p.siNoHay)) noAplica = true;
+    } catch (e) { /* selector mal escrito: el paso se intenta igual */ }
+    if (noAplica) {
+      informePasos.set(p, { paso: describirPaso(p), estado: "no es de este formulario", hizo: [], pasada: pasada + 1 });
+      continue;
+    }
     try {
       if (p.tipo === "select" || p.tipo === "selectPais") {
         const texto = p.tipo === "selectPais" ? p.valor : p.texto;
