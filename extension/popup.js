@@ -616,6 +616,10 @@ async function rellenar() {
     let html = "✓ <b>" + r.ok + "</b> campo(s) rellenado(s)." +
       (objetivoTabId !== tab.id ? " El formulario se abrió en una <b>pestaña aparte</b>." : "");
     if (form.manual) html += "<br><br>📌 " + form.manual;
+    // AVISOS del plan: datos de la marca que el formulario exige y no están guardados
+    // (p. ej. el enlace de ejemplo a la obra en Derechos de autor). No bloquean el
+    // relleno, pero hay que verlos ANTES de enviar.
+    if (plan.avisos && plan.avisos.length) html += "<br><br>⚠ " + plan.avisos.join("<br>⚠ ");
     if (r.faltan && r.faltan.length) html += "<br><br>No se encontraron (revisa a mano): " + r.faltan.join(", ") +
       "<br>👉 Si algo quedó vacío, pulsa <b>📋 Copiar informe</b> (abajo) y mándamelo: dice exactamente qué campos vio y con qué rótulo.";
     if (autoEnviable) {
