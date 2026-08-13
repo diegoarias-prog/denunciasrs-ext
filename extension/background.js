@@ -696,6 +696,9 @@ function ctxEsperarCarga(tabId) {
 // (justif=en, justif_es=es) porque Telegram y otros usan ambos. Devuelve {ctx, form,
 // datos} o null si falta la marca o el formulario.
 async function ctxArmar(marca, formKey, urlsOverride) {
+  // El service worker se duerme y al despertar solo tiene los formularios de fábrica:
+  // si la denuncia es de una plataforma creada por el usuario, hay que recargarla.
+  if (!self.FORMULARIOS[formKey]) await ctxCargarPlataformasDeUsuario();
   const form = self.FORMULARIOS[formKey];
   const MARCAS = await ctxObtenerMarcas();
   const datos = MARCAS[marca];
@@ -987,7 +990,20 @@ function ctxCrearItemDeMenu(opciones) {
 // pendientes antes de dar por cerrada una tanda y anotar el resultado.
 const ctxEsperarCallbacksDeMenu = () => dormir(0);
 
+// Mezcla en self.FORMULARIOS las plataformas que el usuario creó desde el popup
+// (chrome.storage.local -> plataformas_usuario). Se llama ANTES de armar el menú y
+// antes de preparar una denuncia, para que salgan igual que las de fábrica en el
+// clic derecho. Las de fábrica nunca se pisan (lo garantiza formularios.js).
+async function ctxCargarPlataformasDeUsuario() {
+  try {
+    if (typeof self.APLICAR_PLATAFORMAS_DE_USUARIO !== "function") return;
+    const d = await chrome.storage.local.get(["plataformas_usuario"]);
+    self.APLICAR_PLATAFORMAS_DE_USUARIO(d.plataformas_usuario || {});
+  } catch (e) { /* sin ellas, el menú sale con las de fábrica */ }
+}
+
 async function ctxConstruirMenusUnaVez() {
+  await ctxCargarPlataformasDeUsuario();
   rsDiagnosticoMenu = { intentados: 0, creados: 0, fallidos: 0, primerError: "", idsFallidos: [] };
   // redesConItemsRechazados: aquellas en las que el NAVEGADOR rechazó algún item. Es solo
   // información para el diagnóstico: la red se queda en el menú con lo que sí se creó.
@@ -1136,7 +1152,9 @@ chrome.runtime.onInstalled.addListener(ctxConstruirMenus);
 chrome.runtime.onStartup.addListener(ctxConstruirMenus);
 chrome.storage.onChanged.addListener((cambios, area) => {
   if (area !== "local") return;
-  if (cambios.marcas_usuario || cambios.marcas_eliminadas) ctxConstruirMenus();
+  // plataformas_usuario: al crear (o quitar) una plataforma desde el popup, el menú
+  // del clic derecho se rehace para que aparezca (o desaparezca) al momento.
+  if (cambios.marcas_usuario || cambios.marcas_eliminadas || cambios.plataformas_usuario) ctxConstruirMenus();
 });
 
 // ============================================================================
