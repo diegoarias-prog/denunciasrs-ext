@@ -1532,6 +1532,132 @@
   };
 
   // ==========================================================================
+  //  PLATAFORMAS QUE CREA EL USUARIO (desde el popup: "➕ Nueva plataforma…")
+  //
+  //  Sirven para denunciar en un sitio que la extensión todavía no conoce, sin
+  //  esperar a que se programe campo por campo. Se guardan en
+  //  chrome.storage.local -> plataformas_usuario y se MEZCLAN con FORMULARIOS al
+  //  arrancar el popup y el menú del clic derecho, así aparecen igual que las de
+  //  fábrica en las dos listas.
+  //
+  //  Dos tipos:
+  //   · "formulario": abre la URL que dio el usuario e intenta rellenar POR
+  //     RÓTULO los datos que pide cualquier formulario de denuncia (quién
+  //     denuncia, su correo, teléfono, país, la marca, la descripción y los
+  //     enlaces). Todos los pasos son OPCIONALES: lo que esa página no tenga se
+  //     salta sin romper nada, y lo que no encuentre sale listado en el informe
+  //     del popup ("📋 Copiar informe") para poder programarlo bien después.
+  //   · "email": genera el borrador de correo al buzón que dio el usuario, con
+  //     el mismo formato bilingüe que el resto de denuncias por correo.
+  //
+  //  Las de fábrica MANDAN: si el usuario crea una con una clave que ya existe,
+  //  no se pisa la de fábrica (se le pone un sufijo al guardar, ver popup.js).
+  // ==========================================================================
+
+  // Rótulos por los que se busca cada dato. Van en español e inglés porque una
+  // plataforma nueva puede estar en cualquiera de los dos, y separados por "|"
+  // que es como el motor admite varias redacciones para el mismo campo.
+  var ROTULOS_GENERICOS = {
+    nombre:      "nombre completo|nombre y apellidos|tu nombre|nombre del solicitante|full name|your name|first and last name|contact name",
+    correo:      "correo electronico|correo|email|e-mail|email address|tu correo",
+    telefono:    "telefono|teléfono|numero de telefono|phone|telephone|phone number",
+    empresa:     "empresa|compania|compañia|organizacion|organización|company|organization",
+    marca:       "marca|nombre de la marca|titular|titular de los derechos|brand|trademark|rights holder|copyright holder|company name",
+    sitio:       "sitio web oficial|sitio oficial|web oficial|pagina oficial|official website|official site|your website",
+    descripcion: "descripcion|descripción|detalles|explica|explique|motivo|mensaje|comentarios|description|details|explain|message|comments|additional information|reason",
+    enlaces:     "enlace|enlaces|url|urls|direccion|dirección|link|links|reported url|infringing|contenido denunciado|content to report",
+    firma:       "firma|firma electronica|signature|electronic signature|type your name"
+  };
+
+  function planGenericoDeUsuario(ctx, url, manual) {
+    var marca = ctx.marca, d = ctx.datos || {};
+    var repres = /seguridadmaxima\.net/i.test(d.correo || "");
+    var quien = repres ? "Security Maximum in Computer Networks" : marca;
+    var R = ROTULOS_GENERICOS;
+    // TODOS opcionales: es un formulario desconocido, así que ningún paso puede
+    // dar la denuncia por fallida solo porque esa página no tenga ese campo.
+    return { url: url, manual: manual, pasos: [
+      { tipo: "fillLabel", label: R.nombre,   valor: quien,          opcional: true, reintentos: 4 },
+      { tipo: "fillLabel", label: R.correo,   valor: d.correo || "", opcional: true },
+      { tipo: "fillLabel", label: R.telefono, valor: d.telefono || "", opcional: true },
+      { tipo: "fillLabel", label: R.empresa,  valor: quien,          opcional: true },
+      { tipo: "fillLabel", label: R.marca,    valor: marca,          opcional: true },
+      { tipo: "fillLabel", label: R.sitio,    valor: d.sitio || "",  opcional: true },
+      { tipo: "selectPais", label: "pais|país|country", valor: d.pais || "", opcional: true },
+      { tipo: "fillLabel", label: R.descripcion, valor: ctx.justif,  opcional: true },
+      { tipo: "fillUrlsUnaCaja", label: R.enlaces, separador: "\n",  opcional: true },
+      { tipo: "fillLabel", label: R.firma,    valor: quien,          opcional: true }
+    ] };
+  }
+
+  function emailGenericoDeUsuario(ctx, destino, nombrePlataforma) {
+    var marca = ctx.marca, d = ctx.datos || {};
+    var repres = /seguridadmaxima\.net/i.test(d.correo || "");
+    var pais = d.pais ? " (" + d.pais + ")" : "";
+    var en = { to: destino,
+      asunto: "Content impersonating " + marca + " - urgent removal request",
+      cuerpo:
+        "Hello,\n\n" +
+        (repres ? "We are Security Maximum in Computer Networks, on behalf of " + marca + "." : "We are " + marca + ".") + "\n\n" +
+        "We request the removal of the following content, which uses the " + marca +
+        " brand without any authorization and misleads users:\n\n" +
+        negrita("Reported link(s):") + "\n" + urlsODefault(ctx, "[ Paste here the link(s) you are reporting ]") + "\n\n" +
+        ctx.justif + "\n\n" +
+        lineaPerfilOficial(d, nombrePlataforma || "", marca, "en") +
+        "Please remove all content related to " + marca + pais + ".\n\n" +
+        "Sincerely,\n" + (repres ? "Security Maximum in Computer Networks" : marca) + (d.correo ? "\nContact: " + d.correo : "") };
+    var es = {
+      asunto: "Contenido que suplanta a " + marca + " - solicitud urgente de eliminación",
+      cuerpo:
+        "Hola,\n\n" +
+        (repres ? "Somos Seguridad Máxima en Redes Informáticas, en representación de " + marca + "." : "Somos " + marca + ".") + "\n\n" +
+        "Solicitamos la eliminación del siguiente contenido, que usa la marca " + marca +
+        " sin autorización alguna e induce a error a los usuarios:\n\n" +
+        negrita("Enlace(s) denunciado(s):") + "\n" + urlsODefault(ctx, "[ Pega aquí el/los enlace(s) a denunciar ]") + "\n\n" +
+        (ctx.justif_es || ctx.justif) + "\n\n" +
+        lineaPerfilOficial(d, nombrePlataforma || "", marca, "es") +
+        "Por favor, eliminen todo el contenido relacionado con " + marca + pais + ".\n\n" +
+        "Saludos,\n" + (repres ? "Seguridad Máxima en Redes Informáticas" : marca) + (d.correo ? "\nContacto: " + d.correo : "") };
+    return bilingue(en, es);
+  }
+
+  // Convierte UNA plataforma guardada en un formulario como los de fábrica.
+  window.CREAR_FORMULARIO_DE_USUARIO = function (p) {
+    if (!p || !p.red) return null;
+    var esCorreo = (p.tipo === "email");
+    if (esCorreo) {
+      return {
+        red: p.red, nombre: p.nombre || "Denuncia (por correo)", cat: "usuario", tipo: "email",
+        destino: p.destino || "", de_usuario: true,
+        manual: "Plataforma creada por ti. Revisa el correo antes de enviarlo.",
+        construirEmail: function (ctx) { return emailGenericoDeUsuario(ctx, this.destino, this.red); }
+      };
+    }
+    return {
+      red: p.red, nombre: p.nombre || "Denuncia (formulario)", cat: "usuario",
+      url: p.url || "", de_usuario: true,
+      manual: "Plataforma creada por ti: la extensión rellena por el RÓTULO de cada campo lo que reconoce " +
+              "(nombre, correo, teléfono, país, marca, descripción y enlaces). Revisa la página entera antes de enviar; " +
+              "lo que no encontró sale en «📋 Copiar informe».",
+      construirPlan: function (ctx) { return planGenericoDeUsuario(ctx, this.url, this.manual); }
+    };
+  };
+
+  // Mezcla en FORMULARIOS todas las plataformas del usuario. Devuelve cuántas
+  // entraron. Las de fábrica nunca se pisan.
+  window.APLICAR_PLATAFORMAS_DE_USUARIO = function (guardadas) {
+    var n = 0;
+    Object.keys(guardadas || {}).forEach(function (clave) {
+      // Una clave "__proto__"/"constructor" contaminaría el objeto de formularios.
+      if (clave === "__proto__" || clave === "constructor" || clave === "prototype") return;
+      if (Object.prototype.hasOwnProperty.call(window.FORMULARIOS, clave)) return; // de fábrica manda
+      var f = window.CREAR_FORMULARIO_DE_USUARIO(guardadas[clave]);
+      if (f) { window.FORMULARIOS[clave] = f; n++; }
+    });
+    return n;
+  };
+
+  // ==========================================================================
   //  DESTINOS FIJOS POR RED
   //  Hay redes con buzones de denuncia únicos: TODO correo dirigido a esa red
   //  —de cualquier marca, de cualquier categoría (propiedad intelectual,

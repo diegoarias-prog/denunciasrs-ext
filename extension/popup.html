@@ -19,6 +19,7 @@
   .estado.ok { display: block; background: #ecfdf5; color: #065f46; border-left: 3px solid #10b981; }
   .estado.aviso { display: block; background: #fffbeb; color: #92400e; border-left: 3px solid #f59e0b; }
   .estado.error { display: block; background: #fef2f2; color: #991b1b; border-left: 3px solid #ef4444; }
+  .linea_del_atajo { margin: 5px 0 0; font-size: 10.5px; color: #6b7280; text-align: center; }
   .pie { margin-top: 9px; font-size: 11px; text-align: center; }
   .pie a { color: #1d4ed8; text-decoration: none; }
 
@@ -45,6 +46,9 @@
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .boton_mini.rojo { background: #b91c1c; border-color: #b91c1c; }
   .boton_mini.rojo:hover { background: #991b1b; }
+  .nota_de_plataforma { margin: 5px 0 6px; font-size: 11px; color: #64748b; line-height: 1.4; }
+  /* El select de la red comparte fila con su 🗑, igual que el del remitente. */
+  .cuadro_de_denuncia .fila_del_remitente { margin-top: 3px; }
   .caja_de_correo_nuevo { box-sizing: border-box; padding: 6px 8px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 12px; }
   .caja_de_correo_nuevo:focus { outline: 0; border-color: #1d4ed8; }
   .boton_mini { flex: 0 0 auto; padding: 6px 9px; border: 1px solid #1d4ed8; border-radius: 6px; background: #1d4ed8; color: #fff; font-size: 12px; font-weight: 600; cursor: pointer; }
@@ -85,9 +89,37 @@
       </label>
     </div>
     <label for="sel_red">Red social / plataforma</label>
-    <select id="sel_red"></select>
+    <div class="fila_del_remitente">
+      <select id="sel_red"></select>
+      <!-- Solo se enciende en las plataformas que creó el usuario: las de fábrica
+           no se pueden quitar desde aquí. -->
+      <button type="button" class="boton_mas quitar" id="boton_quitar_plataforma"
+              title="Quitar esta plataforma (solo las que creaste tú)" disabled>🗑</button>
+    </div>
     <label for="sel_form">Reporte</label>
     <select id="sel_form"></select>
+
+    <!-- Alta de una plataforma nueva: aparece al elegir "➕ Nueva plataforma…" en
+         el desplegable de arriba. Lo que se pide depende de cómo se denuncie:
+         una URL si es por formulario, un buzón si es por correo. -->
+    <div id="panel_nueva_plataforma" style="display:none;">
+      <label for="caja_nombre_plataforma">Nombre de la plataforma</label>
+      <input type="text" id="caja_nombre_plataforma" class="caja_de_correo_nuevo" style="width:100%"
+             placeholder="Ej. Cloudflare, Mercado Libre…" autocomplete="off" maxlength="60">
+      <label for="caja_url_plataforma" id="rotulo_dato_plataforma">Enlace del formulario de denuncia</label>
+      <input type="text" id="caja_url_plataforma" class="caja_de_correo_nuevo" style="width:100%"
+             placeholder="https://…" autocomplete="off" maxlength="500">
+      <p class="nota_de_plataforma" id="nota_de_plataforma"></p>
+      <div class="fila_del_remitente">
+        <button type="button" class="boton_mini" id="boton_guardar_plataforma">Crear plataforma</button>
+        <button type="button" class="boton_mini gris" id="boton_cancelar_plataforma">Cancelar</button>
+      </div>
+    </div>
+    <div class="fila_del_remitente" id="fila_quitar_plataforma" style="display:none;">
+      <span class="pregunta_de_quitar" id="pregunta_de_quitar_plataforma"></span>
+      <button type="button" class="boton_mini rojo" id="boton_confirmar_quitar_plataforma">Quitar</button>
+      <button type="button" class="boton_mini gris" id="boton_cancelar_quitar_plataforma" title="Cancelar">✕</button>
+    </div>
     <!-- Solo se ve en "Por correo": a qué buzón sale (o el aviso de que va vacío). -->
     <p class="linea_buzon_destino" id="linea_buzon_destino" style="display:none;"></p>
   </div>
@@ -131,6 +163,8 @@
 
   <button class="boton" id="boton_rellenar">Rellenar formulario</button>
   <button class="boton sec" id="boton_capturar" disabled title="Adjunta una captura de esta pestaña al comprobante de la denuncia en curso. Atajo: Alt+Shift+S, captura sin abrir este popup (se puede cambiar en chrome://extensions/shortcuts).">📸 Capturar pantalla</button>
+  <!-- El atajo no se descubre solo: si solo vive en el title del botón, nadie lo ve. -->
+  <p class="linea_del_atajo">Atajo <b>Alt+Shift+S</b>: captura sin abrir esto.</p>
 
   <div class="estado" id="estado"></div>
 

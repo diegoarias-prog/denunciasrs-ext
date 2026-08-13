@@ -167,6 +167,64 @@ function redes_disponibles(tipo) {
   return reds.sort((a, b) => a.localeCompare(b, "es"));
 }
 
+// ===========================================================================
+//  PLATAFORMAS QUE CREA EL USUARIO
+//  Para denunciar en un sitio que la extensión todavía no conoce sin esperar a
+//  que se programe campo por campo. Se guardan en chrome.storage.local
+//  (plataformas_usuario) y datos/formularios.js las convierte en formularios
+//  normales, así salen en el desplegable junto a las de fábrica y también en el
+//  menú del clic derecho.
+// ===========================================================================
+// Un listener `async` que revienta deja la promesa rechazada y NO pasa nada visible:
+// el botón parece no hacer nada y no hay forma de saber por qué. Esto envuelve al
+// manejador para que cualquier error salga en el estado del popup.
+function al_pulsar(fn) {
+  return function () {
+    Promise.resolve()
+      .then(fn)
+      .catch((e) => mostrar_estado("error", "No se pudo completar: " + escapar_html(e && e.message ? e.message : e)));
+  };
+}
+
+const CLAVE_PLATAFORMAS = "plataformas_usuario";
+const OPCION_NUEVA_PLATAFORMA = "__NUEVA_PLATAFORMA__";
+let PLATAFORMAS_DE_USUARIO = {};
+
+function leer_plataformas_de_usuario() {
+  return new Promise((res) => chrome.storage.local.get([CLAVE_PLATAFORMAS], (d) => res(d[CLAVE_PLATAFORMAS] || {})));
+}
+
+// Carga las plataformas guardadas y las mezcla con FORMULARIOS. Se llama UNA vez
+// al abrir el popup y después de cada alta/baja.
+async function cargar_plataformas_de_usuario() {
+  PLATAFORMAS_DE_USUARIO = await leer_plataformas_de_usuario();
+  if (typeof window.APLICAR_PLATAFORMAS_DE_USUARIO === "function") {
+    window.APLICAR_PLATAFORMAS_DE_USUARIO(PLATAFORMAS_DE_USUARIO);
+  }
+}
+
+// ¿Esta red la creó el usuario? (para saber si se puede quitar)
+function clave_de_plataforma_de_usuario(red, tipo) {
+  return Object.keys(PLATAFORMAS_DE_USUARIO).find((k) => {
+    const p = PLATAFORMAS_DE_USUARIO[k] || {};
+    const suyoTipo = (p.tipo === "email") ? "correo" : "formulario";
+    return p.red === red && suyoTipo === tipo;
+  }) || "";
+}
+
+// Clave interna única y previsible a partir del nombre ("Mercado Libre" ->
+// "u_mercado_libre_form"). Si ya existiera, se le suma un número: nunca se pisa
+// una plataforma existente ni, mucho menos, una de fábrica.
+function clave_nueva_de_plataforma(nombre, tipo) {
+  const base = "u_" + String(nombre).toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")   // sin acentos
+    .replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 30) +
+    (tipo === "correo" ? "_mail" : "_form");
+  let clave = base, n = 2;
+  while (window.FORMULARIOS[clave] || PLATAFORMAS_DE_USUARIO[clave]) { clave = base + "_" + n; n++; }
+  return clave;
+}
+
 function formularios_de_red(red, tipo) {
   return Object.keys(window.FORMULARIOS)
     .filter((k) => window.FORMULARIOS[k].red === red && form_es_del_tipo(window.FORMULARIOS[k], tipo))
@@ -176,6 +234,9 @@ function formularios_de_red(red, tipo) {
 let MARCAS = {};
 
 async function inicializar() {
+  // Las plataformas del usuario PRIMERO: se mezclan con FORMULARIOS y así salen
+  // en el desplegable de redes junto a las de fábrica.
+  await cargar_plataformas_de_usuario();
   MARCAS = await obtener_marcas();
   llenar_select($("sel_marca"), Object.keys(MARCAS).sort().map((m) => ({ value: m, texto: m })));
   refrescar_redes();
@@ -189,16 +250,124 @@ function refrescar_redes() {
   const tipo = tipo_de_denuncia();
   const antes = $("sel_red").value;
   const redes = redes_disponibles(tipo);
-  llenar_select($("sel_red"), redes.map((r) => ({ value: r, texto: r })));
+  // La última opción SIEMPRE es dar de alta una plataforma nueva: así se puede
+  // denunciar en un sitio que la extensión no trae, sin esperar a programarlo.
+  llenar_select($("sel_red"), redes.map((r) => ({ value: r, texto: r }))
+    .concat([{ value: OPCION_NUEVA_PLATAFORMA, texto: "➕ Nueva plataforma…" }]));
   if (antes && redes.indexOf(antes) >= 0) $("sel_red").value = antes;
-  refrescar_formularios();
+  al_cambiar_de_red();
   // El botón principal dice lo que va a pasar de verdad al pulsarlo.
   $("boton_rellenar").textContent = (tipo === "correo") ? "✉ Generar correo" : "Rellenar formulario";
+}
+
+// Al elegir una red: si es "➕ Nueva plataforma…" se abre el panel de alta; si no,
+// se listan sus reportes y se decide si esa plataforma se puede quitar.
+function al_cambiar_de_red() {
+  const esAlta = ($("sel_red").value === OPCION_NUEVA_PLATAFORMA);
+  mostrar_panel_de_plataforma(esAlta);
+  mostrar_pregunta_de_quitar_plataforma(false);
+  $("sel_form").disabled = esAlta;
+  if (esAlta) { llenar_select($("sel_form"), [], "(primero crea la plataforma)"); $("boton_quitar_plataforma").disabled = true; pintar_buzon_destino(); return; }
+  refrescar_formularios();
+  // El 🗑 solo se enciende en las plataformas creadas por el usuario.
+  $("boton_quitar_plataforma").disabled = !clave_de_plataforma_de_usuario($("sel_red").value, tipo_de_denuncia());
 }
 
 function refrescar_formularios() {
   llenar_select($("sel_form"), formularios_de_red($("sel_red").value, tipo_de_denuncia()));
   pintar_buzon_destino();
+}
+
+// Enseña el panel de alta y adapta lo que se pide al modo elegido: por formulario
+// hace falta la URL de la página; por correo, el buzón al que se escribe.
+function mostrar_panel_de_plataforma(visible) {
+  const panel = $("panel_nueva_plataforma");
+  panel.style.display = visible ? "" : "none";
+  if (!visible) return;
+  const porCorreo = (tipo_de_denuncia() === "correo");
+  $("rotulo_dato_plataforma").textContent = porCorreo
+    ? "Correo(s) de denuncia de la plataforma"
+    : "Enlace del formulario de denuncia";
+  $("caja_url_plataforma").placeholder = porCorreo ? "abuse@plataforma.com" : "https://…";
+  $("nota_de_plataforma").textContent = porCorreo
+    ? "Se generará el correo de denuncia con los datos de la marca elegida y los enlaces que hayas puesto arriba. Puedes escribir varios buzones separados por coma."
+    : "La extensión abrirá esa página y rellenará por el RÓTULO de cada campo lo que reconozca (nombre, correo, teléfono, país, marca, descripción y enlaces). Lo que no encuentre te lo dirá en «📋 Copiar informe» para poder programarlo bien.";
+  $("caja_nombre_plataforma").value = "";
+  $("caja_url_plataforma").value = "";
+  $("caja_nombre_plataforma").focus();
+}
+
+async function guardar_plataforma_nueva() {
+  const tipo = tipo_de_denuncia();
+  const porCorreo = (tipo === "correo");
+  const nombre = String($("caja_nombre_plataforma").value || "").trim();
+  const dato = String($("caja_url_plataforma").value || "").trim();
+
+  if (!nombre) { mostrar_estado("aviso", "Ponle un <b>nombre</b> a la plataforma (es el que saldrá en la lista)."); $("caja_nombre_plataforma").focus(); return; }
+  if (!dato) {
+    mostrar_estado("aviso", porCorreo ? "Falta el <b>correo</b> al que se denuncia en esa plataforma." : "Falta el <b>enlace</b> del formulario de denuncia.");
+    $("caja_url_plataforma").focus(); return;
+  }
+  if (porCorreo) {
+    // Se admiten varios buzones separados por coma; todos tienen que ser válidos.
+    const lista = depurar_correos_de_marca([dato]);
+    if (!lista.length || !lista.every(correo_valido)) {
+      mostrar_estado("aviso", "Ese correo no parece válido: <b>" + escapar_html(dato) + "</b>."); $("caja_url_plataforma").focus(); return;
+    }
+  } else {
+    // Solo http(s): un "javascript:" o un "data:" aquí acabaría abriéndose en una pestaña.
+    let u = null;
+    try { u = new URL(/^https?:\/\//i.test(dato) ? dato : "https://" + dato); } catch (e) { u = null; }
+    if (!u || (u.protocol !== "http:" && u.protocol !== "https:")) {
+      mostrar_estado("aviso", "Ese enlace no es válido: <b>" + escapar_html(dato) + "</b>. Tiene que empezar por http:// o https://");
+      $("caja_url_plataforma").focus(); return;
+    }
+  }
+  if (redes_disponibles(tipo).indexOf(nombre) >= 0) {
+    mostrar_estado("aviso", "Ya existe una plataforma llamada «" + escapar_html(nombre) + "» para denunciar por " +
+      (porCorreo ? "correo" : "formulario") + ". Elígela en la lista o ponle otro nombre.");
+    return;
+  }
+
+  const clave = clave_nueva_de_plataforma(nombre, tipo);
+  const registro = porCorreo
+    ? { red: nombre, nombre: "Denuncia (por correo)", tipo: "email", destino: depurar_correos_de_marca([dato]).join(", ") }
+    : { red: nombre, nombre: "Denuncia (formulario)", tipo: "formulario", url: /^https?:\/\//i.test(dato) ? dato : "https://" + dato };
+
+  // Se relee lo guardado antes de escribir, por si otra ventana creó otra mientras tanto.
+  const guardadas = await leer_plataformas_de_usuario();
+  guardadas[clave] = registro;
+  await new Promise((res) => chrome.storage.local.set({ [CLAVE_PLATAFORMAS]: guardadas }, res));
+
+  await cargar_plataformas_de_usuario();
+  refrescar_redes();
+  $("sel_red").value = nombre;
+  al_cambiar_de_red();
+  mostrar_estado("ok", "✓ Plataforma «" + escapar_html(nombre) + "» creada. Ya sale también en el menú del clic derecho.");
+}
+
+function mostrar_pregunta_de_quitar_plataforma(visible) {
+  const fila = $("fila_quitar_plataforma");
+  if (visible) {
+    const red = $("sel_red").value;
+    $("pregunta_de_quitar_plataforma").textContent = "¿Quitar la plataforma " + red + "?";
+    fila.style.display = "";
+  } else { fila.style.display = "none"; }
+}
+
+async function confirmar_quitar_plataforma() {
+  const red = $("sel_red").value;
+  const clave = clave_de_plataforma_de_usuario(red, tipo_de_denuncia());
+  if (!clave) { mostrar_pregunta_de_quitar_plataforma(false); return; }
+  const guardadas = await leer_plataformas_de_usuario();
+  delete guardadas[clave];
+  await new Promise((res) => chrome.storage.local.set({ [CLAVE_PLATAFORMAS]: guardadas }, res));
+  // FORMULARIOS es la copia en memoria de esta ventana: se quita también de ahí.
+  delete window.FORMULARIOS[clave];
+  await cargar_plataformas_de_usuario();
+  refrescar_redes();
+  mostrar_pregunta_de_quitar_plataforma(false);
+  mostrar_estado("ok", "✓ Plataforma «" + escapar_html(red) + "» quitada. Las de fábrica no se tocan.");
 }
 
 // Línea pequeña bajo el reporte por correo: a qué buzón sale. Hay reportes cuyo 'destino'
@@ -342,7 +511,21 @@ async function guardar_nuevo_correo() {
     : "✓ Correo agregado a «" + escapar_html(marca) + "» y elegido como remitente.");
 }
 
-$("sel_red").addEventListener("change", refrescar_formularios);
+$("sel_red").addEventListener("change", al_cambiar_de_red);
+$("boton_guardar_plataforma").addEventListener("click", al_pulsar(guardar_plataforma_nueva));
+$("boton_cancelar_plataforma").addEventListener("click", () => {
+  // Al cancelar se vuelve a la primera plataforma de verdad, no se queda en el alta.
+  const redes = redes_disponibles(tipo_de_denuncia());
+  $("sel_red").value = redes[0] || "";
+  al_cambiar_de_red();
+});
+$("boton_quitar_plataforma").addEventListener("click", () => mostrar_pregunta_de_quitar_plataforma(true));
+$("boton_cancelar_quitar_plataforma").addEventListener("click", () => mostrar_pregunta_de_quitar_plataforma(false));
+$("boton_confirmar_quitar_plataforma").addEventListener("click", al_pulsar(confirmar_quitar_plataforma));
+// Enter en las cajas del alta = pulsar "Crear plataforma".
+["caja_nombre_plataforma", "caja_url_plataforma"].forEach((id) => {
+  $(id).addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); guardar_plataforma_nueva(); } });
+});
 $("sel_form").addEventListener("change", pintar_buzon_destino);
 $("sel_marca").addEventListener("change", () => {
   mostrar_caja_de_nuevo_correo(false);
@@ -353,12 +536,12 @@ $("sel_marca").addEventListener("change", () => {
 $("sel_correo_marca").addEventListener("change", () => mostrar_pregunta_de_quitar(false));
 $("boton_quitar_correo").addEventListener("click", () => { mostrar_caja_de_nuevo_correo(false); mostrar_pregunta_de_quitar(true); });
 $("boton_cancelar_quitar").addEventListener("click", () => mostrar_pregunta_de_quitar(false));
-$("boton_confirmar_quitar").addEventListener("click", confirmar_quitar_correo);
+$("boton_confirmar_quitar").addEventListener("click", al_pulsar(confirmar_quitar_correo));
 $("tipo_formulario").addEventListener("change", refrescar_redes);
 $("tipo_correo").addEventListener("change", refrescar_redes);
 $("boton_mostrar_nuevo_correo").addEventListener("click", () => { mostrar_pregunta_de_quitar(false); mostrar_caja_de_nuevo_correo(true); });
 $("boton_cancelar_correo").addEventListener("click", () => mostrar_caja_de_nuevo_correo(false));
-$("boton_guardar_correo").addEventListener("click", guardar_nuevo_correo);
+$("boton_guardar_correo").addEventListener("click", al_pulsar(guardar_nuevo_correo));
 // Enter dentro de la caja = pulsar "Agregar" (no hay formulario que enviar).
 $("caja_nuevo_correo").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); guardar_nuevo_correo(); } });
 $("abrir_opciones").addEventListener("click", (e) => { e.preventDefault(); chrome.runtime.openOptionsPage(); });
