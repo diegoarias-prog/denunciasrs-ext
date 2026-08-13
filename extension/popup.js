@@ -228,8 +228,11 @@ function refrescar_correos_de_marca() {
   if (!sel) return;
   const datos = MARCAS[$("sel_marca").value] || {};
   const correos = Array.isArray(datos.correos) ? datos.correos.filter(Boolean) : [];
-  if (!correos.length) { llenar_select(sel, [], "(sin correo guardado — usa el +)"); return; }
-  llenar_select(sel, correos.map((c) => ({ value: c, texto: c })));
+  if (!correos.length) llenar_select(sel, [], "(sin correo guardado — usa el +)");
+  else llenar_select(sel, correos.map((c) => ({ value: c, texto: c })));
+  // Sin correos no hay nada que quitar: el 🗑 se apaga en vez de desaparecer, para que
+  // el bloque no cambie de tamaño al ir de una marca a otra.
+  $("boton_quitar_correo").disabled = !correos.length;
 }
 
 // Datos de la marca para la denuncia en curso: una COPIA con el correo elegido en el
@@ -270,6 +273,56 @@ async function agregar_correo_a_marca(marca, correo) {
   await new Promise((res) => chrome.storage.local.set({ marcas_usuario: guardadas }, res));
 }
 
+// Quita de ESA marca el correo indicado, con la misma mecánica que agregar: se relee el
+// diccionario guardado, se toca solo esa marca y se vuelve a escribir entero. La lista de
+// partida sale del registro RECIÉN LEÍDO (no de MARCAS, que es la foto de cuando se abrió
+// el popup), así no se deshace lo que ⚙ Marcas u otra ventana guardaran mientras tanto.
+async function quitar_correo_de_marca(marca, correo) {
+  if (clave_peligrosa(marca)) return;
+  const g = await new Promise((res) => chrome.storage.local.get(["marcas_usuario"], res));
+  const guardadas = g.marcas_usuario || {};
+  const previa = guardadas[marca] || {};
+  const crudos = Array.isArray(previa.correos)
+    ? previa.correos
+    : [("correo" in previa) ? previa.correo : (window.MARCAS_BASE[marca] || {}).correo];
+  const quedan = depurar_correos_de_marca(crudos).filter((c) => c.toLowerCase() !== correo.toLowerCase());
+  // `correos` se guarda SIEMPRE, aunque quede vacío: una lista vacía es la forma de decir
+  // "esta marca ya no tiene correos" y así no se hereda otra vez el de MARCAS_BASE.
+  guardadas[marca] = Object.assign({}, previa, { correos: quedan, correo: quedan[0] || "" });
+  await new Promise((res) => chrome.storage.local.set({ marcas_usuario: guardadas }, res));
+}
+
+// Enseña (o esconde) la fila que pregunta si de verdad se quita el correo elegido.
+function mostrar_pregunta_de_quitar(visible) {
+  const fila = $("fila_quitar_correo");
+  if (visible) {
+    const correo = String($("sel_correo_marca").value || "").trim();
+    if (!correo) return;
+    $("pregunta_de_quitar").textContent = "¿Quitar " + correo + "?";
+    $("pregunta_de_quitar").title = correo;   // la línea se recorta con "…"
+    fila.style.display = "";
+  } else {
+    fila.style.display = "none";
+  }
+}
+
+async function confirmar_quitar_correo() {
+  const marca = $("sel_marca").value;
+  const correo = String($("sel_correo_marca").value || "").trim();
+  if (!marca || !correo) { mostrar_pregunta_de_quitar(false); return; }
+  const era_el_principal = ((MARCAS[marca] || {}).correos || [])[0] === correo;
+  await quitar_correo_de_marca(marca, correo);
+  MARCAS = await obtener_marcas();          // la lista en memoria se queda al día
+  refrescar_correos_de_marca();
+  mostrar_pregunta_de_quitar(false);
+  const quedan = (MARCAS[marca] || {}).correos || [];
+  mostrar_estado(quedan.length ? "ok" : "aviso",
+    "✓ Quitado <b>" + escapar_html(correo) + "</b> de «" + escapar_html(marca) + "»." +
+    (quedan.length
+      ? (era_el_principal ? " Ahora el principal es <b>" + escapar_html(quedan[0]) + "</b>." : "")
+      : " Esta marca se quedó <b>sin correos</b>: agrégale uno con el + antes de denunciar."));
+}
+
 async function guardar_nuevo_correo() {
   const marca = $("sel_marca").value;
   const nuevo = String($("caja_nuevo_correo").value || "").trim();
@@ -291,10 +344,19 @@ async function guardar_nuevo_correo() {
 
 $("sel_red").addEventListener("change", refrescar_formularios);
 $("sel_form").addEventListener("change", pintar_buzon_destino);
-$("sel_marca").addEventListener("change", () => { mostrar_caja_de_nuevo_correo(false); refrescar_correos_de_marca(); });
+$("sel_marca").addEventListener("change", () => {
+  mostrar_caja_de_nuevo_correo(false);
+  mostrar_pregunta_de_quitar(false);   // la pregunta era de la marca anterior
+  refrescar_correos_de_marca();
+});
+// Cambiar de correo también cierra la pregunta: preguntaba por el de antes.
+$("sel_correo_marca").addEventListener("change", () => mostrar_pregunta_de_quitar(false));
+$("boton_quitar_correo").addEventListener("click", () => { mostrar_caja_de_nuevo_correo(false); mostrar_pregunta_de_quitar(true); });
+$("boton_cancelar_quitar").addEventListener("click", () => mostrar_pregunta_de_quitar(false));
+$("boton_confirmar_quitar").addEventListener("click", confirmar_quitar_correo);
 $("tipo_formulario").addEventListener("change", refrescar_redes);
 $("tipo_correo").addEventListener("change", refrescar_redes);
-$("boton_mostrar_nuevo_correo").addEventListener("click", () => mostrar_caja_de_nuevo_correo(true));
+$("boton_mostrar_nuevo_correo").addEventListener("click", () => { mostrar_pregunta_de_quitar(false); mostrar_caja_de_nuevo_correo(true); });
 $("boton_cancelar_correo").addEventListener("click", () => mostrar_caja_de_nuevo_correo(false));
 $("boton_guardar_correo").addEventListener("click", guardar_nuevo_correo);
 // Enter dentro de la caja = pulsar "Agregar" (no hay formulario que enviar).

@@ -132,10 +132,19 @@ async function autorelleno(tabId, pasos, opts) {
     await dormir(2500);
   }
   if (AUTORRELLENO[tabId] === estado) delete AUTORRELLENO[tabId];
-  // Solo al COMPLETARSE (no por cancelación ni por agotar el tiempo) y si la red lo permite:
-  // capturar el comprobante y enviar solo (con la cuenta atrás de 5 s).
+  // Al COMPLETARSE y si la red lo permite: enviar solo (con la cuenta atrás de 5 s).
+  // enviarFormulario ya captura el comprobante antes de pulsar Enviar.
   if (completado && opts.autoenviar && !estado.cancelar) {
     try { await enviarFormulario(tabId, opts.marca || "", opts.enviarLabel); } catch (e) { /* el usuario puede enviar a mano */ }
+    return;
+  }
+  // EN CUALQUIER OTRO CASO se captura igual: red con captcha, tiempo agotado o parada.
+  // La captura es la prueba de la denuncia y no puede depender de que la red permita
+  // autoenvío ni de que el formulario quedara perfecto (antes solo se capturaba en el
+  // caso de autoenvío completado, así que en TikTok con captcha no salía comprobante).
+  // Si se canceló porque la pestaña se cerró, guardarComprobante devuelve false y ya está.
+  if (!estado.cancelar) {
+    try { await activarPestana(tabId); await guardarComprobante(tabId); } catch (e) { /* sin comprobante: el usuario tiene el botón 📸 */ }
   }
 }
 
@@ -404,7 +413,13 @@ async function enviarFormulario(tabId, marca, enviarLabel) {
 // Formulario NO progresivo ya rellenado: si faltan campos requeridos, avisa; si no, envía.
 async function finalizarEnvio(tabId, marca, enviarLabel, faltan) {
   if (faltan && faltan.length) {
-    ctxAvisar(tabId, "Denuncias RS: para «" + marca + "» faltan datos (" + faltan.join(", ") + "). Complétalos y pulsa Enviar tú.", true);
+    // SIEMPRE se captura el comprobante, aunque falten campos: la captura es la prueba de
+    // la denuncia y el usuario la necesita igual (antes esto se salía sin capturar, y como
+    // casi siempre falta algún campo, parecía que la extensión había dejado de capturar).
+    await activarPestana(tabId);
+    await guardarComprobante(tabId);
+    ctxAvisar(tabId, "Denuncias RS: para «" + marca + "» faltan datos (" + faltan.join(", ") +
+      "). Complétalos y pulsa Enviar tú. El comprobante ya se capturó.", true);
     return;
   }
   await enviarFormulario(tabId, marca, enviarLabel);
