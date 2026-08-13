@@ -432,6 +432,7 @@ async function APLICAR(pasos, opciones) {
             return false;
           };
           const casaAlguna = (c) => kws.some((kw) => casa(c, kw));
+          const excluirKws = (p.excluir || "").split("|").map(norm).filter(Boolean);
           // Un TÍTULO de campo es corto y no es una frase acabada; un párrafo explicativo
           // largo que termina en punto es PROSA y no rotula la caja que tenga al lado.
           const esProsa = (t) => { const s = (t || "").trim(); return s.length > 90 && /[.!?]$/.test(s); };
@@ -487,6 +488,17 @@ async function APLICAR(pasos, opciones) {
                 let ps = nodo.previousElementSibling, j = 0;
                 while (ps && j < 3) { niveles.push({ t: ps.textContent || "", n: k + 1, el: ps }); ps = ps.previousElementSibling; j++; }
                 nodo = nodo.parentElement; k++;
+              }
+              // EXCLUIR: palabras que descartan el campo aunque su rótulo case. Hace falta
+              // cuando una etiqueta corta es PARTE de otra más larga: en Cloudflare,
+              // "Address" casa también con "Your email address" y "Confirm email address",
+              // y como esas ya están llenas se daba el paso por hecho y la dirección de
+              // verdad quedaba VACÍA. Solo se mira el rótulo CERCANO (niveles 0 y 1): más
+              // arriba está el formulario entero y descartaría cualquier cosa.
+              if (excluirKws.length) {
+                const cerca = niveles.filter((x) => x.n <= 1)
+                  .map((x) => x.el ? textoNorm(x.el) : norm(x.t)).join(" ");
+                if (excluirKws.some((kw) => cerca.indexOf(kw) >= 0)) continue;
               }
               let dist = -1;
               for (let n = 0; n < niveles.length && dist < 0; n++) {

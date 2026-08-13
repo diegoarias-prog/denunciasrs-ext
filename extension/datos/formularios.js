@@ -25,6 +25,43 @@
     return { nom: p[0] || marca, ape: p.length > 1 ? p.slice(1).join(" ") : "" };
   }
 
+  // ==========================================================================
+  //  NOMBRE DE LA PERSONA QUE DENUNCIA (no el de la marca)
+  //  Formularios como el de Cloudflare piden "Your full name" y "Digital
+  //  signature": ahí va quien firma, no la marca. Se busca por el CORREO elegido
+  //  en window.PERSONAS_POR_CORREO (datos/marcas.js) y, si no está, se deduce de
+  //  lo que hay antes de la @ partiendo por punto, guion o guion bajo.
+  //  Si ni eso da un nombre razonable se devuelve vacío, y quien llama decide
+  //  (nunca se rellena con la marca: seria firmar con quien no es).
+  // ==========================================================================
+  function personaDeCorreo(correo) {
+    var c = String(correo || "").trim().toLowerCase();
+    var tabla = window.PERSONAS_POR_CORREO || {};
+    if (Object.prototype.hasOwnProperty.call(tabla, c)) {
+      var f = tabla[c];
+      return { nom: f.nom || "", ape: f.ape || "", completo: ((f.nom || "") + " " + (f.ape || "")).trim() };
+    }
+    var local = c.split("@")[0] || "";
+    if (!local) return { nom: "", ape: "", completo: "" };
+    var partes = local.split(/[._-]+/).filter(Boolean).map(function (t) {
+      return t.charAt(0).toUpperCase() + t.slice(1);
+    });
+    if (!partes.length) return { nom: "", ape: "", completo: "" };
+    return { nom: partes[0], ape: partes.slice(1).join(" "), completo: partes.join(" ") };
+  }
+
+  // Navegador y sistema, para los formularios que preguntan el "User agent" (Cloudflare
+  // lo pide para saber dónde se vio el abuso). Se lee del navegador REAL, no se inventa.
+  function navegadorYSistema() {
+    try {
+      var ua = (self.navigator && self.navigator.userAgent) || "";
+      var chrome = (ua.match(/Chrome\/(\d+)/) || [])[1];
+      var so = /Windows/.test(ua) ? "Windows" : /Macintosh/.test(ua) ? "macOS" : /Linux/.test(ua) ? "Linux" : "";
+      if (!chrome && !so) return "";
+      return (chrome ? "Chrome/" + chrome : "") + (chrome && so ? " " : "") + so;
+    } catch (e) { return ""; }
+  }
+
   // Une la versión inglesa (la que se envía) y la española (referencia) de un correo.
   function bilingue(en, es) {
     return { to: en.to, asunto: en.asunto, asunto_es: es.asunto, cuerpo: en.cuerpo, cuerpo_es: es.cuerpo };
@@ -1184,40 +1221,54 @@
     cf_dmca: {
       red: "Cloudflare", nombre: "Derechos de autor (DMCA)", cat: "cf_dmca",
       url: "https://abuse.cloudflare.com/dmca",
-      manual: "Cloudflare pide una FIRMA electronica (escribe tu nombre) y resolver su captcha. Revisa que el dominio denunciado y los enlaces esten completos antes de enviar.",
+      manual: "Marca TÚ la casilla «Verifique que es un ser humano» (es de Cloudflare y va en su " +
+              "propio marco: la extensión no puede tocarla). Revisa los enlaces denunciados y pulsa Submit.",
       construirPlan: function (ctx) {
         var marca = ctx.marca, d = ctx.datos;
-        var repres = /seguridadmaxima\.net/i.test(d.correo || "");
-        var quien = repres ? "Security Maximum in Computer Networks" : marca;
-        var sitio = (d.sitio || "").trim();
+        // OJO: el nombre y la FIRMA son de la PERSONA que denuncia, no de la marca.
+        // Antes salía "Aki" en los dos y la denuncia quedaba firmada por quien no es.
+        var persona = personaDeCorreo(d.correo);
+        var firmante = persona.completo;            // vacío si el correo no dice quién es
+        var pais = (d.pais || "").trim();
+        var ua = navegadorYSistema();
         return { url: this.url, manual: this.manual, pasos: [
-          // --- Quien denuncia ---
-          { tipo: "fillLabel", label: "your name|full name|first and last name|nombre completo", valor: quien, reintentos: 4 },
-          { tipo: "fillLabel", label: "your email|email address|e-mail|correo electronico", valor: d.correo || "" },
-          { tipo: "fillLabel", label: "company|organization|empresa|organizacion", valor: quien, opcional: true },
-          { tipo: "fillLabel", label: "title|job title|cargo", valor: "Brand Protection", opcional: true },
-          { tipo: "fillLabel", label: "telephone|phone number|telefono", valor: d.telefono || "", opcional: true },
-          { tipo: "selectPais", label: "country|pais", valor: d.pais || "", opcional: true },
-          // --- Quien es el titular de los derechos ---
-          { tipo: "fillLabel", label: "copyright holder|rights holder|owner of the copyright|titular de los derechos", valor: marca, opcional: true },
-          { tipo: "selectLabel", label: "relationship|are you the copyright owner|on behalf of|en representacion",
-            opcion: repres ? "authorized|agent|behalf" : "owner|myself|titular", opcional: true },
-          // --- Que se denuncia ---
-          { tipo: "fillLabel", label: "original work|copyrighted work|description of the work|obra original|descripcion de la obra",
-            valor: ctx.justif, opcional: true },
-          { tipo: "fillLabel", label: "where.*original|url.*original work|link to the original|enlace a la obra original",
-            valor: sitio, opcional: true },
-          // Las URL denunciadas van TODAS en una caja (Cloudflare pide una por linea).
-          { tipo: "fillUrlsUnaCaja",
-            label: "infringing|urls? at issue|allegedly infringing|reported urls|enlaces? denunciad",
-            separador: "\n", opcional: true },
-          { tipo: "fillLabel", label: "description|additional information|comments|explain|detalles|informacion adicional",
-            valor: ctx.justif, opcional: true },
-          // --- Declaraciones y firma ---
-          { tipo: "checkLabel", texto: "good faith|buena fe", opcional: true },
-          { tipo: "checkLabel", texto: "penalty of perjury|bajo pena de perjurio", opcional: true },
-          { tipo: "checkLabel", texto: "accurate|exacta|veraz", opcional: true },
-          { tipo: "fillLabel", label: "signature|firma|type your name|electronic signature", valor: quien, opcional: true }
+          // ---- Quién denuncia (rótulos EXACTOS del formulario) ----
+          { tipo: "fillLabel", label: "your full name", valor: firmante, reintentos: 4 },
+          // El titular de los derechos SÍ es la marca.
+          { tipo: "fillLabel", label: "copyright holder's full name|copyright holders full name|copyright holder", valor: marca },
+          { tipo: "fillLabel", label: "your email address", valor: d.correo || "" },
+          // Cloudflare pide el correo DOS veces y no deja enviar si no coinciden.
+          { tipo: "fillLabel", label: "confirm email address|confirm email", valor: d.correo || "" },
+          { tipo: "fillLabel", label: "title", valor: "Phishing - " + marca, opcional: true },
+          { tipo: "fillLabel", label: "company name", valor: marca, opcional: true },
+          { tipo: "fillLabel", label: "telephone|phone", valor: d.telefono || "", opcional: true },
+          // Dirección: la marca no guarda calle ni ciudad, así que en los tres campos va
+          // su PAÍS (es lo que el usuario pidió y es información cierta, no inventada).
+          // excluir "email": "address" casa tambien con "Your email address" y
+          // "Confirm email address", que ya estan llenas, y la direccion se quedaba vacia.
+          { tipo: "fillLabel", label: "address", excluir: "email", valor: pais },
+          { tipo: "fillLabel", label: "city", valor: pais },
+          { tipo: "fillLabel", label: "state / province|state/province|state / province|state|province", valor: pais },
+          // Los dos desplegables de país. El de "Country" va PRIMERO en la página, así que
+          // se busca por "country" a secas; el otro por su rótulo completo.
+          { tipo: "selectLabel", label: "country", opcion: pais, opcional: true },
+          { tipo: "selectLabel", label: "reporter current country", opcion: pais, opcional: true },
+          // ---- Qué se denuncia ----
+          // Una URL por línea, como pide el propio campo.
+          // fillUrlsUnaCaja lee las URL de p.urls: hay que pasarselas.
+          { tipo: "fillUrlsUnaCaja", label: "infringing urls|infringing url",
+            urls: (ctx.urls || []), separador: "\n" },
+          { tipo: "fillLabel", label: "describe the original work|original work", valor: ctx.justif },
+          { tipo: "fillLabel", label: "user agent", valor: ua, opcional: true },
+          // ---- Declaración y firma ----
+          // Casilla única de "512(f) acknowledgment, Good faith belief, Authority to act".
+          // Sin ella Cloudflare NO deja enviar.
+          { tipo: "checkLabel", texto: "i understand and agree|understand and agree", reintentos: 4 },
+          { tipo: "fillLabel", label: "digital signature", valor: firmante, reintentos: 4 }
+          // "Please forward my report..." ya vienen marcadas de fábrica: no se tocan.
+          // La casilla "Verifique que es un ser humano" es el widget de Cloudflare y vive
+          // en un marco suyo (challenges.cloudflare.com): ni el content script ni el motor
+          // pueden entrar ahí. La marca el usuario, y es lo único que le queda por hacer.
         ] };
       }
     },
