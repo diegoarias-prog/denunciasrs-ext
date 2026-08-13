@@ -45,3 +45,19 @@ window.MARCAS_BASE = {
 // Correo de la persona: cuando una marca usa este correo, en LinkedIn Derechos de
 // autor el Nombre/Apellidos/Firma van como "Diego"/"Arias" (ver formularios.js).
 window.CORREO_PERSONA = "diegoarias@seguridadmaxima.net";
+
+// ============================================================================
+//  QUIÉN ES LA PERSONA DETRÁS DE CADA CORREO
+//  Hay formularios que piden el nombre de la PERSONA que denuncia, no el de la
+//  marca: "Your full name" y "Digital signature" de Cloudflare, por ejemplo. Si
+//  ahí se pone la marca, la denuncia queda firmada por quien no es.
+//  Como una marca puede tener VARIOS correos de remitente (⚙ Marcas), el nombre
+//  se busca por el CORREO elegido, no por la marca.
+//  Para agregar a alguien: una línea más, con el correo en minúsculas.
+//  Si un correo no está aquí, el nombre se deduce de la parte de antes de la @
+//  (diego.arias@ / diego_arias@ / diego-arias@ -> "Diego Arias").
+// ============================================================================
+window.PERSONAS_POR_CORREO = {
+  "diegoarias@seguridadmaxima.net":     { nom: "Diego", ape: "Arias" },
+  "darias@securesoft-antifraude.com":   { nom: "Diego", ape: "Arias" }
+};
