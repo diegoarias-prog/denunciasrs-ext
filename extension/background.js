@@ -727,6 +727,19 @@ async function ctxArmar(marca, formKey, urlsOverride) {
   return { ctx, form, datos };
 }
 
+// ¿Tenemos permiso de Chrome para escribir en el sitio de ESE formulario? Sin él,
+// executeScript falla con "Cannot access contents of the page..." y no se rellena nada.
+// Desde el service worker NO se puede PEDIR el permiso (Chrome exige un gesto del
+// usuario en una página), así que aquí solo se comprueba: si falta, se avisa y se
+// manda al popup, que sí puede pedirlo.
+async function ctxHayPermisoPara(url) {
+  try {
+    const u = new URL(url);
+    if (u.protocol !== "https:" && u.protocol !== "http:") return true;
+    return await chrome.permissions.contains({ origins: [u.origin + "/*"] });
+  } catch (e) { return true; }   // ante la duda, que lo intente
+}
+
 // El REMITENTE (datos.correo) es el correo de contacto que va en el formulario y el "De:"
 // del correo de denuncia. Desde que una marca puede quedarse SIN correos (se borran todos
 // en ⚙ Marcas) esto podía salir vacío y la denuncia se iba sin forma de contactar a quien
@@ -889,6 +902,19 @@ async function ctxAbrirDenuncia(tabOrigen, marca, formKey, objetivo) {
     return;
   }
   const plan = form.construirPlan(ctx);
+  // Sin permiso sobre ese sitio no se puede rellenar: se abre igual el formulario (para
+  // no perder el viaje) pero se dice CLARO qué hay que hacer, en vez de dejar la página
+  // en blanco sin explicación.
+  const hayPermiso = await ctxHayPermisoPara(plan.url);
+  if (!hayPermiso) {
+    try { await chrome.tabs.create({ url: plan.url, active: true }); } catch (e) {}
+    if (tabOrigen && tabOrigen.id) {
+      ctxAvisar(tabOrigen.id, "Denuncias RS: falta el permiso de Chrome para escribir en " +
+        (new URL(plan.url).host) + ". Abre la extensión en esa pestaña y pulsa «Rellenar formulario» una vez: " +
+        "Chrome te lo pedirá y ya queda dado para siempre.", true);
+    }
+    return;
+  }
   await ctxRegistrarDenuncia(marca, form, urlDen);
   let nueva;
   // active:false: abre la denuncia en una pestaña APARTE en segundo plano para NO sacar
