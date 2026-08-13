@@ -37,6 +37,14 @@
   .fila_del_remitente select, .fila_del_remitente input { flex: 1 1 auto; min-width: 0; }
   .boton_mas { flex: 0 0 auto; width: 30px; height: 29px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; color: #1d4ed8; font-size: 17px; font-weight: 700; line-height: 1; cursor: pointer; }
   .boton_mas:hover { background: #eff6ff; border-color: #1d4ed8; }
+  .boton_mas.quitar { color: #b91c1c; font-size: 13px; }
+  .boton_mas.quitar:hover { background: #fef2f2; border-color: #ef4444; }
+  .boton_mas:disabled { opacity: .4; cursor: default; background: #fff; border-color: #cbd5e1; }
+  /* La pregunta se come el ancho sobrante y recorta el correo largo con "…". */
+  .pregunta_de_quitar { flex: 1 1 auto; min-width: 0; font-size: 12px; color: #991b1b;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .boton_mini.rojo { background: #b91c1c; border-color: #b91c1c; }
+  .boton_mini.rojo:hover { background: #991b1b; }
   .caja_de_correo_nuevo { box-sizing: border-box; padding: 6px 8px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 12px; }
   .caja_de_correo_nuevo:focus { outline: 0; border-color: #1d4ed8; }
   .boton_mini { flex: 0 0 auto; padding: 6px 9px; border: 1px solid #1d4ed8; border-radius: 6px; background: #1d4ed8; color: #fff; font-size: 12px; font-weight: 600; cursor: pointer; }
@@ -93,11 +101,19 @@
   <div class="fila_del_remitente">
     <select id="sel_correo_marca"></select>
     <button type="button" class="boton_mas" id="boton_mostrar_nuevo_correo" title="Agregar otro correo a esta marca">+</button>
+    <button type="button" class="boton_mas quitar" id="boton_quitar_correo" title="Quitar de esta marca el correo elegido">🗑</button>
   </div>
   <div class="fila_del_remitente" id="fila_nuevo_correo" style="display:none;">
     <input type="email" id="caja_nuevo_correo" class="caja_de_correo_nuevo" placeholder="correo@dominio.com" autocomplete="off" maxlength="254">
     <button type="button" class="boton_mini" id="boton_guardar_correo">Agregar</button>
     <button type="button" class="boton_mini gris" id="boton_cancelar_correo" title="Cancelar">✕</button>
+  </div>
+  <!-- Quitar un correo se CONFIRMA antes: es un dato que el usuario escribió y borrarlo
+       de un clic accidental obligaría a volver a teclearlo. -->
+  <div class="fila_del_remitente" id="fila_quitar_correo" style="display:none;">
+    <span class="pregunta_de_quitar" id="pregunta_de_quitar"></span>
+    <button type="button" class="boton_mini rojo" id="boton_confirmar_quitar">Quitar</button>
+    <button type="button" class="boton_mini gris" id="boton_cancelar_quitar" title="Cancelar">✕</button>
   </div>
 
   <div class="bloque_urls">

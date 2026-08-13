@@ -61,6 +61,55 @@
     return t ? (t + "\n\n") : "";
   }
 
+  // ==========================================================================
+  //  AVISOS OFICIALES YA PUBLICADOS POR LA MARCA
+  //  Enlaces donde la propia marca ADVIRTIÓ públicamente de la estafa (su blog,
+  //  sus posts en redes). Son la prueba más fuerte de una denuncia por sitios
+  //  fraudulentos: demuestran que la marca ya desmintió la oferta y que no pagó
+  //  esa publicidad. Se citan en el correo de Cloudflare (puntos 6 y 8).
+  //  Para AGREGAR una marca: añade aquí su entrada con los enlaces reales. Si
+  //  una marca no está, se usan sus perfiles oficiales de ⚙ Marcas y, si tampoco
+  //  hay, el correo deja el hueco MARCADO con [ ... ] en vez de inventar nada.
+  // ==========================================================================
+  //  `web` = la web CORPORATIVA de la marca para este correo. Existe aparte del
+  //  campo `sitio` de ⚙ Marcas porque en varias marcas `sitio` guarda su página
+  //  de Facebook (se usa como perfil oficial), y en una denuncia de dominio
+  //  fraudulento hay que enseñar el dominio legítimo, no una red social.
+  var AVISOS_OFICIALES = {
+    "Banco Industrial Guatemala": {
+      web: "https://www.corporacionbi.com/gt/bancoindustrial/",
+      avisos: [
+        "https://blog.corporacionbi.com/seguridad/cuidado-con-las-promociones-falsas",
+        "https://www.facebook.com/BancoIndustrial/photos/a.177701498908250/6628425313835804/",
+        "https://www.corporacionbi.com/gt/bancoindustrial/estafas-de-inversion/",
+        "https://www.facebook.com/BancoIndustrial/posts/774884964677711",
+        "https://www.facebook.com/BancoIndustrial/posts/863310599168480",
+        "https://www.linkedin.com/posts/bancoindustrial_juntossiemprehaciaadelante-activity-7199439002540589056-2F6-/"
+      ]
+    }
+  };
+
+  // Web corporativa de la marca: la de la tabla de arriba si la tiene; si no, el
+  // `dominio` de ⚙ Marcas y, como último recurso, su `sitio`.
+  function webOficialDe(marca, d) {
+    var ficha = AVISOS_OFICIALES[marca];
+    if (ficha && ficha.web) return ficha.web;
+    var dom = ((d || {}).dominio || "").trim();
+    if (dom) return /^https?:/i.test(dom) ? dom : ("https://" + dom);
+    return ((d || {}).sitio || "").trim();
+  }
+
+  function avisosOficialesDe(marca, d) {
+    var ficha = AVISOS_OFICIALES[marca];
+    var propios = ficha && ficha.avisos;
+    if (Array.isArray(propios) && propios.length) return propios.slice();
+    // Sin avisos propios: se ofrecen los perfiles oficiales de la marca, que al
+    // menos sirven para identificar cuál es la cuenta auténtica.
+    return [(d || {}).facebook, (d || {}).linkedin, (d || {}).instagram, (d || {}).sitio]
+      .map(function (u) { return (u || "").trim(); })
+      .filter(function (u, i, a) { return u && a.indexOf(u) === i; });
+  }
+
   // Correo de denuncia (propiedad intelectual / suplantación) para una red social,
   // en inglés (lang "en") o español (lang "es"). Correo propio -> "We are [marca]";
   // si usa el de Seguridad Máxima -> "representing". Cita las normas de esa red.
@@ -1113,6 +1162,146 @@
             marca + " solicita la eliminación inmediata de la(s) aplicación(es) publicada(s) en sitios no autorizados, ya que suponen riesgos de seguridad, infracciones de propiedad intelectual y minan la confianza de los usuarios.\n\n" +
             "Por favor, eliminen toda la información relacionada con " + marca + pais + ".\n\n" +
             negrita("Enlace(s) a denunciar (sitio / app no autorizada):") + "\n" + urlsODefault(ctx, "[ Pega aquí el/los enlace(s) a denunciar ]") + "\n\n" +
+            "Saludos,\n" + (repres ? "Seguridad Máxima en Redes Informáticas" : marca) + (d.correo ? "\nContacto: " + d.correo : "") };
+        return bilingue(en, es);
+      }
+    },
+    // ======================================================================
+    //  CLOUDFLARE — formulario WEB de denuncia por derechos de autor (DMCA)
+    //  https://abuse.cloudflare.com/dmca
+    //
+    //  OJO (2026-08-13): Cloudflare protege esta pagina contra el trafico
+    //  automatizado, asi que NO se pudo volcar su DOM ni con descarga directa
+    //  (403) ni con navegador controlado (bloquea Playwright). Por eso el plan
+    //  va TODO por ROTULO visible (fillLabel/selectLabel/checkLabel), en ingles
+    //  —la pagina no se traduce— y con varias redacciones por campo separadas
+    //  por "|": asi cada paso encuentra su caja aunque la redaccion cambie, en
+    //  vez de depender de `name` inventados. Los campos que no aparezcan se
+    //  quedan en FALTAN y salen listados en el informe del popup.
+    //  PENDIENTE: pasar una vez en vivo y pulsar "📋 Copiar informe" para
+    //  cerrar los rotulos exactos y meter la copia fiel en pruebas/.
+    // ======================================================================
+    cf_dmca: {
+      red: "Cloudflare", nombre: "Derechos de autor (DMCA)", cat: "cf_dmca",
+      url: "https://abuse.cloudflare.com/dmca",
+      manual: "Cloudflare pide una FIRMA electronica (escribe tu nombre) y resolver su captcha. Revisa que el dominio denunciado y los enlaces esten completos antes de enviar.",
+      construirPlan: function (ctx) {
+        var marca = ctx.marca, d = ctx.datos;
+        var repres = /seguridadmaxima\.net/i.test(d.correo || "");
+        var quien = repres ? "Security Maximum in Computer Networks" : marca;
+        var sitio = (d.sitio || "").trim();
+        return { url: this.url, manual: this.manual, pasos: [
+          // --- Quien denuncia ---
+          { tipo: "fillLabel", label: "your name|full name|first and last name|nombre completo", valor: quien, reintentos: 4 },
+          { tipo: "fillLabel", label: "your email|email address|e-mail|correo electronico", valor: d.correo || "" },
+          { tipo: "fillLabel", label: "company|organization|empresa|organizacion", valor: quien, opcional: true },
+          { tipo: "fillLabel", label: "title|job title|cargo", valor: "Brand Protection", opcional: true },
+          { tipo: "fillLabel", label: "telephone|phone number|telefono", valor: d.telefono || "", opcional: true },
+          { tipo: "selectPais", label: "country|pais", valor: d.pais || "", opcional: true },
+          // --- Quien es el titular de los derechos ---
+          { tipo: "fillLabel", label: "copyright holder|rights holder|owner of the copyright|titular de los derechos", valor: marca, opcional: true },
+          { tipo: "selectLabel", label: "relationship|are you the copyright owner|on behalf of|en representacion",
+            opcion: repres ? "authorized|agent|behalf" : "owner|myself|titular", opcional: true },
+          // --- Que se denuncia ---
+          { tipo: "fillLabel", label: "original work|copyrighted work|description of the work|obra original|descripcion de la obra",
+            valor: ctx.justif, opcional: true },
+          { tipo: "fillLabel", label: "where.*original|url.*original work|link to the original|enlace a la obra original",
+            valor: sitio, opcional: true },
+          // Las URL denunciadas van TODAS en una caja (Cloudflare pide una por linea).
+          { tipo: "fillUrlsUnaCaja",
+            label: "infringing|urls? at issue|allegedly infringing|reported urls|enlaces? denunciad",
+            separador: "\n", opcional: true },
+          { tipo: "fillLabel", label: "description|additional information|comments|explain|detalles|informacion adicional",
+            valor: ctx.justif, opcional: true },
+          // --- Declaraciones y firma ---
+          { tipo: "checkLabel", texto: "good faith|buena fe", opcional: true },
+          { tipo: "checkLabel", texto: "penalty of perjury|bajo pena de perjurio", opcional: true },
+          { tipo: "checkLabel", texto: "accurate|exacta|veraz", opcional: true },
+          { tipo: "fillLabel", label: "signature|firma|type your name|electronic signature", valor: quien, opcional: true }
+        ] };
+      }
+    },
+    // ======================================================================
+    //  CLOUDFLARE — denuncia por CORREO (abuse@cloudflare.com)
+    //  Cloudflare no aloja el contenido: es el proveedor de CDN/DNS que está
+    //  delante del sitio fraudulento. Se le denuncia para que traslade el aviso
+    //  al hosting real y al titular del dominio (así lo describe su Abuse
+    //  Approach). El texto sale del correo que el usuario ya venía enviando a
+    //  mano; aquí se rellena solo con los datos de la marca elegida.
+    // ======================================================================
+    cf_correo: {
+      red: "Cloudflare", nombre: "Sitio fraudulento / phishing (por correo)", cat: "cf_phishing", tipo: "email",
+      destino: "abuse@cloudflare.com",
+      manual: "Adjunta la CAPTURA del anuncio o del sitio (el correo la menciona). Donde diga [ ... ] pega el/los enlace(s) a denunciar, revisa y envía.",
+      construirEmail: function (ctx) {
+        var marca = ctx.marca, d = ctx.datos, dest = this.destino;
+        var repres = /seguridadmaxima\.net/i.test(d.correo || "");
+        var sitio = webOficialDe(marca, d);   // web corporativa, no su Facebook
+        var avisos = avisosOficialesDe(marca, d);
+        var pols = (window.POLITICAS_GENERALES && window.POLITICAS_GENERALES["Cloudflare"]) || [];
+
+        // Punto 5: el dominio y la web oficial de la marca. Si la marca no tiene
+        // `sitio` en ⚙ Marcas se deja el hueco marcado en vez de inventarlo.
+        var sitioEn = sitio || "[ Paste here the official website of " + marca + " ]";
+        var sitioEs = sitio || "[ Pega aquí el sitio web oficial de " + marca + " ]";
+        // Puntos 6 y 8: avisos oficiales que la marca ya publicó. Si no hay
+        // ninguno guardado, se marca el hueco: son la prueba más fuerte del correo.
+        var avisoEn = avisos.length ? avisos[0] : "[ Paste here the official warning published by " + marca + " ]";
+        var avisoEs = avisos.length ? avisos[0] : "[ Pega aquí el aviso oficial publicado por " + marca + " ]";
+        var listaEn = avisos.length ? avisos.join("\n") : "[ Paste here the links to the official warnings published by " + marca + " ]";
+        var listaEs = avisos.length ? avisos.join("\n") : "[ Pega aquí los enlaces a los avisos oficiales publicados por " + marca + " ]";
+
+        var polEn = pols.length ? "\n\nThis content violates Cloudflare's own policies, including:\n" +
+          pols.map(function (p) { return "- " + p.t + ": " + p.u; }).join("\n") : "";
+        var polEs = pols.length ? "\n\nEste contenido infringe las propias políticas de Cloudflare, incluyendo:\n" +
+          pols.map(function (p) { return "- " + p.t + ": " + p.u; }).join("\n") : "";
+
+        var en = { to: dest,
+          asunto: "Fraudulent / phishing websites impersonating " + marca + " - urgent removal request",
+          cuerpo:
+            "Hello\n\n" +
+            (repres ? "We are Security Maximum in Computer Networks, representing " + marca : "We are " + marca) + "\n\n" +
+            "Our complaint email is: " + (d.correo || "[ Paste here your contact email ]") + "\n\n" +
+            "We request the removal of the following websites for the following reasons:\n\n" +
+            urlsODefault(ctx, "[ Paste here the link(s) you are reporting ]") + "\n\n" +
+            "They are running a malicious campaign against " + marca + ".\n\n" +
+            "These phishing websites are found in malicious Facebook ads. We're sharing a screenshot.\n\n" +
+            "1. They are using the " + marca + " brand to sell services from our company, with which they have no relationship.\n\n" +
+            "2. They are defaming " + marca + " by offering to buy shares and invest in " + marca + ".\n\n" +
+            "3. They are conducting a malicious campaign against " + marca + ", deceiving users into buying shares.\n\n" +
+            "4. The sole purpose of creating the domain was to commit fraud.\n\n" +
+            "5. The domain and our official website are: " + sitioEn + "\n\n" +
+            "6. " + marca + " has reported the publication of investment offers in alleged shares: " + avisoEn + "\n\n" +
+            "7. " + marca + " has not paid for advertising on Facebook to invest in alleged shares.\n\n" +
+            "8. " + marca + " has provided the following information to warn users about this type of malicious publications:\n" +
+            listaEn + "\n\n" +
+            lineaPerfilOficial(d, "Cloudflare", marca, "en") +
+            "Thank you very much for your work and helping us keep the Internet clean of false profiles to create scams" +
+            polEn + "\n\n" +
+            "Sincerely,\n" + (repres ? "Security Maximum in Computer Networks" : marca) + (d.correo ? "\nContact: " + d.correo : "") };
+
+        var es = {
+          asunto: "Sitios fraudulentos / phishing que suplantan a " + marca + " - solicitud urgente de eliminación",
+          cuerpo:
+            "Hola\n\n" +
+            (repres ? "Somos Seguridad Máxima en Redes Informáticas, en representación de " + marca : "Somos " + marca) + "\n\n" +
+            "Nuestro correo de denuncia es: " + (d.correo || "[ Pega aquí tu correo de contacto ]") + "\n\n" +
+            "Solicitamos la eliminación de los siguientes sitios web por las siguientes razones:\n\n" +
+            urlsODefault(ctx, "[ Pega aquí el/los enlace(s) a denunciar ]") + "\n\n" +
+            "Están llevando a cabo una campaña maliciosa contra " + marca + ".\n\n" +
+            "Estos sitios de phishing aparecen en anuncios maliciosos de Facebook. Adjuntamos una captura de pantalla.\n\n" +
+            "1. Están usando la marca " + marca + " para vender servicios de nuestra empresa, con la que no tienen ninguna relación.\n\n" +
+            "2. Están difamando a " + marca + " ofreciendo comprar acciones e invertir en " + marca + ".\n\n" +
+            "3. Están realizando una campaña maliciosa contra " + marca + ", engañando a los usuarios para que compren acciones.\n\n" +
+            "4. El único propósito de la creación del dominio fue cometer fraude.\n\n" +
+            "5. El dominio y nuestro sitio web oficial son: " + sitioEs + "\n\n" +
+            "6. " + marca + " ha denunciado la publicación de ofertas de inversión en supuestas acciones: " + avisoEs + "\n\n" +
+            "7. " + marca + " no ha pagado publicidad en Facebook para invertir en supuestas acciones.\n\n" +
+            "8. " + marca + " ha facilitado la siguiente información para advertir a los usuarios sobre este tipo de publicaciones maliciosas:\n" +
+            listaEs + "\n\n" +
+            lineaPerfilOficial(d, "Cloudflare", marca, "es") +
+            "Muchas gracias por su trabajo y por ayudarnos a mantener Internet limpio de perfiles falsos creados para estafar" +
+            polEs + "\n\n" +
             "Saludos,\n" + (repres ? "Seguridad Máxima en Redes Informáticas" : marca) + (d.correo ? "\nContacto: " + d.correo : "") };
         return bilingue(en, es);
       }
