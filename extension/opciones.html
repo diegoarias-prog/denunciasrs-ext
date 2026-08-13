@@ -97,6 +97,40 @@
   }
   .entrada_de_campo:focus { border-color: #1d4ed8; outline: none; box-shadow: 0 0 0 3px rgba(29,78,216,.12); }
 
+  /* ====== Lista de correos de la marca (varios correos, el 1.º es el principal) ======
+     Este campo ocupa TODA la fila de la rejilla porque cada correo es una fila con
+     su insignia y sus botones; en una sola columna de 280px no cabría bien. */
+  .campo_de_marca.campo_ancho_completo { grid-column: 1 / -1; }
+  .nota_de_correos { font-size: 12px; color: #6b7280; margin: 0 0 8px; line-height: 1.45; }
+  .lista_de_correos { display: flex; flex-direction: column; gap: 8px; }
+  .fila_de_correo { display: flex; align-items: center; gap: 6px; }
+  /* El input se come el ancho sobrante; min-width:0 evita que desborde la rejilla. */
+  .fila_de_correo .entrada_de_correo { flex: 1 1 auto; min-width: 0; }
+  .entrada_de_correo.correo_invalido { border-color: #ef4444; background: #fef2f2; }
+  .entrada_de_correo.correo_invalido:focus { box-shadow: 0 0 0 3px rgba(239,68,68,.12); }
+  /* Hueco de ancho fijo para la insignia: así TODAS las filas quedan alineadas,
+     tengan o no la etiqueta "Principal". */
+  .celda_de_insignia { flex: 0 0 84px; display: flex; justify-content: flex-end; }
+  .insignia_de_principal {
+    font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+    color: #1d4ed8; background: #eff6ff; border: 1px solid #bfdbfe;
+    border-radius: 999px; padding: 3px 8px; white-space: nowrap; user-select: none;
+  }
+  .boton_de_correo {
+    flex: 0 0 auto; width: 32px; height: 34px; padding: 0;
+    border: 1px solid #cbd5e1; border-radius: 6px; background: #fff;
+    color: #374151; font-size: 13px; line-height: 1; cursor: pointer; font-family: inherit;
+  }
+  .boton_de_correo:hover:not(:disabled) { background: #eff6ff; border-color: #1d4ed8; color: #1d4ed8; }
+  .boton_de_correo:focus-visible { outline: none; border-color: #1d4ed8; box-shadow: 0 0 0 3px rgba(29,78,216,.12); }
+  .boton_de_correo:disabled { opacity: .35; cursor: default; }
+  .boton_de_correo.quitar_correo:hover:not(:disabled) { background: #fef2f2; border-color: #ef4444; color: #ef4444; }
+  .pie_de_correos { margin-top: 10px; }
+  .boton_de_marca.agregar_correo {
+    background: #fff; color: #1d4ed8; border: 1px solid #bfdbfe; padding: 7px 13px; font-size: 13px;
+  }
+  .boton_de_marca.agregar_correo:hover { background: #eff6ff; border-color: #1d4ed8; }
+
   /* ====== Botones ====== */
   .boton_de_marca {
     padding: 9px 16px; border: 0; border-radius: 7px;
@@ -129,7 +163,7 @@
   <div class="contenedor_de_marcas">
     <header class="encabezado_de_marcas">
       <h1>Marcas</h1>
-      <p class="subtitulo_de_marcas">Elige una marca del menú desplegable para ver y editar su información: país, correo, teléfono, sitio y los perfiles oficiales por red (TikTok, Facebook, Instagram, X, YouTube, LinkedIn), los enlaces de Play Store / App Store (Apps maliciosas), el dominio (Delisting) y el N.º de registro de la marca comercial. El resto (leyes, códigos, justificación) se genera solo. Lo que cambies se guarda en este navegador al pulsar "Guardar cambios".</p>
+      <p class="subtitulo_de_marcas">Elige una marca del menú desplegable para ver y editar su información: país, correos desde los que se denuncia (puedes guardar VARIOS por marca: el primero de la lista es el principal, el que se usa por defecto como remitente en los formularios y en los correos de denuncia; ordénalos con ↑ y ↓), teléfono, sitio y los perfiles oficiales por red (TikTok, Facebook, Instagram, X, YouTube, LinkedIn), los enlaces de Play Store / App Store (Apps maliciosas), el dominio (Delisting) y el N.º de registro de la marca comercial. El resto (leyes, códigos, justificación) se genera solo. Lo que cambies se guarda en este navegador al pulsar "Guardar cambios".</p>
     </header>
 
     <div class="barra_selector_de_marcas">

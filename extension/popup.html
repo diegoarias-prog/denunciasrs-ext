@@ -3,69 +3,118 @@
 <head>
 <meta charset="UTF-8">
 <style>
-  body { font-family: "Segoe UI", Arial, sans-serif; width: 320px; margin: 0; padding: 14px; color: #1f2937; }
-  h1 { font-size: 15px; margin: 0 0 2px; }
-  .sub { font-size: 11px; color: #6b7280; margin: 0 0 12px; }
-  label { display: block; font-size: 12px; font-weight: 600; margin: 10px 0 3px; }
-  select { width: 100%; padding: 7px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px; background: #fff; }
-  .boton { width: 100%; margin-top: 14px; padding: 10px; border: 0; border-radius: 8px; background: #1d4ed8; color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; }
+  /* El popup tiene que caber de un vistazo: espaciado apretado a propósito, pero
+     sin bajar de 12px en los controles para que se siga leyendo bien. */
+  body { font-family: "Segoe UI", Arial, sans-serif; width: 320px; margin: 0; padding: 12px 14px; color: #1f2937; }
+  h1 { font-size: 14px; margin: 0 0 5px; }
+  label { display: block; font-size: 12px; font-weight: 600; margin: 5px 0 2px; }
+  select { width: 100%; padding: 5px 6px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px; background: #fff; }
+  .boton { width: 100%; margin-top: 8px; padding: 8px; border: 0; border-radius: 8px; background: #1d4ed8; color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; }
+  #boton_capturar { margin-top: 6px; }
   .boton:hover { background: #1741b6; }
   .boton.sec { background: #e5e7eb; color: #111827; }
   .boton.sec:hover { background: #d1d5db; }
   .boton:disabled { background: #9ca3af; color: #fff; cursor: default; }
-  .estado { margin-top: 12px; font-size: 12px; border-radius: 6px; padding: 8px 10px; display: none; }
+  .estado { margin-top: 10px; font-size: 12px; border-radius: 6px; padding: 8px 10px; display: none; }
   .estado.ok { display: block; background: #ecfdf5; color: #065f46; border-left: 3px solid #10b981; }
   .estado.aviso { display: block; background: #fffbeb; color: #92400e; border-left: 3px solid #f59e0b; }
   .estado.error { display: block; background: #fef2f2; color: #991b1b; border-left: 3px solid #ef4444; }
-  .pie { margin-top: 12px; font-size: 11px; text-align: center; }
+  .pie { margin-top: 9px; font-size: 11px; text-align: center; }
   .pie a { color: #1d4ed8; text-decoration: none; }
-  .bloque_urls { margin-top: 12px; padding: 9px 10px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; }
-  .bloque_urls label { margin: 0 0 5px; }
-  .bloque_urls input[type=file] { width: 100%; font-size: 11px; }
-  .caja_url_manual { width: 100%; box-sizing: border-box; margin-bottom: 5px; padding: 6px 8px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 11.5px; }
+
+  /* ---- Cuadro ÚNICO de la denuncia: cómo se denuncia + dónde + qué reporte ---- */
+  .cuadro_de_denuncia { margin-top: 8px; padding: 8px 9px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; }
+  .cuadro_de_denuncia label { margin: 6px 0 3px; }
+  .rotulo_del_cuadro { display: block; font-size: 12px; font-weight: 600; margin: 0 0 4px; }
+  .fila_tipo_de_denuncia { display: flex; gap: 12px; }
+  .cuadro_de_denuncia .fila_tipo_de_denuncia .opcion_de_tipo { display: flex; align-items: center; gap: 5px; margin: 0; font-size: 12px; cursor: pointer; }
+  .opcion_de_tipo input[type=radio] { margin: 0; flex: 0 0 auto; }
+  /* Una sola línea: si el buzón es largo se recorta y el texto completo va en el title. */
+  .linea_buzon_destino { margin: 5px 0 0; font-size: 11px; color: #475569; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* ---- Correo REMITENTE de la marca: select + "+" para agregar otro ---- */
+  .fila_del_remitente { display: flex; align-items: center; gap: 6px; margin-top: 3px; }
+  .fila_del_remitente select, .fila_del_remitente input { flex: 1 1 auto; min-width: 0; }
+  .boton_mas { flex: 0 0 auto; width: 30px; height: 29px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; color: #1d4ed8; font-size: 17px; font-weight: 700; line-height: 1; cursor: pointer; }
+  .boton_mas:hover { background: #eff6ff; border-color: #1d4ed8; }
+  .caja_de_correo_nuevo { box-sizing: border-box; padding: 6px 8px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 12px; }
+  .caja_de_correo_nuevo:focus { outline: 0; border-color: #1d4ed8; }
+  .boton_mini { flex: 0 0 auto; padding: 6px 9px; border: 1px solid #1d4ed8; border-radius: 6px; background: #1d4ed8; color: #fff; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .boton_mini.gris { background: #fff; color: #64748b; border-color: #cbd5e1; }
+  .boton_mini.gris:hover { background: #f1f5f9; }
+
+  /* ---- Enlaces a denunciar: las 2 cajas a mano y el Excel en UN SOLO cuadro ----
+     Antes eran dos cuadros con su rótulo, su estado y su botón cada uno: el doble
+     de alto para decir lo mismo. Ahora hay una única línea de estado. */
+  .bloque_urls { margin-top: 8px; padding: 8px 9px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; }
+  .bloque_urls label { margin: 0 0 4px; }
+  .caja_url_manual { width: 100%; box-sizing: border-box; margin-bottom: 4px; padding: 6px 8px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 12px; }
   .caja_url_manual:focus { outline: 0; border-color: #1d4ed8; }
-  #estado_urls_manuales { font-size: 11px; color: #475569; }
-  .fila_estado_urls { display: flex; align-items: center; justify-content: space-between; margin-top: 6px; gap: 8px; }
-  #estado_urls { font-size: 11px; color: #475569; }
-  .boton_quitar_urls { padding: 3px 9px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; color: #b91c1c; font-size: 11px; cursor: pointer; }
+  .fila_botones_urls { display: flex; align-items: center; gap: 6px; margin-top: 2px; }
+  /* El <input type=file> de serie ocupa media caja con su "Ningún archivo
+     seleccionado": se oculta (sin perder el foco por teclado) y se abre desde el
+     rótulo 📄 Excel, que cabe en la fila junto a los dos botones de limpiar. */
+  .archivo_oculto { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
+  .boton_excel { display: inline-block; margin: 0; padding: 4px 9px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; color: #1d4ed8; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .boton_excel:hover { background: #eff6ff; border-color: #1d4ed8; }
+  .archivo_oculto:focus + .boton_excel { border-color: #1d4ed8; box-shadow: 0 0 0 2px #dbeafe; }
+  .boton_quitar_urls { padding: 4px 9px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; color: #b91c1c; font-size: 12px; cursor: pointer; }
   .boton_quitar_urls:hover { background: #fee2e2; }
+  #estado_urls { display: block; margin-top: 5px; font-size: 11px; color: #475569; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 </style>
 </head>
 <body>
   <h1>Denuncias RS · Autollenado</h1>
-  <p class="sub">Abre el formulario en esta pestaña, elige marca y pulsa Rellenar.</p>
 
-  <label for="sel_red">Red social</label>
-  <select id="sel_red"></select>
-
-  <label for="sel_form">Formulario</label>
-  <select id="sel_form"></select>
+  <div class="cuadro_de_denuncia">
+    <span class="rotulo_del_cuadro">¿Cómo se denuncia?</span>
+    <div class="fila_tipo_de_denuncia">
+      <label class="opcion_de_tipo" for="tipo_formulario">
+        <input type="radio" name="tipo_de_denuncia" value="formulario" id="tipo_formulario" checked> 📝 Por formulario
+      </label>
+      <label class="opcion_de_tipo" for="tipo_correo">
+        <input type="radio" name="tipo_de_denuncia" value="correo" id="tipo_correo"> ✉️ Por correo
+      </label>
+    </div>
+    <label for="sel_red">Red social / plataforma</label>
+    <select id="sel_red"></select>
+    <label for="sel_form">Reporte</label>
+    <select id="sel_form"></select>
+    <!-- Solo se ve en "Por correo": a qué buzón sale (o el aviso de que va vacío). -->
+    <p class="linea_buzon_destino" id="linea_buzon_destino" style="display:none;"></p>
+  </div>
 
   <label for="sel_marca">Marca</label>
   <select id="sel_marca"></select>
 
-  <button class="boton" id="boton_rellenar">Rellenar formulario</button>
-  <button class="boton sec" id="boton_capturar" disabled title="Adjunta una captura de esta pestaña al comprobante de la denuncia en curso">📸 Capturar pantalla</button>
-  <p class="sub" style="margin:6px 0 0;">Atajo: Alt+Shift+S — captura el formulario sin abrir esto (se puede cambiar en chrome://extensions/shortcuts).</p>
+  <!-- Correo REMITENTE: desde cuál de los correos de la marca se hace la denuncia.
+       La caja para escribir uno nuevo NO se ve hasta pulsar el "+". -->
+  <label for="sel_correo_marca">✉️ Denunciar desde</label>
+  <div class="fila_del_remitente">
+    <select id="sel_correo_marca"></select>
+    <button type="button" class="boton_mas" id="boton_mostrar_nuevo_correo" title="Agregar otro correo a esta marca">+</button>
+  </div>
+  <div class="fila_del_remitente" id="fila_nuevo_correo" style="display:none;">
+    <input type="email" id="caja_nuevo_correo" class="caja_de_correo_nuevo" placeholder="correo@dominio.com" autocomplete="off" maxlength="254">
+    <button type="button" class="boton_mini" id="boton_guardar_correo">Agregar</button>
+    <button type="button" class="boton_mini gris" id="boton_cancelar_correo" title="Cancelar">✕</button>
+  </div>
 
   <div class="bloque_urls">
-    <label for="caja_url_1">🔗 URL(s) a denunciar (a mano)</label>
+    <label for="caja_url_1">🔗 Enlaces a denunciar</label>
     <input type="url" id="caja_url_1" class="caja_url_manual" placeholder="https://… (URL 1)">
     <input type="url" id="caja_url_2" class="caja_url_manual" placeholder="https://… (URL 2, opcional)">
-    <div class="fila_estado_urls">
-      <span id="estado_urls_manuales">Vacías: se usará la lista del Excel</span>
-      <button type="button" class="boton_quitar_urls" id="quitar_urls_manuales">Borrar</button>
+    <div class="fila_botones_urls">
+      <input type="file" id="archivo_urls" accept=".xlsx" class="archivo_oculto">
+      <label class="boton_excel" for="archivo_urls" title="Cargar una lista de enlaces desde un Excel (.xlsx)">📄 Excel</label>
+      <button type="button" class="boton_quitar_urls" id="quitar_urls_manuales" title="Vacía las dos cajas de enlaces de arriba">Borrar</button>
+      <button type="button" class="boton_quitar_urls" id="quitar_urls" title="Quita la lista de enlaces cargada del Excel">Quitar Excel</button>
     </div>
+    <span id="estado_urls">Sin enlaces: escríbelos arriba o carga un Excel</span>
   </div>
 
-  <div class="bloque_urls">
-    <label for="archivo_urls">📄 Cargar lista de URLs (Excel)</label>
-    <input type="file" id="archivo_urls" accept=".xlsx">
-    <div class="fila_estado_urls">
-      <span id="estado_urls">Sin lista cargada</span>
-      <button type="button" class="boton_quitar_urls" id="quitar_urls">Quitar</button>
-    </div>
-  </div>
+  <button class="boton" id="boton_rellenar">Rellenar formulario</button>
+  <button class="boton sec" id="boton_capturar" disabled title="Adjunta una captura de esta pestaña al comprobante de la denuncia en curso. Atajo: Alt+Shift+S, captura sin abrir este popup (se puede cambiar en chrome://extensions/shortcuts).">📸 Capturar pantalla</button>
 
   <div class="estado" id="estado"></div>
 

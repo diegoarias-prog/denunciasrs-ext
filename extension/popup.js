@@ -18,6 +18,59 @@ const REDES_AUTOENVIO_POPUP = ["Facebook", "Instagram", "WhatsApp", "TikTok", "G
   } catch (e) { /* la página no admite content scripts: nada que activar */ }
 })();
 
+// Claves que NUNCA se copian a un objeto de marca: un nombre de marca o un campo
+// llamado así contaminaría el prototipo de todos los objetos. Mismo guardián que
+// usa background.js (se replica en vez de compartir archivo: son tres cargas).
+function clave_peligrosa(k) {
+  return k === "__proto__" || k === "constructor" || k === "prototype";
+}
+
+// Limpia una lista de correos EXACTAMENTE igual que ⚙ Marcas (depurar_lista_de_correos
+// de opciones.js): parte los que vengan pegados con coma o punto y coma, quita los
+// caracteres de control —un "\r\n" en el remitente permitiría colar cabeceras de correo—,
+// recorta, tira los vacíos y quita los repetidos SIN distinguir mayúsculas conservando el
+// PRIMERO (para no cambiarle al usuario cuál es el principal).
+// Las tres implementaciones tienen que coincidir: cuando aquí no se deduplicaba, una marca
+// vieja con el mismo correo repetido con otra capitalización lo mostraba dos veces en el
+// desplegable del remitente mientras ⚙ Marcas lo enseñaba una sola vez.
+function depurar_correos_de_marca(lista) {
+  const vistos = new Set();   // Set y no objeto: un correo "__proto__" no debe romper nada
+  const limpia = [];
+  (lista || []).forEach((crudo) => {
+    String(crudo == null ? "" : crudo).split(/[,;]+/).forEach((trozo) => {
+      const texto = trozo.replace(/[\x00-\x1f\x7f]/g, "").trim();
+      if (!texto) return;
+      const llave = texto.toLowerCase();
+      if (vistos.has(llave)) return;
+      vistos.add(llave);
+      limpia.push(texto);
+    });
+  });
+  return limpia;
+}
+
+// Deja la marca con `correos` (array con TODOS sus correos, el 1.º es el principal) y
+// `correo` (string, el principal) siempre coherentes:
+//   - Si `correos` NO EXISTE (MARCAS_BASE y las marcas guardadas antes de que se
+//     creara el campo), se deriva partiendo `correo` por comas: así el código viejo
+//     sigue funcionando y el selector del popup encuentra la lista igual.
+//   - Si EXISTE, manda ella aunque esté vacía. Vacía = el usuario borró todos los
+//     correos en ⚙ Marcas, y entonces tampoco se hereda el `correo` de la base: si
+//     se heredara, el popup y el menú del clic derecho volverían a ofrecer como
+//     remitente un correo que el usuario acaba de borrar.
+//   - Si la lista tiene datos, el principal es SIEMPRE el primero. Es la regla que
+//     enseña ⚙ Marcas (la insignia «Principal» va en la primera fila) y la que aplica
+//     al guardar. Antes aquí se respetaba cualquier `correo` que estuviera en la lista,
+//     y un registro tocado a mano (o traído de otra parte) con correo = el segundo hacía
+//     que la denuncia se firmara con un correo distinto del que el panel presenta como
+//     principal. Las tres implementaciones tienen que decidirlo igual.
+// En los dos casos la lista pasa por depurar_correos_de_marca (sin repetidos).
+function normalizar_correos_de_marca(o) {
+  o.correos = depurar_correos_de_marca(Array.isArray(o.correos) ? o.correos : [o.correo]);
+  o.correo = o.correos[0] || "";
+  return o;
+}
+
 // --- Marcas: base + las editadas/agregadas en Opciones − las eliminadas ---
 async function obtener_marcas() {
   const d = await new Promise((res) =>
@@ -29,13 +82,24 @@ async function obtener_marcas() {
   // se heredan de MARCAS_BASE en vez de perderse.
   const todas = Object.assign({}, window.MARCAS_BASE);
   Object.keys(guardadas).forEach((m) => {
+    if (clave_peligrosa(m)) return;
     const base = window.MARCAS_BASE[m] || {}, g = guardadas[m] || {}, o = Object.assign({}, base);
-    // Lo guardado pisa a la base, PERO si el usuario lo dejó vacío se conserva la base
-    // (así no se pierde el teléfono/links/etc. agregados después en una copia vieja).
-    Object.keys(g).forEach((k) => { if (g[k] !== "" && g[k] != null) o[k] = g[k]; else if (!(k in o)) o[k] = g[k]; });
+    Object.keys(g).forEach((k) => {
+      if (clave_peligrosa(k)) return;
+      // `correos` es una LISTA que el usuario ordena y puede DEJAR VACÍA en ⚙ Marcas.
+      // Si el campo está guardado se respeta tal cual: aquí no vale la regla de abajo
+      // ("lo vacío no pisa"), porque una lista vacía es una decisión, no un descuido,
+      // y con la otra regla un correo borrado reaparecía solo.
+      if (k === "correos") { o.correos = g[k]; return; }
+      // El resto de campos sí: si el usuario lo dejó vacío se conserva la base (así no
+      // se pierde el teléfono/links/etc. agregados después en una copia vieja).
+      if (g[k] !== "" && g[k] != null) o[k] = g[k]; else if (!(k in o)) o[k] = g[k];
+    });
     todas[m] = o;
   });
   eliminadas.forEach((n) => delete todas[n]);
+  // Todas las marcas (base incluida) salen de aquí con la lista `correos` lista para usar.
+  Object.keys(todas).forEach((m) => { todas[m] = normalizar_correos_de_marca(Object.assign({}, todas[m])); });
   return todas;
 }
 
@@ -45,6 +109,24 @@ function mostrar_estado(clase, html) {
   const e = $("estado");
   e.className = "estado " + clase;
   e.innerHTML = html;
+}
+
+// mostrar_estado pinta con innerHTML: TODO dato del usuario (marca, correo escrito…)
+// que se meta ahí tiene que pasar antes por aquí.
+function escapar_html(s) {
+  return String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+// Correo válido: solo los caracteres que de verdad aparecen en una dirección (nada de
+// <, >, comillas ni espacios) y como mucho 254 caracteres, el máximo que admite el
+// estándar. Cerrado a propósito: lo escrito aquí se guarda y luego se usa como
+// remitente en formularios y correos.
+const PATRON_CORREO = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
+const LARGO_MAXIMO_CORREO = 254;
+
+function correo_valido(c) {
+  const t = String(c == null ? "" : c).trim();
+  return t.length > 0 && t.length <= LARGO_MAXIMO_CORREO && PATRON_CORREO.test(t);
 }
 
 function llenar_select(sel, items, placeholder) {
@@ -59,18 +141,35 @@ function llenar_select(sel, items, placeholder) {
   });
 }
 
-function redes_disponibles() {
+// ===========================================================================
+//  CÓMO SE DENUNCIA: "formulario" (se rellena en la página) o "correo" (se genera
+//  un borrador de email). Es lo único que decide qué redes y qué reportes se ven:
+//  una sola caja, sin cuadros duplicados.
+// ===========================================================================
+function tipo_de_denuncia() {
+  return $("tipo_correo").checked ? "correo" : "formulario";
+}
+
+// ¿Este reporte es del tipo elegido? Los de tipo "email" son los que se envían por
+// correo; el resto se rellenan en la página del formulario.
+function form_es_del_tipo(f, tipo) {
+  if (!f) return false;
+  return tipo === "correo" ? f.tipo === "email" : f.tipo !== "email";
+}
+
+function redes_disponibles(tipo) {
   const reds = [];
   Object.keys(window.FORMULARIOS).forEach((k) => {
     const f = window.FORMULARIOS[k];
+    if (!form_es_del_tipo(f, tipo)) return;
     if (reds.indexOf(f.red) < 0) reds.push(f.red);
   });
   return reds.sort((a, b) => a.localeCompare(b, "es"));
 }
 
-function formularios_de_red(red) {
+function formularios_de_red(red, tipo) {
   return Object.keys(window.FORMULARIOS)
-    .filter((k) => window.FORMULARIOS[k].red === red)
+    .filter((k) => window.FORMULARIOS[k].red === red && form_es_del_tipo(window.FORMULARIOS[k], tipo))
     .map((k) => ({ value: k, texto: window.FORMULARIOS[k].nombre }));
 }
 
@@ -78,16 +177,128 @@ let MARCAS = {};
 
 async function inicializar() {
   MARCAS = await obtener_marcas();
-  llenar_select($("sel_red"), redes_disponibles().map((r) => ({ value: r, texto: r })));
   llenar_select($("sel_marca"), Object.keys(MARCAS).sort().map((m) => ({ value: m, texto: m })));
+  refrescar_redes();
+  refrescar_correos_de_marca();
+}
+
+// Repuebla las redes con las del tipo elegido. Si la red que estaba puesta también
+// existe en el otro tipo (p. ej. Facebook, que tiene formularios Y correo), se
+// conserva: cambiar de "por formulario" a "por correo" no debería mover de sitio.
+function refrescar_redes() {
+  const tipo = tipo_de_denuncia();
+  const antes = $("sel_red").value;
+  const redes = redes_disponibles(tipo);
+  llenar_select($("sel_red"), redes.map((r) => ({ value: r, texto: r })));
+  if (antes && redes.indexOf(antes) >= 0) $("sel_red").value = antes;
   refrescar_formularios();
+  // El botón principal dice lo que va a pasar de verdad al pulsarlo.
+  $("boton_rellenar").textContent = (tipo === "correo") ? "✉ Generar correo" : "Rellenar formulario";
 }
 
 function refrescar_formularios() {
-  llenar_select($("sel_form"), formularios_de_red($("sel_red").value));
+  llenar_select($("sel_form"), formularios_de_red($("sel_red").value, tipo_de_denuncia()));
+  pintar_buzon_destino();
+}
+
+// Línea pequeña bajo el reporte por correo: a qué buzón sale. Hay reportes cuyo 'destino'
+// va vacío a propósito (la plataforma no publica un correo de denuncia): se dice claro
+// para que el usuario sepa que tiene que escribir el "Para" al enviar. En modo formulario
+// no aplica y la línea no ocupa sitio.
+function pintar_buzon_destino() {
+  const e = $("linea_buzon_destino");
+  if (!e) return;
+  if (tipo_de_denuncia() !== "correo") { e.style.display = "none"; e.textContent = ""; return; }
+  const f = window.FORMULARIOS[$("sel_form").value];
+  const destino = (f && f.destino) ? String(f.destino).trim() : "";
+  const t = destino ? ("Va a: " + destino) : "El 'Para' va vacío: lo escribes al enviar";
+  e.textContent = t;
+  e.title = t;          // la línea se recorta con "…"; el buzón completo, en el title
+  e.style.display = "";
+}
+
+// ===========================================================================
+//  CORREO REMITENTE: desde cuál de los correos de la marca se hace la denuncia.
+//  Una marca puede tener varios guardados (⚙ Marcas): `correos` es la lista en
+//  orden y el 1.º es el principal. Con el botón "+" se agrega otro sin salir del
+//  popup; la caja para escribirlo solo aparece al pulsarlo.
+// ===========================================================================
+function refrescar_correos_de_marca() {
+  const sel = $("sel_correo_marca");
+  if (!sel) return;
+  const datos = MARCAS[$("sel_marca").value] || {};
+  const correos = Array.isArray(datos.correos) ? datos.correos.filter(Boolean) : [];
+  if (!correos.length) { llenar_select(sel, [], "(sin correo guardado — usa el +)"); return; }
+  llenar_select(sel, correos.map((c) => ({ value: c, texto: c })));
+}
+
+// Datos de la marca para la denuncia en curso: una COPIA con el correo elegido en el
+// selector. Nunca se modifica MARCAS (el cambio vale solo para esta denuncia).
+function datos_de_la_marca(marca) {
+  const datos = Object.assign({}, MARCAS[marca] || {});
+  const sel = $("sel_correo_marca");
+  const elegido = sel ? String(sel.value || "").trim() : "";
+  if (elegido) datos.correo = elegido;
+  return datos;
+}
+
+function mostrar_caja_de_nuevo_correo(visible) {
+  $("fila_nuevo_correo").style.display = visible ? "" : "none";
+  if (visible) $("caja_nuevo_correo").focus(); else $("caja_nuevo_correo").value = "";
+}
+
+// Agrega el correo a ESA marca dentro de `marcas_usuario`, con la misma semántica que
+// usa ⚙ Marcas: `correos` es la lista en orden y `correo` es siempre el primero. Se lee
+// el diccionario guardado, se toca solo esa marca y se vuelve a escribir entero, para no
+// pisar lo que el usuario tenga en las demás.
+// La lista de partida sale del registro RECIÉN LEÍDO, no de MARCAS (que es la foto de
+// cuando se abrió el popup): así no se deshace lo que ⚙ Marcas u otra ventana hayan
+// guardado mientras este popup estaba abierto. Si esa marca todavía no está en
+// marcas_usuario se parte del `correo` de MARCAS_BASE (puede traer varios con comas);
+// si está y tiene el campo vacío, se respeta vacío (el usuario lo borró).
+async function agregar_correo_a_marca(marca, correo) {
+  if (clave_peligrosa(marca)) return;
+  const g = await new Promise((res) => chrome.storage.local.get(["marcas_usuario"], res));
+  const guardadas = g.marcas_usuario || {};
+  const previa = guardadas[marca] || {};
+  const crudos = Array.isArray(previa.correos)
+    ? previa.correos
+    : [("correo" in previa) ? previa.correo : (window.MARCAS_BASE[marca] || {}).correo];
+  const actuales = depurar_correos_de_marca(crudos);
+  if (!actuales.some((c) => c.toLowerCase() === correo.toLowerCase())) actuales.push(correo);
+  guardadas[marca] = Object.assign({}, previa, { correos: actuales, correo: actuales[0] || "" });
+  await new Promise((res) => chrome.storage.local.set({ marcas_usuario: guardadas }, res));
+}
+
+async function guardar_nuevo_correo() {
+  const marca = $("sel_marca").value;
+  const nuevo = String($("caja_nuevo_correo").value || "").trim();
+  if (!marca) { mostrar_estado("aviso", "Elige primero la <b>marca</b> a la que se le agrega el correo."); return; }
+  if (!correo_valido(nuevo)) {
+    mostrar_estado("aviso", "Ese correo no parece válido: <b>" + escapar_html(nuevo) + "</b>.");
+    return;
+  }
+  const yaEstaba = ((MARCAS[marca] || {}).correos || []).some((c) => c.toLowerCase() === nuevo.toLowerCase());
+  await agregar_correo_a_marca(marca, nuevo);
+  MARCAS = await obtener_marcas();          // la lista en memoria se queda al día
+  refrescar_correos_de_marca();
+  $("sel_correo_marca").value = nuevo;      // el nuevo queda elegido para esta denuncia
+  mostrar_caja_de_nuevo_correo(false);
+  mostrar_estado("ok", yaEstaba
+    ? "Ese correo ya estaba en «" + escapar_html(marca) + "»: queda elegido como remitente."
+    : "✓ Correo agregado a «" + escapar_html(marca) + "» y elegido como remitente.");
 }
 
 $("sel_red").addEventListener("change", refrescar_formularios);
+$("sel_form").addEventListener("change", pintar_buzon_destino);
+$("sel_marca").addEventListener("change", () => { mostrar_caja_de_nuevo_correo(false); refrescar_correos_de_marca(); });
+$("tipo_formulario").addEventListener("change", refrescar_redes);
+$("tipo_correo").addEventListener("change", refrescar_redes);
+$("boton_mostrar_nuevo_correo").addEventListener("click", () => mostrar_caja_de_nuevo_correo(true));
+$("boton_cancelar_correo").addEventListener("click", () => mostrar_caja_de_nuevo_correo(false));
+$("boton_guardar_correo").addEventListener("click", guardar_nuevo_correo);
+// Enter dentro de la caja = pulsar "Agregar" (no hay formulario que enviar).
+$("caja_nuevo_correo").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); guardar_nuevo_correo(); } });
 $("abrir_opciones").addEventListener("click", (e) => { e.preventDefault(); chrome.runtime.openOptionsPage(); });
 $("abrir_politicas").addEventListener("click", (e) => { e.preventDefault(); chrome.tabs.create({ url: chrome.runtime.getURL("politicas.html") }); });
 $("abrir_plantilla").addEventListener("click", (e) => { e.preventDefault(); chrome.tabs.create({ url: chrome.runtime.getURL("plantilla.html") }); });
@@ -175,12 +386,32 @@ $("copiar_informe").addEventListener("click", async (e) => {
 // ===========================================================================
 const CLAVE_URLS = "urls_denuncia";
 
-// Muestra en #estado_urls cuántas URLs hay cargadas (o "Sin lista cargada").
-function pintar_estado_urls(n) {
+// UNA sola línea de estado para los enlaces (antes había dos, una por cuadro, y
+// ocupaban el doble para decir lo mismo). Dice lo único que importa: qué se va a
+// usar en esta denuncia — manda lo escrito a mano y, si no hay nada escrito, la
+// lista del Excel. Se guardan los dos conteos porque cada uno se actualiza por su
+// lado (al escribir en las cajas y al cargar/quitar el Excel).
+let CUENTA_URLS_A_MANO = 0, CUENTA_URLS_EXCEL = 0;
+
+function pintar_estado_de_enlaces() {
   const e = $("estado_urls");
   if (!e) return;
-  e.textContent = (n && n > 0) ? (n + " URL" + (n === 1 ? "" : "s") + " cargada" + (n === 1 ? "" : "s")) : "Sin lista cargada";
+  let t;
+  if (CUENTA_URLS_A_MANO > 0) {
+    t = CUENTA_URLS_A_MANO + " enlace" + (CUENTA_URLS_A_MANO === 1 ? "" : "s") +
+        " a mano: se usa" + (CUENTA_URLS_A_MANO === 1 ? "" : "n") + " est" +
+        (CUENTA_URLS_A_MANO === 1 ? "e" : "os") + " (el Excel se ignora)";
+  } else if (CUENTA_URLS_EXCEL > 0) {
+    t = CUENTA_URLS_EXCEL + " URL" + (CUENTA_URLS_EXCEL === 1 ? "" : "s") + " del Excel: se usa" +
+        (CUENTA_URLS_EXCEL === 1 ? "" : "n") + " en esta denuncia";
+  } else {
+    t = "Sin enlaces: escríbelos arriba o carga un Excel";
+  }
+  e.textContent = t;
+  e.title = t;   // la línea se recorta con "…" si no cabe
 }
+
+function pintar_estado_urls(n) { CUENTA_URLS_EXCEL = n || 0; pintar_estado_de_enlaces(); }
 
 // Lee las URLs guardadas en storage (array vacío si no hay).
 function obtener_urls_guardadas() {
@@ -215,10 +446,22 @@ function normalizar_url(v) {
 // Rótulos de encabezado que NO son datos (para saber si la fila 1 es título o URL).
 const ROTULOS_ENCABEZADO = { "url": 1, "urls": 1, "enlace": 1, "enlaces": 1, "link": 1, "links": 1, "liga": 1, "ligas": 1, "direccion": 1, "dirección": 1 };
 
+// Topes de seguridad del Excel. Sin ellos, un archivo enorme (o una "bomba zip": un .xlsx
+// pequeño que al descomprimirse ocupa gigas) deja el popup congelado sin explicar por qué.
+const MAXIMO_TAMANO_EXCEL = 10 * 1024 * 1024;  // 10 MB
+const MAXIMO_FILAS_EXCEL = 5000;
+
 async function cargar_archivo_urls(file) {
   if (!file) return;
   try {
     if (typeof ExcelJS === "undefined") throw new Error("no se cargó la librería ExcelJS.");
+    // Se comprueba ANTES de leerlo: una vez cargado en memoria ya sería tarde.
+    if (file.size > MAXIMO_TAMANO_EXCEL) {
+      const mb = (file.size / 1024 / 1024).toFixed(1);
+      mostrar_estado("error", "El Excel pesa " + mb + " MB y el máximo son 10 MB. " +
+        "Déjalo con la columna de URLs y borra hojas, imágenes o formatos que no hagan falta.");
+      return;
+    }
     const arrayBuffer = await file.arrayBuffer();
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(arrayBuffer);
@@ -243,7 +486,11 @@ async function cargar_archivo_urls(file) {
     const urls = [];
     const vistas = {};
     const total = hoja.actualRowCount || hoja.rowCount || 0;
-    for (let r = inicio; r <= total; r++) {
+    // Se leen como mucho MAXIMO_FILAS_EXCEL filas para que el popup no se quede colgado.
+    // Si el archivo tiene más, NO se ocultan: se avisa abajo de cuántas se leyeron y de
+    // que quedaron fuera, para que se puedan cargar en una segunda tanda.
+    const ultima = Math.min(total, inicio + MAXIMO_FILAS_EXCEL - 1);
+    for (let r = inicio; r <= ultima; r++) {
       const url = normalizar_url(valor_celda(hoja.getRow(r).getCell(colUrl)));
       if (!url) continue; // vacío o no parece una URL
       const clave = url.toLowerCase();
@@ -251,10 +498,15 @@ async function cargar_archivo_urls(file) {
       vistas[clave] = true;
       urls.push(url);
     }
+    const filas_leidas = Math.max(0, ultima - inicio + 1);
+    const filas_de_mas = Math.max(0, total - ultima);
 
     await new Promise((res) => chrome.storage.local.set({ [CLAVE_URLS]: urls }, res));
     pintar_estado_urls(urls.length);
     if (urls.length === 0) mostrar_estado("aviso", "No se encontraron URLs en el Excel. Revisa que la columna tenga los enlaces de las publicaciones (con o sin https).");
+    else if (filas_de_mas > 0) mostrar_estado("aviso", "✓ " + urls.length + " URL(s) cargadas, pero OJO: solo se leyeron las primeras " +
+      filas_leidas + " filas de " + total + " (el máximo son 5.000 por vez). Quedaron " + filas_de_mas +
+      " filas SIN leer: quítalas de este archivo y vuelve a cargarlo para hacer el resto.");
     else mostrar_estado("ok", "✓ " + urls.length + " URL(s) cargadas. Se pondrán en las cajas Enlace 1.." + urls.length + " al Rellenar.");
   } catch (e) {
     // El mensaje del parser es dato NO confiable: se escapa (mostrar_estado usa innerHTML).
@@ -290,13 +542,7 @@ obtener_urls_guardadas().then((u) => pintar_estado_urls(u.length));
 // ===========================================================================
 const CLAVE_URLS_MANUALES = "urls_manuales";
 
-function pintar_estado_urls_manuales(n) {
-  const e = $("estado_urls_manuales");
-  if (!e) return;
-  e.textContent = (n && n > 0)
-    ? (n + " URL" + (n === 1 ? "" : "s") + " a mano: se usa" + (n === 1 ? "" : "n") + " esta" + (n === 1 ? "" : "s") + " (el Excel se ignora)")
-    : "Vacías: se usará la lista del Excel";
-}
+function pintar_estado_urls_manuales(n) { CUENTA_URLS_A_MANO = n || 0; pintar_estado_de_enlaces(); }
 
 // Lee las cajas, se queda con las que parecen URL y las guarda.
 function guardar_urls_manuales() {
@@ -465,7 +711,9 @@ async function capturar_pantalla() {
     await new Promise((res) => chrome.storage.local.set({ [CLAVE]: lista }, res));
     mostrar_estado("ok", "✓ Captura guardada en el comprobante.");
   } catch (e) {
-    mostrar_estado("error", "No se pudo capturar esta página: " + e.message);
+    // El mensaje de error puede traer la URL de la pestaña: se escapa, igual que en el
+    // Excel, porque mostrar_estado pinta con innerHTML.
+    mostrar_estado("error", "No se pudo capturar esta página: " + escapar_html(e && e.message ? e.message : e));
   } finally {
     $("boton_capturar").disabled = false;
   }
@@ -485,10 +733,10 @@ function esperar_carga(tabId) {
 async function rellenar() {
   const formKey = $("sel_form").value;
   const marca = $("sel_marca").value;
-  if (!formKey || !marca) { mostrar_estado("aviso", "Elige red, formulario y marca."); return; }
+  if (!formKey || !marca) { mostrar_estado("aviso", "Elige plataforma, reporte y marca."); return; }
 
   const form = window.FORMULARIOS[formKey];
-  const datos = MARCAS[marca] || {};
+  const datos = datos_de_la_marca(marca);
   // Código de red para la justificación de difamación (fb/ig/tk).
   const redCode = { Facebook: "fb", Instagram: "ig", TikTok: "tk" }[form.red] || "";
   const pais = datos.pais || "";
@@ -496,8 +744,18 @@ async function rellenar() {
   // sin él no deja avanzar). Se avisa ANTES de rellenar para no dejar al usuario delante de
   // un formulario a medias con un "This field is required" sin explicación.
   if (!pais.trim() && form.tipo !== "email") {
-    mostrar_estado("aviso", "La marca «" + marca + "» no tiene <b>país</b> configurado y el formulario lo exige. " +
+    mostrar_estado("aviso", "La marca «" + escapar_html(marca) + "» no tiene <b>país</b> configurado y el formulario lo exige. " +
       "Ábrela en <b>⚙ Marcas</b>, escribe el país (ej. Ecuador) y vuelve a intentarlo.");
+    return;
+  }
+  // El REMITENTE también es obligatorio: es el correo de contacto que va en el formulario
+  // (LinkedIn incluso saca de ahí el nombre y apellido) y el "De:" del correo de denuncia.
+  // Desde que una marca puede quedarse SIN correos (se borran todos en ⚙ Marcas), esto
+  // podía salir vacío y la denuncia se iba sin forma de contactar a quien denuncia, sin
+  // que nadie avisara. Se dice ANTES de rellenar y se recuerda que el "+" está aquí mismo.
+  if (!String(datos.correo || "").trim()) {
+    mostrar_estado("aviso", "La marca «" + escapar_html(marca) + "» no tiene <b>correo</b> desde el que denunciar. " +
+      "Agrégalo con el botón <b>+</b> de «✉️ Denunciar desde» (o en <b>⚙ Marcas</b>) y vuelve a intentarlo.");
     return;
   }
   // Formularios web: justificación en ESPAÑOL (regla del proyecto, igual que en el menú
@@ -554,7 +812,15 @@ async function rellenar() {
   const hostForm = new URL(plan.url).host.replace(/^www\./, "");
   const hostTab = (() => { try { return new URL(tab.url).host.replace(/^www\./, ""); } catch (e) { return ""; } })();
   $("boton_rellenar").disabled = true;
-  if (hostTab.indexOf(hostForm.split(".").slice(-2).join(".")) < 0) {
+  // La pestaña actual solo cuenta como "ya estoy en el formulario" si ES el sitio del
+  // formulario o un subdominio suyo. Antes se comparaba por SUBCADENA, y así pasaban webs
+  // falsas como "instagram.com.tienda-falsa.ru" o "notfacebook.com": la extensión rellenaba
+  // los datos de la marca (correo, teléfono, país, perfiles, N.º de registro) en la página
+  // del suplantador, que es justo donde suele estar el usuario al denunciar.
+  // (Si no coincide no pasa nada malo: se abre el formulario en una pestaña aparte.)
+  const raiz_del_formulario = hostForm.split(".").slice(-2).join(".");
+  const es_el_mismo_sitio = (hostTab === raiz_del_formulario) || hostTab.endsWith("." + raiz_del_formulario);
+  if (!es_el_mismo_sitio) {
     mostrar_estado("aviso", "Abriendo el formulario en una pestaña aparte…");
     const nueva = await chrome.tabs.create({ url: plan.url, active: false });
     objetivoTabId = nueva.id;
@@ -632,7 +898,9 @@ async function rellenar() {
     html += "<br><br>📓 Registrada como pendiente — agrega el N.º de caso en Registro.";
     mostrar_estado(r.ok > 0 ? "ok" : "aviso", html);
   } catch (e) {
-    mostrar_estado("error", "Error al rellenar: " + e.message + "<br>¿La pestaña es el formulario y está cargado?");
+    // Igual que arriba: el error de chrome.scripting puede citar la URL de la pestaña.
+    mostrar_estado("error", "Error al rellenar: " + escapar_html(e && e.message ? e.message : e) +
+      "<br>¿La pestaña es el formulario y está cargado?");
   } finally {
     $("boton_rellenar").disabled = false;
   }
