@@ -178,6 +178,40 @@ function redes_disponibles(tipo) {
 // Un listener `async` que revienta deja la promesa rechazada y NO pasa nada visible:
 // el botón parece no hacer nada y no hay forma de saber por qué. Esto envuelve al
 // manejador para que cualquier error salga en el estado del popup.
+// ===========================================================================
+//  PERMISO SOBRE EL SITIO DEL FORMULARIO
+//  Chrome no deja tocar una página si su dominio no está en el manifest: falla
+//  con "Cannot access contents of the page. Extension manifest must request
+//  permission to access the respective host" y no se rellena NADA. Los sitios de
+//  siempre van en `host_permissions`, pero una plataforma que cree el usuario
+//  puede ser cualquiera, así que el manifest declara `optional_host_permissions`
+//  y aquí se pide el permiso EN EL MOMENTO, con el clic del usuario (Chrome
+//  exige que la petición salga de un gesto suyo). Se acepta una vez por sitio.
+// ===========================================================================
+function origen_de(url) {
+  try { const u = new URL(url); return (u.protocol === "https:" || u.protocol === "http:") ? (u.origin + "/*") : ""; }
+  catch (e) { return ""; }
+}
+
+function tiene_permiso_para(origen) {
+  return new Promise((res) => {
+    try { chrome.permissions.contains({ origins: [origen] }, (ok) => res(!!ok && !chrome.runtime.lastError)); }
+    catch (e) { res(false); }
+  });
+}
+
+// Devuelve true si al final hay permiso (ya lo había o el usuario lo acaba de dar).
+async function asegurar_permiso_para(url) {
+  const origen = origen_de(url);
+  if (!origen) return true;                       // no es http(s): que siga el flujo normal
+  if (await tiene_permiso_para(origen)) return true;
+  const dado = await new Promise((res) => {
+    try { chrome.permissions.request({ origins: [origen] }, (ok) => res(!!ok && !chrome.runtime.lastError)); }
+    catch (e) { res(false); }
+  });
+  return dado;
+}
+
 function al_pulsar(fn) {
   return function () {
     Promise.resolve()
@@ -1042,6 +1076,15 @@ async function rellenar() {
   }
 
   const plan = form.construirPlan(ctx);
+
+  // El permiso sobre el sitio del formulario se pide AQUÍ, antes de abrir nada: sin él
+  // Chrome no deja escribir en la página y no se rellena ni un campo. Va antes de
+  // registrar la denuncia para no dejar una pendiente si el usuario dice que no.
+  if (!(await asegurar_permiso_para(plan.url))) {
+    mostrar_estado("aviso", "Para rellenar en <b>" + escapar_html(new URL(plan.url).host) + "</b> hace falta " +
+      "tu permiso (Chrome lo pide una sola vez por sitio). Vuelve a pulsar <b>Rellenar</b> y acepta el aviso del navegador.");
+    return;
+  }
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab || !tab.id) { mostrar_estado("error", "No encuentro la pestaña activa."); return; }

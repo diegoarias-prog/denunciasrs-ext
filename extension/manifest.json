@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Denuncias RS · Autollenado",
-  "version": "1.2.84",
+  "version": "1.2.85",
   "update_url": "https://diegoarias-prog.github.io/denunciasrs-ext/update.xml",
   "description": "Rellena los formularios de denuncia (Facebook, Instagram, TikTok, WhatsApp, X, LinkedIn) con los datos de la marca seleccionada. Funciona en tu navegador con tu sesión.",
   "permissions": [
@@ -29,8 +29,12 @@
     "https://support.google.com/*",
     "https://*.youtube.com/*",
     "https://support.github.com/*",
+    "https://abuse.cloudflare.com/*",
     "https://gmail.googleapis.com/*",
     "https://raw.githubusercontent.com/*"
+  ],
+  "optional_host_permissions": [
+    "https://*/*"
   ],
   "action": {
     "default_popup": "popup.html",
@@ -42,7 +46,7 @@
         "https://*.facebook.com/*","https://*.instagram.com/*","https://*.meta.com/*","https://*.tiktok.com/*",
         "https://*.whatsapp.com/*","https://*.linkedin.com/*","https://twitter.com/*",
         "https://*.x.com/*","https://support.google.com/*","https://*.youtube.com/*",
-        "https://support.github.com/*"
+        "https://support.github.com/*","https://abuse.cloudflare.com/*"
       ],
       "js": ["captura_flotante.js"],
       "run_at": "document_idle"
