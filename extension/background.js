@@ -508,6 +508,41 @@ const RS_CONTEXTS = ["page", "frame", "selection", "link", "image", "editable"];
 const rsEnc = (s) => encodeURIComponent(String(s)); // marca -> id de menú (nunca lleva '|')
 const rsDec = (s) => { try { return decodeURIComponent(s); } catch (e) { return s; } };
 
+// Limpia una lista de correos EXACTAMENTE igual que ⚙ Marcas (depurar_lista_de_correos de
+// opciones.js) y que depurar_correos_de_marca del popup: parte los pegados con coma o punto
+// y coma, quita los caracteres de control (un "\r\n" en el remitente permitiría colar
+// cabeceras de correo), recorta, tira los vacíos y quita los repetidos SIN distinguir
+// mayúsculas conservando el PRIMERO (para no cambiar cuál es el principal).
+function ctxDepurarCorreosDeMarca(lista) {
+  const vistos = new Set();   // Set y no objeto: un correo "__proto__" no debe romper nada
+  const limpia = [];
+  (lista || []).forEach((crudo) => {
+    String(crudo == null ? "" : crudo).split(/[,;]+/).forEach((trozo) => {
+      const texto = trozo.replace(/[\x00-\x1f\x7f]/g, "").trim();
+      if (!texto) return;
+      const llave = texto.toLowerCase();
+      if (vistos.has(llave)) return;
+      vistos.add(llave);
+      limpia.push(texto);
+    });
+  });
+  return limpia;
+}
+
+// Deja `correos` (array con TODOS, el 1.º el principal) y `correo` (string) coherentes.
+// Si `correos` NO EXISTE se deriva partiendo `correo` por comas (MARCAS_BASE y las marcas
+// guardadas antes de que se creara el campo). Si EXISTE manda ella aunque esté vacía:
+// vacía = el usuario borró todos los correos en ⚙ Marcas, y entonces tampoco se hereda el
+// `correo` de la base (si no, el menú del clic derecho seguiría usando un correo borrado).
+// El principal es SIEMPRE el primero de la lista, la misma regla que ⚙ Marcas (insignia
+// «Principal») y que normalizar_correos_de_marca() del popup: si cada parte lo decidiera
+// a su manera, la denuncia se firmaría con un correo distinto del que enseña el panel.
+function ctxNormalizarCorreosDeMarca(o) {
+  o.correos = ctxDepurarCorreosDeMarca(Array.isArray(o.correos) ? o.correos : [o.correo]);
+  o.correo = o.correos[0] || "";
+  return o;
+}
+
 // Marcas: base + editadas − eliminadas (idéntico a obtener_marcas() del popup).
 async function ctxObtenerMarcas() {
   const d = await chrome.storage.local.get(["marcas_usuario", "marcas_eliminadas"]);
@@ -518,10 +553,18 @@ async function ctxObtenerMarcas() {
   Object.keys(guardadas).forEach((m) => {
     if (PELIGROSA(m)) return; // evita contaminación de prototipo por un nombre de marca malicioso
     const base = self.MARCAS_BASE[m] || {}, g = guardadas[m] || {}, o = Object.assign({}, base);
-    Object.keys(g).forEach((k) => { if (PELIGROSA(k)) return; if (g[k] !== "" && g[k] != null) o[k] = g[k]; else if (!(k in o)) o[k] = g[k]; });
+    Object.keys(g).forEach((k) => {
+      if (PELIGROSA(k)) return;
+      // `correos` es una LISTA que el usuario puede DEJAR VACÍA en ⚙ Marcas: si el campo
+      // está guardado se respeta tal cual. Con la regla general ("lo vacío no pisa") un
+      // correo borrado reaparecía y el menú del clic derecho lo volvía a usar.
+      if (k === "correos") { o.correos = g[k]; return; }
+      if (g[k] !== "" && g[k] != null) o[k] = g[k]; else if (!(k in o)) o[k] = g[k];
+    });
     todas[m] = o;
   });
   eliminadas.forEach((n) => delete todas[n]);
+  Object.keys(todas).forEach((m) => { todas[m] = ctxNormalizarCorreosDeMarca(Object.assign({}, todas[m])); });
   return todas;
 }
 
@@ -538,8 +581,19 @@ function ctxDetectarForm(urlTab) {
     let fh = "", fp = "";
     try { const fu = new URL(f.url); fh = fu.host.replace(/^www\./, ""); fp = (fu.pathname || "").toLowerCase(); }
     catch (e) { return; }
-    const raiz = fh.split(".").slice(-2).join("."); // p.ej. tiktok.com
-    if (host.indexOf(raiz) < 0 && fh.indexOf(host.split(".").slice(-2).join(".")) < 0) return;
+    // Sitio del formulario, p.ej. tiktok.com. OJO al añadir formularios: si alguno llegara
+    // a estar en un dominio de DOS niveles (algo.com.mx, algo.co.uk), este slice(-2) daría
+    // "com.mx" y valdría CUALQUIER web de ese país -> habría que tratarlo aparte.
+    // Hoy todos los formularios son .com planos (facebook, instagram, meta, tiktok,
+    // google, linkedin, github, x), así que la raíz de dos etiquetas es correcta.
+    const raiz = fh.split(".").slice(-2).join(".");
+    // La pestaña tiene que SER ese sitio o un subdominio suyo. Antes se comparaba por
+    // subcadena (y en los dos sentidos), y así colaban webs falsas como
+    // "instagram.com.tienda-falsa.ru", "notfacebook.com" o "facebook.com.cdn-x.io":
+    // la extensión creía estar en el formulario bueno y escribía en ESA página los datos
+    // de la marca (correo, teléfono, país, perfiles oficiales, N.º de registro). Y es el
+    // caso normal, porque el usuario suele estar en la web que va a denunciar.
+    if (host !== raiz && !host.endsWith("." + raiz)) return;
     if (fp && fp.length > 1 && path.indexOf(fp) === 0) {         // ruta distintiva coincide
       if (fp.length > mejorLargo) { mejor = k; mejorLargo = fp.length; }
     } else if (mejorLargo < 0) {                                  // solo coincide el dominio
@@ -653,6 +707,23 @@ async function ctxArmar(marca, formKey, urlsOverride) {
              : (urlsManuales.length ? urlsManuales : urlsExcel);
   const ctx = { marca, datos, justif, justif_es, correoPersona: self.CORREO_PERSONA, urls };
   return { ctx, form, datos };
+}
+
+// El REMITENTE (datos.correo) es el correo de contacto que va en el formulario y el "De:"
+// del correo de denuncia. Desde que una marca puede quedarse SIN correos (se borran todos
+// en ⚙ Marcas) esto podía salir vacío y la denuncia se iba sin forma de contactar a quien
+// denuncia, sin avisar. Devuelve true si falta (y entonces NO se denuncia).
+// La comprobación se hace SIEMPRE, haya o no pestaña donde pintar el aviso: en
+// chrome.contextMenus.onClicked el parámetro `tab` es OPCIONAL, y cuando llega vacío una
+// guardia condicionada a él se saltaba entera y el correo salía igual, sin remitente.
+// Lo único que depende de la pestaña es el aviso.
+function ctxFaltaElCorreo(tabId, marca, datos) {
+  if (String((datos || {}).correo || "").trim()) return false;
+  if (tabId) {
+    ctxAvisar(tabId, "Denuncias RS: la marca «" + marca + "» no tiene correo desde el que denunciar. " +
+      "Agrégalo en ⚙ Marcas (o con el botón + del popup) y vuelve a intentarlo.", true);
+  }
+  return true;
 }
 
 // ============================================================================
@@ -773,6 +844,7 @@ async function ctxRellenarPagina(tab, marca, objetivo) {
   }
   const a = await ctxArmar(marca, formKey, objetivo);
   if (!a) { ctxAvisar(tab.id, "Denuncias RS: no encuentro la marca «" + marca + "».", true); return; }
+  if (ctxFaltaElCorreo(tab.id, marca, a.datos)) return;
   await ctxRegistrarDenuncia(marca, a.form, (objetivo && objetivo[0]) || "");
   try { await ctxEjecutarPlan(tab.id, a.form.construirPlan(a.ctx), marca, a.form, a.datos); }
   catch (e) { ctxAvisar(tab.id, "Denuncias RS: no se pudo rellenar aquí (" + (e.message || e) + ").", true); }
@@ -783,6 +855,7 @@ async function ctxRellenarPagina(tab, marca, objetivo) {
 async function ctxAbrirDenuncia(tabOrigen, marca, formKey, objetivo) {
   const a = await ctxArmar(marca, formKey, objetivo);
   if (!a) { if (tabOrigen && tabOrigen.id) ctxAvisar(tabOrigen.id, "Denuncias RS: no encuentro la marca «" + marca + "».", true); return; }
+  if (ctxFaltaElCorreo(tabOrigen && tabOrigen.id, marca, a.datos)) return;
   const form = a.form, ctx = a.ctx, datos = a.datos;
   const urlDen = (objetivo && objetivo[0]) || "";
   if (form.tipo === "email") {
@@ -809,43 +882,220 @@ async function ctxAbrirDenuncia(tabOrigen, marca, formKey, objetivo) {
   catch (e) { /* la pestaña abrió; el usuario puede rellenar con el clic derecho de nuevo */ }
 }
 
-// (Re)construye el menú: 🚩 Denuncias RS ▸ [cada marca] ▸ (Rellenar esta página + todos
-// los formularios). Se arma una sola vez al instalar/arrancar y al cambiar las marcas.
-let rsConstruyendo = false;
-async function ctxConstruirMenus() {
-  if (rsConstruyendo) return; rsConstruyendo = true;
+// ============================================================================
+//  MENÚ DEL CLIC DERECHO: 🚩 Denuncias RS ▸ [marca] ▸ [red] ▸ [formulario]
+//
+//  POR QUÉ ESTÁ ESCRITO ASÍ (bug recurrente: "solo salen 2 marcas"):
+//  el menú completo son ~64 items POR MARCA (marca + rellenar + separador + 17 redes
+//  + 44 formularios). Con 20 marcas eso pasa de 1.200 items y el navegador deja de
+//  crearlos. Antes TODO el bucle estaba dentro de un solo try/catch, así que el
+//  PRIMER item que fallaba abortaba el bucle entero y se perdían todas las marcas que
+//  faltaban por recorrer: por eso sobrevivían solo las primeras del alfabeto.
+//
+//  Ahora se construye en DOS PASADAS:
+//   · Pasada 1 (garantizada): root + por cada marca su nodo, "✍ Rellenar ESTA página"
+//     y el separador. Son ~3 items por marca (~61 en total). Al acabar esta pasada
+//     TODAS las marcas ya están visibles y se pueden usar.
+//   · Pasada 2: TODAS las redes con TODOS sus formularios, recorriendo EN ANCHURA
+//     (bucle externo por RED, interno por MARCA), de principio a fin y SIN cortarse.
+//     La anchura importa por si algún navegador se plantara a mitad: el reparto queda
+//     parejo entre marcas en vez de dejar completas las primeras y vacías las últimas.
+//
+//  REGLA QUE MANDA SOBRE TODO LO DEMÁS: aquí no se borra ni se descarta NADA.
+//  Se intentan crear SIEMPRE los 1.281 items del menú completo (con 20 marcas), uno por
+//  uno, hasta el final. Un item que falle se cuenta y se anota en el diagnóstico, pero
+//  NO hace que se retire nada ya creado ni que se deje de intentar lo que viene después.
+//
+//  MEDIDO EN CHROME REAL (2026-08-12) — por eso el código es tan simple:
+//   · chrome.contextMenus no tiene límite práctico: 20.000 items, 0 fallos, ~3 s.
+//   · El caso real (1.281 items) se crea entero en 0,3 s, sin un solo fallo.
+//   · create() NUNCA lanza excepción: los errores (id duplicado, padre inexistente,
+//     title vacío…) llegan SOLO por chrome.runtime.lastError.
+//   · Tras un error, create() SIGUE funcionando: en un bucle de 200 items con el 3.º
+//     fallando, los otros 199 se crean sin problema. Por eso abortar sería absurdo:
+//     solo serviría para perder todo lo que venía detrás.
+//  El try/catch de ctxCrearItemDeMenu se queda igualmente como red de seguridad barata,
+//  por si otro Chromium (Edge, Brave, Opera) se comporta distinto.
+// ============================================================================
+
+// ---- FRENO ANTIBUCLE. NO ES UNA POLÍTICA DE "ESTO NO CABE" ----
+// Único papel: cortar por lo sano si algún día los datos se descontrolan (una marca
+// duplicada en bucle, un formulario que se multiplica) y la construcción se volviera
+// interminable. Está MUY por encima de lo que el menú necesita de verdad (con 20 marcas,
+// 17 redes y 44 formularios son 1.281 items) y de lo que aguanta el navegador (medido:
+// 20.000 items sin un fallo), así que en uso normal NUNCA llega a actuar y NUNCA descarta
+// contenido. Si algún día hiciera falta tocarlo, se cambia AQUÍ: es el único sitio donde
+// vive el número. PROHIBIDO usarlo para dejar redes o reportes fuera del menú: si no
+// cupieran, se rediseña o se pregunta al usuario, no se recorta por nuestra cuenta.
+// Al cambiarlo, volver a pasar: python pruebas\probar_menu_contextual.py
+const RS_MAXIMO_DE_ITEMS_DE_MENU = 20000;
+
+// Cuántos ids fallidos se guardan en el diagnóstico. Con una muestra basta para saber QUÉ
+// falló; guardarlos todos podría meter miles de cadenas en chrome.storage.local.
+const RS_MAXIMO_DE_IDS_FALLIDOS = 20;
+
+// Contadores de la construcción en curso; se vuelcan a chrome.storage.local para que el
+// usuario/QA pueda ver el estado REAL del menú sin adivinar (clave diagnostico_menu_contextual).
+let rsDiagnosticoMenu = { intentados: 0, creados: 0, fallidos: 0, primerError: "", idsFallidos: [] };
+
+function ctxAnotarFalloDeMenu(id, mensaje) {
+  rsDiagnosticoMenu.fallidos++;
+  rsDiagnosticoMenu.creados--; // se había contado como creado de forma optimista
+  const texto = String(mensaje || "desconocido");
+  if (!rsDiagnosticoMenu.primerError) rsDiagnosticoMenu.primerError = texto;
+  // Solo una muestra: qué items concretos fallaron, para poder investigarlo después.
+  if (rsDiagnosticoMenu.idsFallidos.length < RS_MAXIMO_DE_IDS_FALLIDOS) {
+    rsDiagnosticoMenu.idsFallidos.push(String(id) + " → " + texto);
+  }
+}
+
+// Crea UN item de menú sin que un fallo pueda propagarse. Devuelve true/false.
+// El error llega por chrome.runtime.lastError, y hay que LEERLO: si no, Chrome lo apunta
+// como "error no comprobado" y ensucia la consola. El try/catch es red de seguridad: en
+// Chrome create() no lanza nunca (medido), pero otro Chromium podría hacerlo.
+function ctxCrearItemDeMenu(opciones) {
+  rsDiagnosticoMenu.intentados++;
+  try {
+    chrome.contextMenus.create(opciones, () => {
+      const err = chrome.runtime.lastError;
+      if (err) ctxAnotarFalloDeMenu(opciones.id, err.message || err);
+    });
+    rsDiagnosticoMenu.creados++;
+    return true;
+  } catch (e) {
+    ctxAnotarFalloDeMenu(opciones.id, e && e.message ? e.message : e);
+    return false;
+  }
+}
+
+// Los callbacks de create() son asíncronos: este respiro deja que lleguen los lastError
+// pendientes antes de dar por cerrada una tanda y anotar el resultado.
+const ctxEsperarCallbacksDeMenu = () => dormir(0);
+
+async function ctxConstruirMenusUnaVez() {
+  rsDiagnosticoMenu = { intentados: 0, creados: 0, fallidos: 0, primerError: "", idsFallidos: [] };
+  // redesConItemsRechazados: aquellas en las que el NAVEGADOR rechazó algún item. Es solo
+  // información para el diagnóstico: la red se queda en el menú con lo que sí se creó.
+  // frenoAntibucle: ver RS_MAXIMO_DE_ITEMS_DE_MENU.
+  let marcas = [], redes = [], pasada2Completa = true, redesCreadas = 0;
+  const redesConItemsRechazados = [];
+  let frenoAntibucle = false;
   try {
     await new Promise((res) => chrome.contextMenus.removeAll(res));
     const base = { contexts: RS_CONTEXTS }; // sin documentUrlPatterns: aparece en TODA página
-    chrome.contextMenus.create(Object.assign({ id: "rs_root", title: "🚩 Denuncias RS" }, base));
+    ctxCrearItemDeMenu(Object.assign({ id: "rs_root", title: "🚩 Denuncias RS" }, base));
     const MARCAS = await ctxObtenerMarcas();
-    const marcas = Object.keys(MARCAS).sort((a, b) => a.localeCompare(b, "es"));
+    marcas = Object.keys(MARCAS).sort((a, b) => a.localeCompare(b, "es"));
     // Formularios ordenados por "Red: Nombre" (se listan dentro de cada marca).
     const forms = Object.keys(self.FORMULARIOS).sort((a, b) =>
       (self.FORMULARIOS[a].red + ": " + self.FORMULARIOS[a].nombre)
         .localeCompare(self.FORMULARIOS[b].red + ": " + self.FORMULARIOS[b].nombre, "es"));
     // Lista de redes sociales presentes (ordenadas), para agrupar los formularios.
-    const redes = [];
     forms.forEach((fk) => { const r = self.FORMULARIOS[fk].red; if (redes.indexOf(r) < 0) redes.push(r); });
     redes.sort((a, b) => a.localeCompare(b, "es"));
+
+    // ---- PASADA 1: lo imprescindible de cada marca, y va PRIMERO. Nada la frena: si un
+    // item falla se anota y se sigue con la marca siguiente, nunca se corta el bucle.
+    // Al acabar aquí, las 20 marcas ya están en el menú pase lo que pase después.
     marcas.forEach((m) => {
       const pid = "rs_m|" + rsEnc(m);
-      chrome.contextMenus.create(Object.assign({ id: pid, parentId: "rs_root", title: m }, base));
-      chrome.contextMenus.create(Object.assign({ id: "rs_fill|" + rsEnc(m), parentId: pid, title: "✍ Rellenar ESTA página" }, base));
-      chrome.contextMenus.create(Object.assign({ id: "rs_sep|" + rsEnc(m), parentId: pid, type: "separator" }, base));
-      // Un submenú por RED SOCIAL; dentro, solo los formularios de esa red (así el menú
-      // queda agrupado y legible en vez de una lista larga y plana).
-      redes.forEach((red) => {
-        const rid = "rs_red|" + rsEnc(m) + "|" + rsEnc(red);
-        chrome.contextMenus.create(Object.assign({ id: rid, parentId: pid, title: red }, base));
-        forms.filter((fk) => self.FORMULARIOS[fk].red === red).forEach((fk) => {
-          const f = self.FORMULARIOS[fk];
-          chrome.contextMenus.create(Object.assign({ id: "rs_open|" + rsEnc(m) + "|" + fk, parentId: rid, title: f.nombre }, base));
-        });
-      });
+      ctxCrearItemDeMenu(Object.assign({ id: pid, parentId: "rs_root", title: m }, base));
+      ctxCrearItemDeMenu(Object.assign({ id: "rs_fill|" + rsEnc(m), parentId: pid, title: "✍ Rellenar ESTA página" }, base));
+      ctxCrearItemDeMenu(Object.assign({ id: "rs_sep|" + rsEnc(m), parentId: pid, type: "separator" }, base));
     });
-  } catch (e) { /* si falla, el popup sigue funcionando igual */ }
-  finally { rsConstruyendo = false; }
+    await ctxEsperarCallbacksDeMenu();
+
+    // ---- PASADA 2: TODAS las redes con TODOS sus formularios, para TODAS las marcas.
+    // Se recorre entera SIEMPRE, de la primera red a la última y de la primera marca a la
+    // última. Aquí no hay ni un `break` ni una sola línea que borre algo ya creado:
+    //   · No se elige qué crear: se crea todo.
+    //   · Un item que falle NO retira nada (ni su red, ni sus hermanos): quitar contenido
+    //     bueno para que todas las marcas queden simétricas sería destruir lo que sí se
+    //     pudo crear. Manda que el usuario tenga TODO lo que el navegador acepte.
+    //   · Un item que falle NO corta el recorrido: create() sigue funcionando después de
+    //     un error (medido), así que abortar solo perdería lo que viene detrás.
+    // El fallo se cuenta, se guarda su id en el diagnóstico, y se sigue.
+    // Se va EN ANCHURA (bucle externo por RED, interno por MARCA): si algún navegador se
+    // plantara, el reparto quedaría parejo entre marcas en vez de vaciar las últimas.
+    for (const red of redes) {
+      // Freno ANTIBUCLE, no un "esto no cabe": ver RS_MAXIMO_DE_ITEMS_DE_MENU. En uso
+      // normal no salta nunca (el menú completo son 1.281 items y el tope son 20.000).
+      if (rsDiagnosticoMenu.creados >= RS_MAXIMO_DE_ITEMS_DE_MENU) { frenoAntibucle = true; break; }
+      const fallidosAntes = rsDiagnosticoMenu.fallidos;
+      const susForms = forms.filter((fk) => self.FORMULARIOS[fk].red === red);
+      for (const m of marcas) {
+        const rid = "rs_red|" + rsEnc(m) + "|" + rsEnc(red);
+        ctxCrearItemDeMenu(Object.assign({ id: rid, parentId: "rs_m|" + rsEnc(m), title: red }, base));
+        for (const fk of susForms) {
+          const f = self.FORMULARIOS[fk];
+          ctxCrearItemDeMenu(Object.assign({ id: "rs_open|" + rsEnc(m) + "|" + fk, parentId: rid, title: f.nombre }, base));
+        }
+      }
+      await ctxEsperarCallbacksDeMenu(); // que lleguen los lastError de esta tanda
+      // Solo para el informe: qué redes salieron limpias y en cuáles rechazó algo el
+      // navegador. Ninguna de las dos ramas toca el menú.
+      if (rsDiagnosticoMenu.fallidos > fallidosAntes) redesConItemsRechazados.push(red);
+      else redesCreadas++;
+    }
+    // "Completa" = el navegador no rechazó ni un item. Nunca es falso por decisión propia.
+    pasada2Completa = rsDiagnosticoMenu.fallidos === 0 && !frenoAntibucle;
+
+    // El aviso SOLO si de verdad hubo items rechazados por el navegador (con 0 fallos no
+    // aparece). Va en cada marca para que el usuario sepa POR QUÉ le faltaría algo ahí y a
+    // dónde ir: el popup los tiene todos, siempre.
+    if (!pasada2Completa) {
+      marcas.forEach((m) => {
+        ctxCrearItemDeMenu(Object.assign({
+          id: "rs_aviso|" + rsEnc(m), parentId: "rs_m|" + rsEnc(m),
+          title: "⚠ El navegador no admitió más: usa el popup", enabled: false
+        }, base));
+      });
+      await ctxEsperarCallbacksDeMenu();
+    }
+  } catch (e) {
+    // Nunca debería llegar aquí (cada item se crea a prueba de fallos), pero si pasa se anota.
+    ctxAnotarFalloDeMenu("(construcción del menú)", e && e.message ? e.message : e);
+    pasada2Completa = false;
+  }
+  try {
+    await chrome.storage.local.set({ diagnostico_menu_contextual: {
+      fecha: new Date().toLocaleString(),
+      marcas: marcas.length,
+      redes_totales: redes.length,
+      redes_creadas: redesCreadas, // las que salieron sin que el navegador rechazara nada
+      // Redes donde el navegador rechazó ALGÚN item. Siguen en el menú con lo que sí se
+      // creó: no se borra nada. `borrados_por_decision_propia` es 0 fijo y está aquí a
+      // propósito, como constancia de que el programa nunca quita contenido; si algún día
+      // no fuera 0, sería un fallo que corregir, no una política.
+      redes_con_items_rechazados: redesConItemsRechazados,
+      borrados_por_decision_propia: 0,
+      freno_antibucle: frenoAntibucle,
+      items_intentados: rsDiagnosticoMenu.intentados,
+      items_creados: rsDiagnosticoMenu.creados,
+      items_fallidos: rsDiagnosticoMenu.fallidos,
+      pasada2_completa: pasada2Completa,
+      primer_error: rsDiagnosticoMenu.primerError,
+      ids_fallidos: rsDiagnosticoMenu.idsFallidos, // muestra, tope RS_MAXIMO_DE_IDS_FALLIDOS
+      maximo_de_items_antibucle: RS_MAXIMO_DE_ITEMS_DE_MENU
+    } });
+  } catch (e) { /* el diagnóstico es solo ayuda, no puede romper el menú */ }
+}
+
+// (Re)construye el menú al instalar/arrancar y al cambiar las marcas.
+// Antes, si llegaba un cambio mientras se estaba construyendo, se DESCARTABA (`return`) y
+// el menú se quedaba viejo: agregar una marca en ese momento no se veía hasta reiniciar.
+// Ahora se encola: al terminar se vuelve a construir una vez más con los datos nuevos.
+let rsConstruyendo = false;
+let rsReconstruirPendiente = false;
+async function ctxConstruirMenus() {
+  if (rsConstruyendo) { rsReconstruirPendiente = true; return; }
+  rsConstruyendo = true;
+  try {
+    do {
+      rsReconstruirPendiente = false; // lo que llegue a partir de aquí obliga a otra vuelta
+      await ctxConstruirMenusUnaVez();
+    } while (rsReconstruirPendiente);
+  } finally { rsConstruyendo = false; }
 }
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
