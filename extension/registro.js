@@ -79,6 +79,17 @@ async function obtener_plataformas_registro() {
   // 1) Plataformas creadas por el usuario -> se mezclan dentro de FORMULARIOS.
   const guardadas = await new Promise((res) =>
     chrome.storage.local.get([CLAVE_PLATAFORMAS_USUARIO], (x) => res((x && x[CLAVE_PLATAFORMAS_USUARIO]) || {})));
+  // Las del usuario se vuelven a montar desde cero: si el usuario QUITÓ una en el
+  // popup, aquí también tiene que desaparecer (APLICAR_… sólo agrega, nunca borra).
+  // Sus claves siempre empiezan por "u_" (popup.js, clave_nueva_de_plataforma), así
+  // que las de fábrica no se tocan. Lo ya guardado en denuncias no se pierde: el
+  // punto 3 lo vuelve a añadir.
+  const forms_previos = window.FORMULARIOS || {};
+  Object.keys(forms_previos).forEach((clave) => {
+    if (clave.indexOf("u_") === 0 && !Object.prototype.hasOwnProperty.call(guardadas, clave)) {
+      delete forms_previos[clave];
+    }
+  });
   if (typeof window.APLICAR_PLATAFORMAS_DE_USUARIO === "function") {
     window.APLICAR_PLATAFORMAS_DE_USUARIO(guardadas);
   }
