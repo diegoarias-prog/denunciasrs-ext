@@ -9,12 +9,19 @@
 
 const CLAVE_REGISTRO = "denuncias_registro";
 
-// Lista FIJA de plataformas (espeja la tabla Plataformas de la futura BD).
+// RESPALDO HISTÓRICO. Ésta era la lista fija de plataformas del Registro y se
+// CONSERVA a propósito: hoy la lista se arma sola desde window.FORMULARIOS
+// (obtener_plataformas_registro), pero si ese archivo no cargara, el desplegable
+// seguiría funcionando con estas 16. NO borrar: es la red de seguridad.
 const PLATAFORMAS_REGISTRO = [
   "Facebook", "Instagram", "WhatsApp", "TikTok", "X", "LinkedIn", "YouTube",
   "Telegram", "GitHub", "Apps maliciosas", "Delisting", "Ofertas falsas de trabajo",
   "Outlook / Hotmail", "Scribd", "Studocu", "Sitios maliciosos Banguat"
 ];
+
+// Clave donde el popup guarda las plataformas que crea el usuario ("➕ Nueva
+// plataforma…"). Es la MISMA que usa popup.js.
+const CLAVE_PLATAFORMAS_USUARIO = "plataformas_usuario";
 
 // "borrador" se conserva por compatibilidad con registros antiguos; el alta usa
 // pendiente / enviada / resuelta.
@@ -54,6 +61,62 @@ async function obtener_marcas_registro() {
   });
   eliminadas.forEach((n) => delete todas[n]);
   return Object.keys(todas).sort();
+}
+
+// ----------------------------------------------------------------------------
+//  Plataformas: se arman SOLAS, no se escriben a mano.
+//  Antes el desplegable traía una lista fija de 16 y por eso faltaban redes que
+//  sí existen (Cloudflare, Google) y nunca aparecían las que el usuario crea
+//  desde el popup. Ahora se juntan tres fuentes, sin repetir:
+//    1) window.FORMULARIOS (las de fábrica) + las del usuario ya mezcladas,
+//       usando la MISMA función que usa el popup (APLICAR_PLATAFORMAS_DE_USUARIO).
+//    2) PLATAFORMAS_REGISTRO, como respaldo por si formularios.js no cargara.
+//    3) Las plataformas que ya aparecen en denuncias guardadas, para que un
+//       registro viejo con una plataforma retirada siga siendo editable y
+//       filtrable (nunca se pierde nada de lo ya guardado).
+// ----------------------------------------------------------------------------
+async function obtener_plataformas_registro() {
+  // 1) Plataformas creadas por el usuario -> se mezclan dentro de FORMULARIOS.
+  const guardadas = await new Promise((res) =>
+    chrome.storage.local.get([CLAVE_PLATAFORMAS_USUARIO], (x) => res((x && x[CLAVE_PLATAFORMAS_USUARIO]) || {})));
+  if (typeof window.APLICAR_PLATAFORMAS_DE_USUARIO === "function") {
+    window.APLICAR_PLATAFORMAS_DE_USUARIO(guardadas);
+  }
+
+  const lista = [];
+  const agregar = (nombre) => {
+    const n = String(nombre == null ? "" : nombre).trim();
+    if (n && lista.indexOf(n) === -1) lista.push(n);
+  };
+
+  const forms = window.FORMULARIOS || {};
+  Object.keys(forms).forEach((clave) => {
+    const f = forms[clave];
+    if (f && f.red) agregar(f.red);
+  });
+
+  // 2) Respaldo histórico (si FORMULARIOS no cargó, esto salva el desplegable).
+  PLATAFORMAS_REGISTRO.forEach(agregar);
+
+  // 3) Lo que ya está guardado en el registro manda: siempre debe poder editarse.
+  (DENUNCIAS || []).forEach((d) => { if (d && d.plataforma) agregar(d.plataforma); });
+
+  return lista.sort((a, b) => a.localeCompare(b, "es"));
+}
+
+// Rellena los dos desplegables de plataforma CONSERVANDO lo que el usuario
+// tuviera elegido (una edición en curso no se puede perder).
+function poblar_selects_de_plataforma(plataformas) {
+  [
+    { sel: $("campo_plataforma"), inicial: { value: "", texto: "— Elige plataforma —" } },
+    { sel: $("filtro_plataforma"), inicial: { value: "", texto: "Todas" } }
+  ].forEach(({ sel, inicial }) => {
+    if (!sel) return;
+    const elegido = sel.value;                 // se guarda ANTES de vaciar
+    llenar_select(sel, plataformas, inicial);
+    // Sólo se reasigna si la opción sigue existiendo; si no, queda el valor inicial.
+    if (elegido && plataformas.indexOf(elegido) !== -1) sel.value = elegido;
+  });
 }
 
 // ----------------------------------------------------------------------------
@@ -626,14 +689,14 @@ async function quitar_imagen_respuesta(indice) {
 // ----------------------------------------------------------------------------
 async function inicializar_registro() {
   const marcas = await obtener_marcas_registro();
-  // Selects del formulario de alta.
+  // Selects de marca (del alta y del filtro).
   llenar_select($("campo_marca"), marcas, { value: "", texto: "— Elige marca —" });
-  llenar_select($("campo_plataforma"), PLATAFORMAS_REGISTRO, { value: "", texto: "— Elige plataforma —" });
-  // Selects de filtros.
   llenar_select($("filtro_marca"), marcas, { value: "", texto: "Todas" });
-  llenar_select($("filtro_plataforma"), PLATAFORMAS_REGISTRO, { value: "", texto: "Todas" });
 
+  // Las denuncias se leen ANTES que los selects de plataforma: la lista de
+  // plataformas incluye las que ya aparecen en los registros guardados.
   DENUNCIAS = await leer_registro();
+  poblar_selects_de_plataforma(await obtener_plataformas_registro());
   refrescar_vista();
 
   // Eventos.
@@ -654,6 +717,16 @@ async function inicializar_registro() {
   $("boton_cerrar_comprobante").addEventListener("click", cerrar_comprobante);
   $("boton_copiar_correo").addEventListener("click", copiar_correo_modal);
   $("fondo_comprobante").addEventListener("click", (e) => { if (e.target === $("fondo_comprobante")) cerrar_comprobante(); });
+
+  // Si el usuario crea (o quita) una plataforma en el popup mientras esta página
+  // está abierta, los desplegables se actualizan solos, sin recargar y sin perder
+  // lo que estuviera seleccionado ni la edición en curso.
+  if (chrome.storage && chrome.storage.onChanged) {
+    chrome.storage.onChanged.addListener(async (cambios, area) => {
+      if (area !== "local" || !cambios[CLAVE_PLATAFORMAS_USUARIO]) return;
+      poblar_selects_de_plataforma(await obtener_plataformas_registro());
+    });
+  }
 }
 
 inicializar_registro();
