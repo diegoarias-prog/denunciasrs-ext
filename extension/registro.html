@@ -273,8 +273,17 @@
     </div>
   </div>
 
+  <!-- MISMAS dependencias de datos que popup.html y en el MISMO orden: así el
+       Registro conoce TODAS las plataformas (window.FORMULARIOS) y no una lista
+       escrita a mano que se queda vieja. Ninguno de estos archivos toca el DOM,
+       sólo publican datos en window; formularios.js necesita correos_denuncia.js
+       cargado antes (le suma los buzones fijos por red). NO se cargan exceljs,
+       motor.js ni popup.js: esta página no los usa. -->
   <script src="datos/marcas.js"></script>
+  <script src="datos/justificaciones.js"></script>
+  <script src="datos/politicas_generales.js"></script>
   <script src="datos/correos_denuncia.js"></script>
+  <script src="datos/formularios.js"></script>
   <script src="registro.js"></script>
 </body>
 </html>
