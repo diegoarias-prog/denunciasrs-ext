@@ -394,8 +394,24 @@
     if (!perfil) avisos.push("La marca «" + marca + "» no tiene <b>perfil de " + red + "</b>, <b>sitio web</b>, " +
       "<b>dominio</b> ni <b>app</b> guardados, y Meta exige un enlace de ejemplo a la obra. " +
       "Añade uno en <b>⚙ Marcas</b> o pégalo a mano antes de enviar.");
-    var C = '[name="copyright_owner"]'; // marca de agua del formulario CLÁSICO
-    return { url: this.url, manual: this.manual, avisos: avisos, pasos: [
+    // MARCA DE AGUA del formulario CLÁSICO. Antes se miraba un ÚNICO campo
+    // ([name="copyright_owner"]): si Meta le cambiaba el name, ese `siHay` fallaba, se
+    // saltaban TODOS los pasos del clásico y encima corrían los del portal nuevo (que
+    // tampoco casan) => no se rellenaba NADA. Ahora es una lista de selectores separados
+    // por coma (querySelector la acepta nativamente): basta con que exista UNO de estos
+    // names para saber que estamos en esa variante. OJO: solo se listan names EXCLUSIVOS
+    // de derechos de autor. `confirm_email`, `email`, `your_name`, `reporter_name` y
+    // `why_reporting_other` NO valen: el formulario de Marca Registrada de Meta también
+    // los lleva (visto en el informe real del 2026-08-22), y con ellos el plan de
+    // copyright se dispararía dentro del formulario de marca si el usuario ya estaba ahí.
+    // La firma sí distingue: copyright usa `Electronic_sig` y marca usa `signature`.
+    var C = '[name="copyright_owner"],[name="describe_copyrighted_work_me"],[name="describe_copyrighted_work_me_URLs"],[name="Electronic_sig"]';
+    // `insistir`: el portal nuevo de Meta a veces pasa por una pantalla intermedia (o tarda
+    // en pintar el formulario), así que con UNA sola pasada la extensión llegaba antes que
+    // los campos y no rellenaba nada. Con esto, si la 1.ª pasada no reconoce NINGÚN campo,
+    // el service worker reintenta solo hasta 3 min. NO se usa `autorepetir`: eso reabriría
+    // los desplegables cada 2,5 s y pisaría lo que el usuario escriba a mano.
+    return { url: this.url, manual: this.manual, avisos: avisos, insistir: true, pasos: [
       // ================= A) Formulario CLÁSICO (campos con `name`) =================
       { tipo: "radio", siHay: C, name: "copyright_owner",
         texto: "soy el propietario|i am the rights owner", esperaMs: 800 },
