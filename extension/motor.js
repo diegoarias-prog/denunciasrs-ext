@@ -117,11 +117,42 @@ async function APLICAR(pasos, opciones) {
     return norm(t);
   }
   let ok = 0; const faltan = []; const clicsReales = [];
+  // ---------------------------------------------------------------------------
+  //  MARCAS PARA LOS CLICS REALES: por qué el sufijo tiene que ser ÚNICO.
+  //  A los radios/casillas que hay que clicar de verdad (los sintéticos no "pegan" en
+  //  React) se les pone un atributo, y el service worker los localiza DESPUÉS por ese
+  //  atributo con document.querySelector.
+  //  El fallo que hubo aquí: el atributo era "data-cr-" + clicsReales.length, o sea
+  //  data-cr-0, data-cr-1... y ese contador vuelve a 0 en CADA invocación de APLICAR,
+  //  mientras que los atributos se quedaban pegados en el DOM para siempre. Con varias
+  //  pasadas (el bucle del service worker hace muchas) el documento acumulaba varios
+  //  data-cr-0 de pasadas distintas, y querySelector devuelve EL PRIMERO: el clic real
+  //  podía caer sobre una casilla YA MARCADA y DESMARCARLA. Si esa casilla era una de
+  //  la Declaración (buena fe / bajo pena de perjurio), la denuncia se enviaba con una
+  //  declaración legal sin firmar. Por eso: sufijo distinto por invocación + limpieza
+  //  de las marcas de las pasadas anteriores al entrar.
+  // ---------------------------------------------------------------------------
+  // Limpieza de lo que dejaron pasadas anteriores. Los nombres de esos atributos se
+  // guardan en la propia página (window.__rs_clicsPrevios) porque APLICAR se inyecta de
+  // cero cada vez y no puede recordar nada entre invocaciones.
+  try {
+    const marcasPrevias = window.__rs_clicsPrevios || [];
+    for (let i = 0; i < marcasPrevias.length; i++) {
+      const nombre = marcasPrevias[i];
+      Array.prototype.slice.call(document.querySelectorAll("[" + nombre + "]"))
+        .forEach(function (e) { try { e.removeAttribute(nombre); } catch (x) {} });
+    }
+    window.__rs_clicsPrevios = [];
+  } catch (e) { /* página rara sin window/document utilizable: seguimos igual */ }
+  // Sufijo irrepetible de ESTA invocación (hora en base 36 + azar): solo letras y
+  // números, que es lo que admite un nombre de atributo y un selector [data-...].
+  const sufijoDeEstaPasada = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   // Etiqueta un radio/checkbox para que el service worker le dé un CLIC REAL después.
   function marcarParaClicReal(el) {
     if (!el) return;
-    const attr = "data-cr-" + clicsReales.length; // atributo ÚNICO (no se sobrescribe)
+    const attr = "data-cr-" + sufijoDeEstaPasada + "-" + clicsReales.length; // ÚNICO en todo el documento
     try { el.setAttribute(attr, "1"); } catch (e) { return; }
+    try { (window.__rs_clicsPrevios = window.__rs_clicsPrevios || []).push(attr); } catch (e) {}
     clicsReales.push("[" + attr + "]");
   }
   // VARIAS PASADAS automáticas: TikTok revela partes del formulario con retraso, así
@@ -961,6 +992,18 @@ async function APLICAR(pasos, opciones) {
     inventario = { campos: [], opciones: [] };
     try {
       const visible = (e) => { const r = e.getBoundingClientRect(); return r.width > 2 && r.height > 2; };
+      // CREDENCIALES FUERA DEL INFORME. El informe se guarda en `ultimo_informe`, el
+      // usuario lo copia con "📋 Copiar informe" y nos lo manda por correo o chat: NUNCA
+      // puede llevar una contraseña, un código de un solo uso ni un número de tarjeta.
+      // Estos campos se listan igual (para saber que existen y por qué no se rellenaron),
+      // pero con "(campo protegido)" en lugar del valor.
+      const AUTOCOMPLETADO_SECRETO = /current-password|new-password|one-time-code|cc-number|cc-csc|cc-exp/;
+      const esSecreto = (e) => {
+        const t = (e.type || "").toLowerCase();
+        if (t === "password") return true;
+        const ac = ((e.getAttribute && e.getAttribute("autocomplete")) || "").toLowerCase();
+        return AUTOCOMPLETADO_SECRETO.test(ac);
+      };
       Array.prototype.slice.call(document.querySelectorAll('textarea,input,select')).forEach(function (e) {
         const t = (e.type || "").toLowerCase();
         if (t === "hidden" || !visible(e)) return;
@@ -969,7 +1012,7 @@ async function APLICAR(pasos, opciones) {
         } else {
           inventario.campos.push({
             rotulo: rotuloDe(e), tag: e.tagName.toLowerCase(),
-            valor: ((e.value || "") + "").replace(/\s+/g, " ").slice(0, 70),
+            valor: esSecreto(e) ? "(campo protegido)" : ((e.value || "") + "").replace(/\s+/g, " ").slice(0, 70),
             bloqueado: !!(e.disabled || e.readOnly)
           });
         }
@@ -980,6 +1023,13 @@ async function APLICAR(pasos, opciones) {
   }
   return {
     ok: ok, faltan: faltan, clicsReales: clicsReales,
+    // `hechos` = campos que de VERDAD se tocaron (el registro solo crece cuando se
+    // escribió, marcó o eligió algo; un paso que no toca la página no anota nada).
+    // Hace falta aparte de `ok` porque `ok` también cuenta pasos que no escriben: p. ej.
+    // el `clickBoton` con `avanza:true` suma aunque el botón "Siguiente" no exista (caso
+    // "formulario de una sola página"), así que una página SIN formulario devuelve ok=1.
+    // Quien quiera saber si no se reconoció NADA debe mirar `hechos`, no `ok`.
+    hechos: registro.length,
     informe: { pasos: Array.from(informePasos.values()), inventario: inventario }
   };
 }

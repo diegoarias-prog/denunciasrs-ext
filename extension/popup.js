@@ -1009,6 +1009,17 @@ function esperar_carga(tabId) {
   });
 }
 
+// OJO: EL RELLENO SE INYECTA SOLO EN EL MARCO PRINCIPAL, Y ES A PROPÓSITO.
+// Hubo la tentación de reintentar en todos los marcos (`executeScript({ allFrames: true })`)
+// por si el formulario viniera dentro de un iframe. NO se hace: `executeScript` no "mide",
+// EJECUTA Y ESCRIBE. Y como la rama del portal nuevo de Meta se detecta POR DESCARTE
+// (`siNoHay: C`), esos pasos correrían en CUALQUIER marco que no tenga los `name` del
+// formulario clásico —un iframe de login de Meta o de un tercero, por ejemplo— y ese marco
+// recibiría el correo, el teléfono, la dirección postal y la firma de la marca (setNative
+// dispara input/change con bubbles:true, así que su JS los lee al instante). Es una fuga de
+// datos de la marca a páginas ajenas. Si algún día vuelve a hacer falta, hay que resolverlo
+// de otra forma, no inyectando el plan entero en marcos desconocidos.
+
 async function rellenar() {
   const formKey = $("sel_form").value;
   const marca = $("sel_marca").value;
@@ -1107,7 +1118,25 @@ async function rellenar() {
   // del suplantador, que es justo donde suele estar el usuario al denunciar.
   // (Si no coincide no pasa nada malo: se abre el formulario en una pestaña aparte.)
   const raiz_del_formulario = hostForm.split(".").slice(-2).join(".");
-  const es_el_mismo_sitio = (hostTab === raiz_del_formulario) || hostTab.endsWith("." + raiz_del_formulario);
+  const es_el_mismo_host = (hostTab === raiz_del_formulario) || hostTab.endsWith("." + raiz_del_formulario);
+  // IDENTIFICACIÓN POSITIVA: además del host, la RUTA tiene que casar (una prefijo de la
+  // otra, por segmentos completos). Con solo el host bastaba estar en help.meta.com con
+  // OTRO formulario de Meta abierto (p. ej. Marca Registrada) para que "Derechos de autor"
+  // rellenara ESE formulario —incluidas las casillas de declaración BAJO PENA DE PERJURIO—
+  // y, con Facebook/Instagram en autoenvío, llegara a enviarse. Si la ruta no casa no pasa
+  // nada malo: se sigue el camino de siempre, abrir el formulario en una pestaña aparte.
+  // En MINÚSCULAS: hay formularios con mayúsculas en la ruta (TikTok: /legal/report/Copyright)
+  // y el sitio puede redirigir a la versión en minúsculas.
+  const ruta_de = (u) => { try { return new URL(u).pathname.toLowerCase().replace(/\/+$/, ""); } catch (e) { return ""; } };
+  const rutaForm = ruta_de(plan.url), rutaTab = ruta_de(tab.url);
+  // UN SOLO SENTIDO: la ruta de la PESTAÑA tiene que empezar por la del FORMULARIO,
+  // nunca al revés. Aceptarlo en los dos sentidos dejaba pasar rutas MÁS CORTAS (p. ej.
+  // help.meta.com/requests, el panel de solicitudes del usuario) como si fueran el
+  // formulario, y entonces se rellenaba y se capturaba esa página.
+  const es_la_misma_ruta = !rutaForm
+    ? (rutaTab === rutaForm) // formulario en la raíz del sitio: solo vale la raíz
+    : (rutaTab === rutaForm || rutaTab.indexOf(rutaForm + "/") === 0);
+  const es_el_mismo_sitio = es_el_mismo_host && es_la_misma_ruta;
   if (!es_el_mismo_sitio) {
     mostrar_estado("aviso", "Abriendo el formulario en una pestaña aparte…");
     const nueva = await chrome.tabs.create({ url: plan.url, active: false });
@@ -1121,10 +1150,15 @@ async function rellenar() {
   // Sin esto el botón no aparecía nunca en la pestaña nueva. Ver background.js.
   try { await chrome.runtime.sendMessage({ accion: "activarCaptura", tabId: objetivoTabId }); }
   catch (e) { /* si el service worker no responde, queda el botón del popup */ }
+  // Se corta cualquier bucle VIEJO que siguiera vivo en esta pestaña (de una denuncia
+  // anterior). Si no, ese bucle podría capturar un comprobante o enviar por su cuenta
+  // encima de la denuncia nueva, mezclando las dos.
+  try { await chrome.runtime.sendMessage({ accion: "detenerAutorelleno", tabId: objetivoTabId }); }
+  catch (e) { /* si el service worker no responde, no hay bucle vivo que parar */ }
   mostrar_estado("aviso", "Rellenando…");
   try {
     const res = await chrome.scripting.executeScript({
-      target: { tabId: objetivoTabId },
+      target: { tabId: objetivoTabId }, // SOLO el marco principal (ver el aviso de los iframes, arriba)
       func: APLICAR,
       // {informe:true} => además de rellenar, devuelve el paso a paso y el inventario
       // de campos de la página. Solo en este primer clic (el bucle del service worker
@@ -1132,6 +1166,11 @@ async function rellenar() {
       args: [plan.pasos, { informe: true }]
     });
     const r = (res && res[0] && res[0].result) || { ok: 0, faltan: [], clicsReales: [] };
+    // ¿NO se reconoció NADA? Se mide con `hechos` (campos de verdad escritos/marcados),
+    // no con `ok`: `ok` cuenta también el paso del botón "Siguiente" cuando el botón no
+    // existe, así que una página SIN formulario devuelve ok=1 y parecería que algo se hizo.
+    // (`r.ok === 0` queda de respaldo por si el motor fuera una versión vieja sin `hechos`.)
+    const nada = (r.hechos != null ? r.hechos === 0 : r.ok === 0);
     // Se guarda el informe para el botón "📋 Copiar informe" del popup.
     try {
       const inf = r.informe || {};
@@ -1154,6 +1193,7 @@ async function rellenar() {
     // service worker (no en el popup ni en un timer de la página), así sobrevive a cerrar el
     // popup y a irse a verificar el correo. Ver autorelleno() en background.js.
     const autoEnviable = REDES_AUTOENVIO_POPUP.indexOf(form.red) >= 0;
+    let insistiendo = false; // true = el service worker se quedó reintentando en segundo plano
     if (plan.autorepetir) {
       // La 1.ª etapa (los desplegables) ya quedó hecha en este primer clic; se excluye de la
       // repetición para NO reabrirlos cada pocos segundos. El bucle solo insiste en los campos
@@ -1162,29 +1202,53 @@ async function rellenar() {
       const pasos2 = plan.pasos.filter(function (p) { return p.tipo !== "dropdown"; });
       try { await chrome.runtime.sendMessage({ accion: "iniciarAutorelleno", tabId: objetivoTabId, pasos: pasos2, autoenviar: autoEnviable, marca: marca, enviarLabel: plan.enviarLabel }); }
       catch (e) { /* si el service worker no responde, el usuario puede pulsar Rellenar otra vez */ }
+    } else if (plan.insistir && nada) {
+      // No se reconoció NI UN campo y el plan pide INSISTIR (Meta · Derechos de autor):
+      // la página aún no ha pintado el formulario (pantalla intermedia del portal nuevo,
+      // carga lenta, o el formulario dentro de un iframe). En vez de dar el asunto por
+      // terminado —que es lo que hacía "finalizar"—, el service worker reintenta solo
+      // hasta 3 min y, cuando aparezca, rellena y sigue el flujo normal.
+      insistiendo = true;
+      // `urlForm` ANCLA el bucle a ESTA página: si la pestaña se va (Meta redirige al
+      // login, el usuario navega), el service worker para en vez de escribir los datos de
+      // la marca en otra pantalla y guardarla como comprobante. Ver insistirRelleno.
+      try { await chrome.runtime.sendMessage({ accion: "insistirRelleno", tabId: objetivoTabId, pasos: plan.pasos, autoenviar: autoEnviable, marca: marca, enviarLabel: plan.enviarLabel, urlForm: plan.url }); }
+      catch (e) { insistiendo = false; /* si el service worker no responde, el usuario puede pulsar Rellenar otra vez */ }
     } else {
       // Formulario NO progresivo: el service worker captura y (si no hay captcha) envía solo.
       try { await chrome.runtime.sendMessage({ accion: "finalizar", tabId: objetivoTabId, marca: marca, autoenviar: autoEnviable, enviarLabel: plan.enviarLabel, faltan: (r.faltan || []) }); }
       catch (e) { /* el usuario puede enviar a mano */ }
     }
-    let html = "✓ <b>" + r.ok + "</b> campo(s) rellenado(s)." +
+    let html = "✓ <b>" + (r.hechos != null ? r.hechos : r.ok) + "</b> campo(s) rellenado(s)." +
       (objetivoTabId !== tab.id ? " El formulario se abrió en una <b>pestaña aparte</b>." : "");
     if (form.manual) html += "<br><br>📌 " + form.manual;
     // AVISOS del plan: datos de la marca que el formulario exige y no están guardados
     // (p. ej. el enlace de ejemplo a la obra en Derechos de autor). No bloquean el
     // relleno, pero hay que verlos ANTES de enviar.
     if (plan.avisos && plan.avisos.length) html += "<br><br>⚠ " + plan.avisos.join("<br>⚠ ");
-    if (r.faltan && r.faltan.length) html += "<br><br>No se encontraron (revisa a mano): " + r.faltan.join(", ") +
+    // `faltan` sale de los rótulos del PLAN, pero mostrar_estado escribe con innerHTML:
+    // se escapa igual que `marca`, para que ningún texto pueda inyectar HTML en el popup.
+    if (r.faltan && r.faltan.length) html += "<br><br>No se encontraron (revisa a mano): " + escapar_html(r.faltan.join(", ")) +
       "<br>👉 Si algo quedó vacío, pulsa <b>📋 Copiar informe</b> (abajo) y mándamelo: dice exactamente qué campos vio y con qué rótulo.";
+    // CERO campos: antes esto se decía solo si `faltan` traía algo, y justo en el peor caso
+    // (no se reconoce NADA, que es cuando el informe hace más falta) el popup se callaba.
+    if (nada) html += "<br><br>⚠ <b>No reconocí NINGÚN campo de esta página.</b>" +
+      "<br>👉 Pulsa <b>📋 Copiar informe</b> (abajo) y mándamelo: dice exactamente qué vio la extensión en la página.";
+    // Y si además el plan pide insistir, se le dice que NO tiene que hacer nada más.
+    if (insistiendo) html += "<br><br>⏳ <b>La página todavía no muestra el formulario.</b> " +
+      "La extensión <b>seguirá intentándolo sola hasta 3 minutos</b> y lo rellenará en cuanto aparezca: " +
+      "<b>no hace falta que vuelvas a pulsar nada</b>. Deja abierta la pestaña del formulario.";
     if (autoEnviable) {
-      html += plan.autorepetir
+      html += (plan.autorepetir || insistiendo)
         ? "<br><br>🚀 Cuando el formulario quede completo, la extensión <b>capturará el comprobante y lo enviará sola</b> (5 s para cancelar en la pestaña del formulario)."
         : "<br><br>🚀 La extensión está <b>capturando el comprobante y enviando</b> (5 s para cancelar en la pestaña del formulario).";
     } else {
       html += "<br><br>⚠ Este formulario tiene <b>captcha</b>: la extensión capturó el comprobante; <b>resuelve el captcha y pulsa Enviar</b> tú.";
     }
     html += "<br><br>📓 Registrada como pendiente — agrega el N.º de caso en Registro.";
-    mostrar_estado(r.ok > 0 ? "ok" : "aviso", html);
+    // El color del aviso sigue a `nada`, no a `ok`: con ok=1 por el paso del botón
+    // "Siguiente" saldría en verde una página en la que no se reconoció ni un campo.
+    mostrar_estado(nada ? "aviso" : "ok", html);
   } catch (e) {
     // Igual que arriba: el error de chrome.scripting puede citar la URL de la pestaña.
     mostrar_estado("error", "Error al rellenar: " + escapar_html(e && e.message ? e.message : e) +

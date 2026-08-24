@@ -148,6 +148,155 @@ async function autorelleno(tabId, pasos, opts) {
   }
 }
 
+// ============================================================================
+//  OJO: AQUÍ NO SE INYECTA EN IFRAMES, Y ES A PROPÓSITO.
+//  Hubo la tentación de probar el relleno en todos los marcos
+//  (`executeScript({ allFrames: true })`) por si el formulario viniera dentro de un
+//  iframe. NO se hace: `executeScript` no "mide", EJECUTA Y ESCRIBE. Y como toda la
+//  rama del portal nuevo de Meta se detecta POR DESCARTE (`siNoHay: C`), esos pasos se
+//  ejecutarían en CUALQUIER marco que no tenga los `name` del formulario clásico —por
+//  ejemplo un iframe de login de Meta o de un tercero—, y ese marco recibiría el correo,
+//  el teléfono, la dirección postal y la firma de la marca (setNative dispara
+//  input/change con bubbles:true, así que su JS los lee en el acto). Es una fuga de
+//  datos de la marca a páginas ajenas. Se inyecta SOLO en el marco principal, siempre.
+// ============================================================================
+
+// ¿La pestaña sigue en LA PÁGINA del formulario? Mismo host (o subdominio del host del
+// formulario) y ruta compatible (una prefijo de la otra, por segmentos completos).
+// Sirve para anclar el bucle de abajo: si Meta redirige al LOGIN —que es justo el caso
+// que dispara el bucle—, la extensión NO debe escribir ahí los datos de la marca, ni
+// darle clics reales con el depurador, ni guardar esa pantalla como comprobante.
+function mismaPaginaDelFormulario(urlActual, urlForm) {
+  try {
+    const a = new URL(urlActual), b = new URL(urlForm);
+    const ha = a.host.replace(/^www\./, ""), hb = b.host.replace(/^www\./, "");
+    if (!(ha === hb || ha.endsWith("." + hb))) return false;
+    // Rutas en MINÚSCULAS: hay formularios cuya URL lleva mayúsculas (TikTok:
+    // /legal/report/Copyright) y el sitio puede redirigir a la versión en minúsculas;
+    // sin esto la comparación fallaría y el bucle se cancelaría estando en la página buena.
+    const pa = a.pathname.toLowerCase().replace(/\/+$/, ""), pb = b.pathname.toLowerCase().replace(/\/+$/, "");
+    // UN SOLO SENTIDO: la ruta de la PESTAÑA tiene que empezar por la del FORMULARIO,
+    // nunca al revés. Aceptarlo en los dos sentidos dejaba pasar una ruta MÁS CORTA
+    // como si fuera el formulario: p. ej. help.meta.com/requests (el panel de
+    // solicitudes del usuario, con sus datos personales) contaba como el formulario
+    // /requests/1523801815366035, y ahí el bucle habría escrito los datos de la marca
+    // y habría guardado esa pantalla como comprobante de la denuncia.
+    if (!pb) return pa === pb; // formulario en la raíz del sitio: solo vale la raíz
+    return pa === pb || pa.indexOf(pb + "/") === 0;
+  } catch (e) { return false; }
+}
+
+// Comprueba, ANTES de cada reinyección, que la pestaña sigue en la página del formulario.
+// Marca `seFue`/`cancelar` en el estado del bucle si se ha ido, para que quien llama solo
+// tenga que salir. Si `chrome.tabs.get` lanza (pestaña cerrada), también se sale.
+async function sigueEnElFormulario(tabId, urlForm, estado) {
+  if (!urlForm) return true; // sin URL de referencia no hay nada que comparar
+  let t = null;
+  try { t = await chrome.tabs.get(tabId); } catch (e) { estado.cancelar = true; return false; }
+  if (!t || !mismaPaginaDelFormulario(t.url || "", urlForm)) { estado.cancelar = true; estado.seFue = true; return false; }
+  return true;
+}
+
+// ============================================================================
+//  BUCLE "INSISTIR" (OJO: NO es el autorrelleno de arriba).
+//  El autorrelleno de TikTok repite SIEMPRE, porque allí van apareciendo campos nuevos.
+//  Aquí el caso es otro (Meta · Derechos de autor): el formulario a veces NO está pintado
+//  todavía cuando el usuario pulsa Rellenar (pantalla intermedia del portal nuevo o carga
+//  lenta), así que la 1.ª pasada no reconoce NADA.
+//  Por eso este bucle solo insiste MIENTRAS NO SE HAYA RELLENADO NADA: en cuanto una
+//  pasada consigue algo, hace una pasada completa, dispara los clics reales y se va. Así
+//  nunca reabre desplegables ni pisa lo que el usuario esté escribiendo a mano.
+//  "No se rellenó nada" se mide con `hechos` (campos de verdad escritos/marcados), NO con
+//  `ok`: `ok` cuenta también el paso del botón "Siguiente" cuando el botón no existe, así
+//  que una página vacía devuelve ok=1 y el bucle no arrancaría jamás.
+// ============================================================================
+async function insistirRelleno(tabId, pasos, opts) {
+  opts = opts || {};
+  const urlForm = opts.urlForm || "";
+  if (AUTORRELLENO[tabId]) AUTORRELLENO[tabId].cancelar = true; // cancela un bucle previo del mismo tab
+  const estado = { cancelar: false, seFue: false };
+  AUTORRELLENO[tabId] = estado; // se comparte el registro: así "detenerAutorelleno" y onRemoved también lo paran
+
+  // Si la pestaña NAVEGA fuera del formulario (lo típico: Meta manda al login), se corta
+  // en el acto, sin esperar a la siguiente vuelta del bucle.
+  const vigilarNavegacion = (id, info, tab) => {
+    if (id !== tabId) return;
+    const u = (info && info.url) || (tab && tab.url) || "";
+    if (u && !mismaPaginaDelFormulario(u, urlForm)) { estado.cancelar = true; estado.seFue = true; }
+  };
+  if (urlForm) { try { chrome.tabs.onUpdated.addListener(vigilarNavegacion); } catch (e) {} }
+
+  const fin = Date.now() + 180000; // 3 min de tope
+  let ultimoFaltan = [], relleno = false, cortado = false;
+
+  while (!estado.cancelar && Date.now() < fin) {
+    await dormir(2500); // la 1.ª pasada ya la hizo el popup; aquí solo reintentamos
+    if (estado.cancelar) break;
+    if (!(await sigueEnElFormulario(tabId, urlForm, estado))) break; // ANCLA a la página del formulario
+    let res = null;
+    try {
+      const r = await chrome.scripting.executeScript({
+        target: { tabId: tabId }, // SOLO el marco principal (ver el aviso de los iframes, arriba)
+        func: APLICAR,
+        args: [pasos, { unaPasada: true }]
+      });
+      res = (r && r[0] && r[0].result) || null;
+    } catch (e) {
+      cortado = true; break; // la pestaña se cerró o navegó fuera: salimos sin romper nada
+    }
+    if (res && res.faltan) ultimoFaltan = res.faltan;
+    const nada = res ? (res.hechos != null ? res.hechos === 0 : res.ok === 0) : true;
+    if (!nada) { relleno = true; break; } // ya hay formulario: dejamos de insistir
+  }
+
+  // Ya apareció el formulario: UNA pasada completa (sin `unaPasada`, para que el motor
+  // haga sus reintentos internos) + los clics reales de radios/casillas.
+  if (relleno && !estado.cancelar && (await sigueEnElFormulario(tabId, urlForm, estado))) {
+    try {
+      const r2 = await chrome.scripting.executeScript({ target: { tabId: tabId }, func: APLICAR, args: [pasos, {}] });
+      const res2 = (r2 && r2[0] && r2[0].result) || null;
+      if (res2) {
+        if (res2.faltan) ultimoFaltan = res2.faltan;
+        if (res2.clicsReales && res2.clicsReales.length) {
+          try { await hacerClics(tabId, res2.clicsReales); } catch (e) { /* radios a mano y ya */ }
+        }
+      }
+    } catch (e) { cortado = true; }
+  }
+
+  if (urlForm) { try { chrome.tabs.onUpdated.removeListener(vigilarNavegacion); } catch (e) {} }
+  if (AUTORRELLENO[tabId] === estado) delete AUTORRELLENO[tabId];
+
+  // La pestaña YA NO está en el formulario: ni comprobante ni envío. Esa pantalla (un
+  // login, otra web…) no es la denuncia; guardarla como prueba falsearía el Registro y
+  // además expondría lo que hubiera en ella. Solo se avisa.
+  if (estado.seFue) {
+    ctxAvisar(tabId, "Denuncias RS: la pestaña salió de la página del formulario, así que dejé de rellenar " +
+      "(no se capturó comprobante ni se envió nada). Vuelve al formulario y pulsa Rellenar otra vez.", true);
+    return;
+  }
+  if (cortado || estado.cancelar) return; // pestaña cerrada, o lo paró el usuario / otra denuncia
+
+  // BLINDAJE ANTI FORMULARIO EN BLANCO: si no se rellenó nada, `faltan` puede venir vacío
+  // (la pasada ni siquiera devolvió resultado). Se marca a mano para que finalizarEnvio
+  // —que SOLO envía con `faltan` vacío— jamás mande un formulario vacío.
+  if (!relleno && !ultimoFaltan.length) ultimoFaltan = ["el formulario nunca llegó a mostrarse"];
+
+  // A partir de aquí, exactamente lo mismo que hace hoy el flujo NO progresivo.
+  try {
+    if (opts.autoenviar) {
+      await finalizarEnvio(tabId, opts.marca || "", opts.enviarLabel, ultimoFaltan);
+    } else {
+      await activarPestana(tabId);
+      await guardarComprobante(tabId);
+      ctxAvisar(tabId, relleno
+        ? "Denuncias RS: comprobante capturado. Resuelve el captcha y pulsa Enviar."
+        : "Denuncias RS: la página no llegó a mostrar el formulario en 3 minutos. El comprobante se guardó igual; revísala y rellena a mano.",
+        !relleno);
+    }
+  } catch (e) { /* sin comprobante: el usuario tiene el botón 📸 */ }
+}
+
 // Si se cierra la pestaña, cancela su bucle de autorrelleno.
 chrome.tabs.onRemoved.addListener((tabId) => { if (AUTORRELLENO[tabId]) AUTORRELLENO[tabId].cancelar = true; });
 
@@ -466,6 +615,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // El popup pide que el service worker siga rellenando la 2.ª etapa por su cuenta.
     const tabId = msg.tabId || (sender && sender.tab && sender.tab.id);
     if (tabId && Array.isArray(msg.pasos)) autorelleno(tabId, msg.pasos, { autoenviar: !!msg.autoenviar, marca: msg.marca, enviarLabel: msg.enviarLabel }); // bucle en segundo plano; envía al completar si procede
+    sendResponse({ ok: true });
+    return; // no necesitamos mantener el canal abierto
+  }
+  if (msg && msg.accion === "insistirRelleno") {
+    // La 1.ª pasada del popup no reconoció NINGÚN campo (Meta · Derechos de autor suele
+    // tardar en pintar el formulario, o lo mete en un iframe). El service worker reintenta
+    // solo hasta 3 min: el usuario NO tiene que volver a pulsar Rellenar.
+    const tabId = msg.tabId || (sender && sender.tab && sender.tab.id);
+    // `urlForm` ANCLA el bucle a la página del formulario: sin ella el bucle escribiría en
+    // lo que la pestaña muestre en ese momento (p. ej. el login al que redirige Meta).
+    if (tabId && Array.isArray(msg.pasos)) insistirRelleno(tabId, msg.pasos, { autoenviar: !!msg.autoenviar, marca: msg.marca, enviarLabel: msg.enviarLabel, urlForm: msg.urlForm || "" });
     sendResponse({ ok: true });
     return; // no necesitamos mantener el canal abierto
   }
@@ -826,7 +986,28 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 // Si la marca no tiene PAÍS (campo obligatorio en los formularios de Meta y compañía) se
 // avisa y no se sigue: sin él el formulario no deja avanzar y el usuario se queda con un
 // "This field is required" sin explicación.
-async function ctxEjecutarPlan(tabId, plan, marca, form, datos) {
+// `urlEsperada` es la página en la que TIENE que estar la pestaña para rellenar. Por
+// defecto es la del plan (la que la extensión acaba de abrir); "Rellenar ESTA página"
+// pasa la URL que el usuario tenía y que ctxDetectarForm ya validó, porque ahí el
+// formulario bueno puede estar en otra ruta del mismo sitio.
+async function ctxEjecutarPlan(tabId, plan, marca, form, datos, urlEsperada) {
+  // ANCLA A LA PÁGINA DEL FORMULARIO (misma razón que en insistirRelleno).
+  // Hasta aquí se abría la pestaña, se esperaba a "complete" + 1,8 s y se inyectaba el
+  // plan SIN mirar en qué URL había acabado. Si Meta redirige al LOGIN, el paso
+  // fillLabel «correo electronico|email address» casa con "Correo electrónico o número
+  // de teléfono" de esa pantalla: se escribiría ahí el correo de la marca, se le darían
+  // clics reales con el depurador y se guardaría esa pantalla como comprobante de la
+  // denuncia. Si la pestaña no está donde debe: se avisa y no se toca NADA.
+  const urlDeReferencia = urlEsperada || (plan && plan.url) || "";
+  if (urlDeReferencia) {
+    let t = null;
+    try { t = await chrome.tabs.get(tabId); } catch (e) { return; } // pestaña cerrada
+    if (!t || !mismaPaginaDelFormulario(t.url || "", urlDeReferencia)) {
+      ctxAvisar(tabId, "Denuncias RS: la página no es el formulario (puede que te haya mandado a iniciar sesión), " +
+        "así que NO se rellenó nada ni se capturó comprobante. Inicia sesión, vuelve al formulario y repite.", true);
+      return;
+    }
+  }
   // Denunciar en esta pestaña = activar la extensión aquí: se muestra el botón flotante
   // de capturar comprobante (que por defecto está oculto mientras solo se navega) y la
   // pestaña queda marcada para que el botón siga visible al avanzar el formulario.
@@ -877,7 +1058,11 @@ async function ctxRellenarPagina(tab, marca, objetivo) {
   if (!a) { ctxAvisar(tab.id, "Denuncias RS: no encuentro la marca «" + marca + "».", true); return; }
   if (ctxFaltaElCorreo(tab.id, marca, a.datos)) return;
   await ctxRegistrarDenuncia(marca, a.form, (objetivo && objetivo[0]) || "");
-  try { await ctxEjecutarPlan(tab.id, a.form.construirPlan(a.ctx), marca, a.form, a.datos); }
+  // La referencia es la URL que el usuario TENÍA (la que ctxDetectarForm reconoció como
+  // formulario), no la del plan: Meta sirve el mismo formulario en dos direcciones
+  // distintas, y aquí el usuario ya estaba en una de ellas. Aun así se comprueba, para
+  // cortar si la página se fue al login entre el clic del menú y la inyección.
+  try { await ctxEjecutarPlan(tab.id, a.form.construirPlan(a.ctx), marca, a.form, a.datos, tab.url || ""); }
   catch (e) { ctxAvisar(tab.id, "Denuncias RS: no se pudo rellenar aquí (" + (e.message || e) + ").", true); }
 }
 
