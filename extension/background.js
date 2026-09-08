@@ -97,19 +97,161 @@ async function hacerClics(tabId, selectores) {
 //  el correo. Por eso antes había que pulsar "Rellenar" por 2.ª vez al volver del correo.
 //  Solución: tras el primer clic, el service worker REPITE por su cuenta lo mismo que hacía
 //  ese 2.º clic —re-inyecta APLICAR (una pasada) + clics reales— cada pocos segundos, hasta
-//  ~5 min o hasta que el formulario quede completo. Vive en el service worker: sobrevive a
-//  cerrar el popup y a irse a verificar el correo. Un solo "Rellenar" basta.
+//  que el formulario quede completo. Vive en el service worker: sobrevive a cerrar el popup
+//  y a irse a verificar el correo. Un solo "Rellenar" basta.
+//
+//  POR QUÉ SE REESCRIBIÓ (medido en vivo contra el formulario real, no supuesto):
+//   - En la pantalla "Verifica tu correo electrónico" NO existe ni un campo del formulario:
+//     solo hay UNA caja para escribir el correo. Nombre, titular, dirección, teléfono, Tipo
+//     de obra, Origen, Descripción, firma, casillas y URLs aparecen DESPUÉS de verificar.
+//   - Una pasada de APLICAR sobre esa pantalla tarda 13.717 ms MEDIDOS. Con el tope viejo de
+//     5 minutos y `dormir(2500)` cabían ~18 vueltas: se gastaban ENTERAS mientras el usuario
+//     seguía en su bandeja de correo. Cuando volvía verificado, el bucle ya había terminado
+//     y no rellenaba nada. Es exactamente lo que le pasó al usuario.
+//   Por eso ahora: tope de 30 min (verificar un correo pasa de 5 min con facilidad), una
+//   SONDA barata de solo lectura mientras no hay formulario (se reacciona en 2 s en vez de
+//   en 16 y no se quema CPU en pasadas de 13,7 s contra una pantalla vacía), tolerancia a
+//   fallos pasajeros de inyección y, sobre todo, NUNCA un comprobante en blanco.
 // ============================================================================
 const AUTORRELLENO = {}; // tabId -> { cancelar: bool }
 
+// SONDA DE SOLO LECTURA. Se inyecta en la pestaña antes de cada vuelta para saber si el
+// formulario YA apareció, sin escribir ni marcar NADA. Es crítico que no toque la página:
+// mientras dura la verificación, el usuario puede estar tecleando su correo o el código que
+// le llegó, y una pasada de relleno le pisaría lo escrito.
+// Devuelve el recuento de lo VISIBLE: cajas de texto, opciones (radios/casillas) y rótulos
+// `.field-title` (la clase con la que TikTok pinta el título de cada campo).
+//
+// OJO CON LOS `<select>`: NO cuentan como caja, y es a propósito. TikTok tiene un SELECTOR
+// DE IDIOMA `<select>` VISIBLE EN EL PIE de página, en TODAS las pantallas. Contándolo, la
+// pantalla de "Verifica tu correo electrónico" daba `cajas: 2` (la caja del correo + el
+// idioma) y la huella decía que YA había formulario: el bucle se ponía a lanzar la pasada
+// completa de 13,7 s en cada vuelta contra una pantalla vacía —justo lo que este arreglo
+// evita— y encima el motor podía escribir en la ÚNICA caja de esa pantalla, que es la del
+// correo de verificación que el usuario está tecleando. Medido en vivo el 2026-09-08.
+// Por eso se cuentan SOLO cajas de texto de verdad (textarea y los input de tipo
+// text/email/url/tel/number/search, o sin `type`, que el DOM ya devuelve como "text"), y se
+// dejan fuera select, button, submit, reset, image, file y hidden.
+function HUELLA_DEL_FORMULARIO() {
+  try {
+    var seVe = function (e) {
+      try {
+        var r = e.getBoundingClientRect();
+        if (r.width < 1 && r.height < 1) return false;
+        var s = window.getComputedStyle(e);
+        return s.display !== "none" && s.visibility !== "hidden";
+      } catch (x) { return false; }
+    };
+    var TIPOS_DE_CAJA = ["text", "email", "url", "tel", "number", "search"];
+    var cajas = 0, opciones = 0, rotulos = 0;
+    var campos = document.querySelectorAll("input,textarea"); // los `select` NO entran (ver arriba)
+    for (var i = 0; i < campos.length; i++) {
+      var e = campos[i];
+      var etiqueta = (e.tagName || "").toLowerCase();
+      var tipo = (e.type || "").toLowerCase();
+      if (!seVe(e)) continue;
+      if (tipo === "radio" || tipo === "checkbox") { opciones++; continue; }
+      if (etiqueta === "textarea") { cajas++; continue; }
+      if (etiqueta === "input" && TIPOS_DE_CAJA.indexOf(tipo) >= 0) { cajas++; }
+      // el resto (button, submit, reset, image, file, hidden…) no es una caja que rellenar
+    }
+    var titulos = document.querySelectorAll(".field-title");
+    for (var j = 0; j < titulos.length; j++) if (seVe(titulos[j])) rotulos++;
+    return { cajas: cajas, opciones: opciones, rotulos: rotulos };
+  } catch (x) {
+    return { cajas: 0, opciones: 0, rotulos: 0 };
+  }
+}
+
+// ¿La huella dice que YA hay formulario que rellenar? Es una señal POSITIVA a propósito:
+// solo se da por bueno lo que NINGUNA pantalla de verificación puede tener.
+//   - TikTok verifica el correo en DOS pantallas: la 1.ª pide el correo (1 caja) y la 2.ª
+//     pide el código de un solo uso enseñando el correo + el código (2 cajas). Las dos
+//     tienen 0 radios/casillas y como mucho 2 rótulos.
+//   - El formulario de verdad tiene 5+ cajas, 13 radios/casillas y 14 rótulos `.field-title`
+//     (medido sobre la copia fiel del formulario real: {cajas:9, opciones:13, rotulos:14}).
+// Por eso los umbrales van con MARGEN (3, no 2): un umbral de `cajas > 1` daba por buena la
+// pantalla del código y habría lanzado ahí la pasada de 13,7 s, encima de lo que el usuario
+// está tecleando. Con margen, entre "pantalla de verificación" y "formulario" no hay empate.
+function hayFormularioEnLaHuella(h) {
+  if (!h) return false;
+  return (h.opciones || 0) > 0 || (h.cajas || 0) >= 3 || (h.rotulos || 0) >= 3;
+}
+
 async function autorelleno(tabId, pasos, opts) {
   opts = opts || {};
+  const urlForm = opts.urlForm || "";
   if (AUTORRELLENO[tabId]) AUTORRELLENO[tabId].cancelar = true; // cancela un bucle previo del mismo tab
-  const estado = { cancelar: false };
+  const estado = { cancelar: false, seFue: false };
   AUTORRELLENO[tabId] = estado;
-  const fin = Date.now() + 300000; // 5 min (cubre el ida y vuelta de verificar el correo)
+  limpiarAvisoDelIcono(); // empieza un relleno nuevo: el aviso anterior del icono ya no aplica
+
+  // Se FIJA aquí a qué denuncia del Registro irá el comprobante. Si se resolviera al
+  // capturar —hasta 30 minutos después—, cualquier denuncia dada de alta mientras tanto
+  // habría pisado `ultima_denuncia_registro` y la foto se pegaría a la denuncia equivocada.
+  // Si quien arranca el bucle ya lo fijó (el clic derecho), se usa el suyo.
+  const idDenuncia = (opts.idDenuncia != null ? opts.idDenuncia : await denunciaEnCurso());
+
+  // Si la pestaña NAVEGA fuera del formulario (lo típico: el sitio manda al login), se corta
+  // en el acto, sin esperar a la siguiente vuelta del bucle. Igual que en insistirRelleno.
+  const vigilarNavegacion = (id, info, tab) => {
+    if (id !== tabId) return;
+    const u = (info && info.url) || (tab && tab.url) || "";
+    if (u && !mismaPaginaDelFormulario(u, urlForm)) { estado.cancelar = true; estado.seFue = true; }
+  };
+  if (urlForm) { try { chrome.tabs.onUpdated.addListener(vigilarNavegacion); } catch (e) {} }
+
+  // 30 MINUTOS. Antes eran 5 y no daban: verificar un correo (ir al buzón, esperar el
+  // mensaje, pulsar el enlace, volver) pasa de 5 min con facilidad, y encima esos 5 min se
+  // los comían las pasadas de 13,7 s contra la pantalla de verificación. Ahora la espera es
+  // barata (sonda de 2 s), así que aguantar media hora no cuesta nada.
+  const fin = Date.now() + 1800000;
   let limpias = 0, completado = false;
+  let toco = false;        // ¿ALGUNA pasada llegó a escribir/marcar algo de verdad?
+  let fallos = 0;          // fallos CONSECUTIVOS de inyección
+  let porFallos = false;   // se salió por acumular fallos de inyección
+  let cerrada = false;     // la pestaña se cerró
+  let huellaAnterior = null;
+
   while (!estado.cancelar && Date.now() < fin) {
+    // 1) ¿La pestaña sigue viva y en la página del formulario? Un fallo de inyección NO
+    //    puede matar el bucle, pero esto sí: si el usuario se fue (o cerró), se para.
+    let t = null;
+    try { t = await chrome.tabs.get(tabId); }
+    catch (e) { cerrada = true; estado.cancelar = true; break; }
+    if (urlForm && !mismaPaginaDelFormulario((t && t.url) || "", urlForm)) { estado.seFue = true; break; }
+
+    // 2) SONDA barata de SOLO LECTURA: ¿ya hay formulario? Cuesta milisegundos, frente a los
+    //    13,7 s de una pasada de APLICAR.
+    let huella = null;
+    try {
+      const rs = await chrome.scripting.executeScript({
+        target: { tabId: tabId }, // SOLO el marco principal (ver el aviso de los iframes, abajo)
+        func: HUELLA_DEL_FORMULARIO
+      });
+      huella = (rs && rs[0] && rs[0].result) || null;
+      fallos = 0; // inyección buena: el contador de fallos vuelve a cero
+    } catch (e) {
+      // Fallo PASAJERO típico: la página se está repintando/recargando justo al verificar el
+      // correo. Antes esto hacía `break` y el autorrelleno moría para siempre, en silencio.
+      if (++fallos >= 8) { porFallos = true; break; } // ~20 s seguidos sin poder inyectar
+      await dormir(2500);
+      continue;
+    }
+
+    // 3) Sigue la pantalla de "Verifica tu correo electrónico": NI UNA pasada de relleno.
+    //    Dos razones: no hay nada que rellenar, y la única caja en pantalla es la del correo
+    //    de verificación —escribir ahí sería pisarle al usuario lo que está tecleando—.
+    //    Se vuelve a sondear en 2 s, así en cuanto aparezca el formulario se reacciona casi
+    //    al instante en vez de tardar los ~16 s de una vuelta completa.
+    if (!hayFormularioEnLaHuella(huella)) {
+      huellaAnterior = huella;
+      await dormir(2000);
+      continue;
+    }
+    huellaAnterior = huella;
+
+    // 4) Ya hay formulario: pasada completa de relleno, como siempre.
     let res = null;
     try {
       const r = await chrome.scripting.executeScript({
@@ -118,33 +260,84 @@ async function autorelleno(tabId, pasos, opts) {
         args: [pasos, { unaPasada: true }]
       });
       res = (r && r[0] && r[0].result) || null;
+      fallos = 0;
     } catch (e) {
-      break; // la pestaña se cerró o navegó fuera del formulario: paramos
+      if (++fallos >= 8) { porFallos = true; break; }
+      await dormir(2500);
+      continue;
     }
     if (res && res.clicsReales && res.clicsReales.length) {
+      // ANCLA TAMBIÉN AQUÍ. `hacerClics` dispara clics REALES (de confianza, vía depurador)
+      // en las coordenadas de la página que esté cargada EN ESE INSTANTE, y entre la pasada
+      // de APLICAR —13,7 s medidos— y este punto la pestaña ha podido irse al login. Sin
+      // esta comprobación se daban clics de verdad sobre una pantalla ajena (medido: 6).
+      if (urlForm && !(await sigueEnElFormulario(tabId, urlForm, estado))) break; // deja `seFue` marcado
       try { await hacerClics(tabId, res.clicsReales); } catch (e) { /* seguimos igual */ }
     }
+    // ¿Se tocó la página de VERDAD? Se mide con `hechos` (campos escritos/marcados), no con
+    // `ok`: `ok` cuenta también el paso del botón "Siguiente" aunque el botón no exista, así
+    // que una página vacía devuelve ok=1. `res.ok` solo como respaldo por si el motor fuera
+    // una versión vieja que aún no devolvía `hechos`.
+    if (res && (res.hechos != null ? res.hechos > 0 : res.ok > 0)) toco = true;
     // Parada anticipada: 3 rondas seguidas sin campos faltantes = formulario ya completo.
-    // Durante la espera de verificación del correo, faltan.length > 0 (los campos de la 2.ª
-    // etapa aún no existen), así que el bucle NO se corta antes de tiempo.
     if (res && (!res.faltan || res.faltan.length === 0)) { if (++limpias >= 3) { completado = true; break; } }
     else limpias = 0;
     await dormir(2500);
   }
+
+  if (urlForm) { try { chrome.tabs.onUpdated.removeListener(vigilarNavegacion); } catch (e) {} }
   if (AUTORRELLENO[tabId] === estado) delete AUTORRELLENO[tabId];
+
+  // ---- SALIDAS SIN COMPROBANTE ----
+  if (cerrada) return;              // la pestaña ya no existe: no hay a quién avisar
+  // ÚLTIMA COMPROBACIÓN DEL ANCLA, YA FUERA DEL BUCLE. Entre la comprobación de la última
+  // vuelta y este punto hay una pasada completa de APLICAR (13,7 s medidos) más los clics
+  // reales: en ese hueco la pestaña ha podido irse al login. Sin esto se capturaba esa
+  // pantalla ajena como comprobante de la denuncia y, en las redes con autoenvío, se seguía
+  // hasta `clicRealEnviar`, que busca el botón por texto y se queda con el ÚLTIMO que case.
+  if (!estado.seFue && urlForm && !(await sigueEnElFormulario(tabId, urlForm, estado))) {
+    // sigueEnElFormulario ya deja marcado `seFue` (o `cancelar` si la pestaña se cerró).
+  }
+  if (estado.seFue) {
+    // Misma razón que en insistirRelleno: esa pantalla (un login, otra web…) no es la
+    // denuncia; guardarla como prueba falsearía el Registro y expondría lo que hubiera en ella.
+    await avisarDenunciaPendiente(tabId, "Denuncias RS: la pestaña salió de la página del formulario, así que dejé de rellenar " +
+      "(no se capturó comprobante ni se envió nada). Vuelve al formulario y pulsa Rellenar otra vez.", "se fue");
+    return;
+  }
+  if (estado.cancelar) return;      // lo paró el usuario u otra denuncia del mismo tab
+
+  const agotado = !completado && !porFallos && Date.now() >= fin;
+  const motivo = porFallos ? " porque no pude escribir en la pestaña varias veces seguidas"
+    : agotado ? " porque pasaron los 30 minutos de espera" : "";
+
+  // NUNCA UN COMPROBANTE EN BLANCO: si ninguna pasada llegó a tocar la página, la captura
+  // sería una foto de un formulario VACÍO y quedaría en el Registro como prueba de una
+  // denuncia que no se hizo. Eso falsearía el Registro, así que no se captura: se AVISA.
+  if (!toco) {
+    await avisarDenunciaPendiente(tabId, "Denuncias RS: no llegué a rellenar nada" + motivo + ". El formulario sigue abierto: " +
+      "cuando lo veas en pantalla, pulsa Rellenar otra vez. No guardé comprobante (una captura de un " +
+      "formulario vacío falsearía el Registro).", "nada");
+    return;
+  }
+
   // Al COMPLETARSE y si la red lo permite: enviar solo (con la cuenta atrás de 5 s).
-  // enviarFormulario ya captura el comprobante antes de pulsar Enviar.
-  if (completado && opts.autoenviar && !estado.cancelar) {
-    try { await enviarFormulario(tabId, opts.marca || "", opts.enviarLabel); } catch (e) { /* el usuario puede enviar a mano */ }
+  // enviarFormulario ya captura el comprobante antes de pulsar Enviar, comprueba otra vez
+  // el ancla y lo pega a la denuncia que arrancó ESTE bucle.
+  if (completado && opts.autoenviar) {
+    try { await enviarFormulario(tabId, opts.marca || "", opts.enviarLabel, { idDenuncia: idDenuncia, urlForm: urlForm }); } catch (e) { /* el usuario puede enviar a mano */ }
     return;
   }
   // EN CUALQUIER OTRO CASO se captura igual: red con captcha, tiempo agotado o parada.
   // La captura es la prueba de la denuncia y no puede depender de que la red permita
   // autoenvío ni de que el formulario quedara perfecto (antes solo se capturaba en el
   // caso de autoenvío completado, así que en TikTok con captcha no salía comprobante).
-  // Si se canceló porque la pestaña se cerró, guardarComprobante devuelve false y ya está.
-  if (!estado.cancelar) {
-    try { await activarPestana(tabId); await guardarComprobante(tabId); } catch (e) { /* sin comprobante: el usuario tiene el botón 📸 */ }
+  try { await activarPestana(tabId); await guardarComprobante(tabId, idDenuncia); } catch (e) { /* sin comprobante: el usuario tiene el botón 📸 */ }
+  // Y si la cosa no acabó bien, se DICE. Rendirse en silencio es lo que dejaba al usuario
+  // esperando a una extensión que ya había terminado.
+  if (porFallos || agotado) {
+    await avisarDenunciaPendiente(tabId, "Denuncias RS: el formulario quedó rellenado A MEDIAS" + motivo + ". " +
+      "Guardé el comprobante de cómo quedó: revísalo, complétalo a mano y envíalo tú.", "a medias");
   }
 }
 
@@ -216,6 +409,10 @@ async function insistirRelleno(tabId, pasos, opts) {
   if (AUTORRELLENO[tabId]) AUTORRELLENO[tabId].cancelar = true; // cancela un bucle previo del mismo tab
   const estado = { cancelar: false, seFue: false };
   AUTORRELLENO[tabId] = estado; // se comparte el registro: así "detenerAutorelleno" y onRemoved también lo paran
+  limpiarAvisoDelIcono(); // empieza un relleno nuevo: el aviso anterior del icono ya no aplica
+  // Misma razón que en autorelleno: el comprobante tiene que ir a la denuncia que arrancó
+  // ESTE bucle, no a la que estuviera en curso 3 minutos después.
+  const idDenuncia = await denunciaEnCurso();
 
   // Si la pestaña NAVEGA fuera del formulario (lo típico: Meta manda al login), se corta
   // en el acto, sin esperar a la siguiente vuelta del bucle.
@@ -271,8 +468,8 @@ async function insistirRelleno(tabId, pasos, opts) {
   // login, otra web…) no es la denuncia; guardarla como prueba falsearía el Registro y
   // además expondría lo que hubiera en ella. Solo se avisa.
   if (estado.seFue) {
-    ctxAvisar(tabId, "Denuncias RS: la pestaña salió de la página del formulario, así que dejé de rellenar " +
-      "(no se capturó comprobante ni se envió nada). Vuelve al formulario y pulsa Rellenar otra vez.", true);
+    await avisarDenunciaPendiente(tabId, "Denuncias RS: la pestaña salió de la página del formulario, así que dejé de rellenar " +
+      "(no se capturó comprobante ni se envió nada). Vuelve al formulario y pulsa Rellenar otra vez.", "se fue");
     return;
   }
   if (cortado || estado.cancelar) return; // pestaña cerrada, o lo paró el usuario / otra denuncia
@@ -285,10 +482,10 @@ async function insistirRelleno(tabId, pasos, opts) {
   // A partir de aquí, exactamente lo mismo que hace hoy el flujo NO progresivo.
   try {
     if (opts.autoenviar) {
-      await finalizarEnvio(tabId, opts.marca || "", opts.enviarLabel, ultimoFaltan);
+      await finalizarEnvio(tabId, opts.marca || "", opts.enviarLabel, ultimoFaltan, { idDenuncia: idDenuncia, urlForm: urlForm });
     } else {
       await activarPestana(tabId);
-      await guardarComprobante(tabId);
+      await guardarComprobante(tabId, idDenuncia);
       ctxAvisar(tabId, relleno
         ? "Denuncias RS: comprobante capturado. Resuelve el captcha y pulsa Enviar."
         : "Denuncias RS: la página no llegó a mostrar el formulario en 3 minutos. El comprobante se guardó igual; revísala y rellena a mano.",
@@ -450,15 +647,32 @@ async function redimensionarSW(dataUrl, maxW, calidad) {
   } catch (e) { return dataUrl; }
 }
 
-// Captura el formulario y lo adjunta (comprobante_img) a la denuncia en curso
-// (ultima_denuncia_registro), igual que el botón "Capturar" del popup. Devuelve bool.
-async function guardarComprobante(tabId) {
+// Id de la denuncia que se está tramitando AHORA. Se lee UNA vez, al arrancar un bucle
+// largo, para poder fijarlo (ver guardarComprobante).
+async function denunciaEnCurso() {
+  try {
+    const g = await chrome.storage.local.get("ultima_denuncia_registro");
+    return g.ultima_denuncia_registro != null ? g.ultima_denuncia_registro : null;
+  } catch (e) { return null; }
+}
+
+// Captura el formulario y lo adjunta (comprobante_img) a una denuncia del Registro.
+//
+// `idDenuncia` es OPCIONAL: sin él se comporta como siempre (la denuncia en curso según
+// `ultima_denuncia_registro`), así que ninguna de las llamadas de siempre cambia.
+// CON él se ARREGLA esto: `ultima_denuncia_registro` la pisa CADA denuncia nueva, y el
+// destino se resolvía en el momento de CAPTURAR, no al empezar. Como los bucles largos
+// duran ahora hasta 30 minutos y pueden convivir dos pestañas, la captura de la marca A
+// —con su correo, teléfono y dirección a la vista— podía acabar pegada a la denuncia B.
+// Eso falsea el Registro, que es la prueba legal del usuario. Por eso los bucles largos
+// FIJAN el id al arrancar y lo pasan aquí. Devuelve bool.
+async function guardarComprobante(tabId, idDenuncia) {
   try {
     const cap = await capturarCompleta(tabId);
     if (!cap || cap.error || !cap.dataUrl) return false;
     const img = await redimensionarSW(cap.dataUrl, 1280, 0.7);
     const g = await chrome.storage.local.get(["ultima_denuncia_registro", "denuncias_registro"]);
-    const idDest = g.ultima_denuncia_registro;
+    const idDest = (idDenuncia != null && idDenuncia !== "") ? idDenuncia : g.ultima_denuncia_registro;
     const lista = Array.isArray(g.denuncias_registro) ? g.denuncias_registro : [];
     const ent = lista.find((x) => String(x.id) === String(idDest));
     if (!ent) return false;
@@ -466,6 +680,45 @@ async function guardarComprobante(tabId) {
     await chrome.storage.local.set({ denuncias_registro: lista });
     return true;
   } catch (e) { return false; }
+}
+
+// ============================================================================
+//  AVISO QUE NO SE PIERDE (marca en el icono de la extensión).
+//  `ctxAvisar` pinta un toast de 6 s DENTRO de la pestaña del formulario, y el caso de uso
+//  es justo el contrario: mientras el bucle espera hasta 30 minutos, el usuario está en OTRA
+//  pestaña (su correo). Cuando vuelve, el toast ya se borró y no se entera de que la
+//  extensión se rindió. Por eso, además del toast, se marca el ICONO —el mismo mecanismo
+//  que ya usa el aviso de actualización, no se inventa otro—:
+//     "↑" = hay una versión nueva     "!" = la última denuncia necesita que la mires
+//  La versión manda sobre el aviso porque es la que se resuelve sola al recargar.
+// ============================================================================
+async function pintarAvisoDelIcono() {
+  try {
+    const g = await chrome.storage.local.get(["estado_version", "aviso_denuncia"]);
+    const hayNueva = !!(g.estado_version && g.estado_version.hayNueva);
+    const hayAviso = !!(g.aviso_denuncia && g.aviso_denuncia.texto);
+    await chrome.action.setBadgeText({ text: hayNueva ? "↑" : (hayAviso ? "!" : "") });
+    await chrome.action.setBadgeBackgroundColor({ color: "#e8402a" });
+  } catch (e) { /* sin icono que marcar: el toast ya salió */ }
+}
+
+// Avisa POR PARTIDA DOBLE: toast en la pestaña (si el usuario está mirando) + marca en el
+// icono (si no lo está). `motivo` identifica el caso para el popup: "nada", "a medias",
+// "se fue".
+async function avisarDenunciaPendiente(tabId, texto, motivo) {
+  ctxAvisar(tabId, texto, true);
+  try {
+    await chrome.storage.local.set({ aviso_denuncia: { texto: texto, motivo: motivo || "", fecha: Date.now() } });
+    await pintarAvisoDelIcono();
+  } catch (e) {}
+}
+
+// El aviso ya cumplió: se limpia al abrir el popup y al empezar otro relleno.
+async function limpiarAvisoDelIcono() {
+  try {
+    await chrome.storage.local.remove("aviso_denuncia");
+    await pintarAvisoDelIcono();
+  } catch (e) {}
 }
 
 // Se INYECTA en la página (función autónoma, no usa nada externo): muestra una cuenta atrás
@@ -542,16 +795,42 @@ async function clicRealEnviar(tabId, labelRegexSrc) {
 }
 
 // FLUJO DE ENVÍO: activar pestaña -> capturar comprobante -> cuenta atrás 5 s -> clic Enviar.
-async function enviarFormulario(tabId, marca, enviarLabel) {
+// `extra` es OPCIONAL: { idDenuncia, urlForm }. Sin él se comporta como siempre.
+//   idDenuncia -> a qué denuncia del Registro se pega el comprobante (ver guardarComprobante).
+//   urlForm    -> ANCLA: se comprueba ANTES de capturar y OTRA VEZ antes de pulsar Enviar.
+// Lo segundo no es paranoia: entre las dos cosas hay una cuenta atrás de 5 s en la que la
+// pestaña puede irse (o haberse ido ya durante la pasada de relleno, de 13,7 s medidos), y
+// `clicRealEnviar` busca el botón por su TEXTO (enviar|send|submit) quedándose con el
+// ÚLTIMO que case: en la pantalla de inicio de sesión de TikTok eso puede ser el botón de
+// "Iniciar sesión". Si la pestaña ya no está en el formulario: ni captura, ni envío, y aviso.
+async function enviarFormulario(tabId, marca, enviarLabel, extra) {
+  extra = extra || {};
+  const urlForm = extra.urlForm || "";
+  const fueraDelFormulario = async () => {
+    if (!urlForm) return false; // sin URL de referencia no hay nada que comparar
+    return !(await sigueEnElFormulario(tabId, urlForm, {}));
+  };
   try {
+    if (await fueraDelFormulario()) {
+      await avisarDenunciaPendiente(tabId, "Denuncias RS: la pestaña salió de la página del formulario antes de enviar, " +
+        "así que NO capturé comprobante ni envié nada. Vuelve al formulario y repítelo.", "se fue");
+      return;
+    }
     await activarPestana(tabId);
-    await guardarComprobante(tabId); // el comprobante queda en el Registro antes de enviar
+    await guardarComprobante(tabId, extra.idDenuncia); // el comprobante queda en el Registro antes de enviar
     let cancelado = false;
     try {
       const r = await chrome.scripting.executeScript({ target: { tabId }, func: overlayEnvio, args: [5, "Denuncias RS: enviando la denuncia de «" + marca + "»"] });
       cancelado = !!(r && r[0] && r[0].result && r[0].result.cancelado);
     } catch (e) { cancelado = false; }
     if (cancelado) { ctxAvisar(tabId, "Denuncias RS: envío cancelado. Revísalo y pulsa Enviar cuando quieras (el comprobante ya se guardó).", false); return; }
+    // Última comprobación, ya pegada al clic: durante los 5 s de la cuenta atrás la pestaña
+    // ha podido navegar (o el propio sitio mandar al login).
+    if (await fueraDelFormulario()) {
+      await avisarDenunciaPendiente(tabId, "Denuncias RS: la pestaña salió del formulario durante la cuenta atrás, " +
+        "así que NO pulsé Enviar. Vuelve al formulario y envíalo tú.", "se fue");
+      return;
+    }
     const ok = await clicRealEnviar(tabId, enviarLabel || ENVIAR_LABEL_DEFECTO);
     ctxAvisar(tabId, ok
       ? "Denuncias RS: denuncia enviada. El comprobante quedó guardado en el Registro."
@@ -560,18 +839,27 @@ async function enviarFormulario(tabId, marca, enviarLabel) {
 }
 
 // Formulario NO progresivo ya rellenado: si faltan campos requeridos, avisa; si no, envía.
-async function finalizarEnvio(tabId, marca, enviarLabel, faltan) {
+// `extra` (opcional) = { idDenuncia, urlForm }; se pasa tal cual a enviarFormulario.
+async function finalizarEnvio(tabId, marca, enviarLabel, faltan, extra) {
+  extra = extra || {};
   if (faltan && faltan.length) {
     // SIEMPRE se captura el comprobante, aunque falten campos: la captura es la prueba de
     // la denuncia y el usuario la necesita igual (antes esto se salía sin capturar, y como
     // casi siempre falta algún campo, parecía que la extensión había dejado de capturar).
+    // Salvo que la pestaña ya no esté en el formulario: entonces la foto sería de otra
+    // pantalla y falsearía el Registro.
+    if (extra.urlForm && !(await sigueEnElFormulario(tabId, extra.urlForm, {}))) {
+      await avisarDenunciaPendiente(tabId, "Denuncias RS: la pestaña salió de la página del formulario, " +
+        "así que no capturé comprobante. Vuelve al formulario y repítelo.", "se fue");
+      return;
+    }
     await activarPestana(tabId);
-    await guardarComprobante(tabId);
+    await guardarComprobante(tabId, extra.idDenuncia);
     ctxAvisar(tabId, "Denuncias RS: para «" + marca + "» faltan datos (" + faltan.join(", ") +
       "). Complétalos y pulsa Enviar tú. El comprobante ya se capturó.", true);
     return;
   }
-  await enviarFormulario(tabId, marca, enviarLabel);
+  await enviarFormulario(tabId, marca, enviarLabel, extra);
 }
 
 // ============================================================================
@@ -614,7 +902,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg && msg.accion === "iniciarAutorelleno") {
     // El popup pide que el service worker siga rellenando la 2.ª etapa por su cuenta.
     const tabId = msg.tabId || (sender && sender.tab && sender.tab.id);
-    if (tabId && Array.isArray(msg.pasos)) autorelleno(tabId, msg.pasos, { autoenviar: !!msg.autoenviar, marca: msg.marca, enviarLabel: msg.enviarLabel }); // bucle en segundo plano; envía al completar si procede
+    // `urlForm` ANCLA el bucle a la página del formulario, igual que en insistirRelleno: si la
+    // pestaña se va (TikTok manda a iniciar sesión, el usuario navega), el bucle para en vez de
+    // escribir los datos de la marca en otra pantalla o guardarla como comprobante.
+    if (tabId && Array.isArray(msg.pasos)) autorelleno(tabId, msg.pasos, { autoenviar: !!msg.autoenviar, marca: msg.marca, enviarLabel: msg.enviarLabel, urlForm: msg.urlForm || "" }); // bucle en segundo plano; envía al completar si procede
     sendResponse({ ok: true });
     return; // no necesitamos mantener el canal abierto
   }
@@ -640,6 +931,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       })().then(() => sendResponse({ ok: true }), () => sendResponse({ ok: false }));
       return true; // respuesta asíncrona
     }
+    return;
+  }
+  if (msg && msg.accion === "limpiarAvisoDenuncia") {
+    // El popup se abrió: el usuario ya está mirando, el "!" del icono ya cumplió.
+    limpiarAvisoDelIcono();
+    sendResponse({ ok: true });
     return;
   }
   if (msg && msg.accion === "detenerAutorelleno") {
@@ -1012,6 +1309,7 @@ async function ctxEjecutarPlan(tabId, plan, marca, form, datos, urlEsperada) {
   // de capturar comprobante (que por defecto está oculto mientras solo se navega) y la
   // pestaña queda marcada para que el botón siga visible al avanzar el formulario.
   marcarPestanaDeDenuncia(tabId);
+  limpiarAvisoDelIcono(); // empieza un relleno nuevo: el aviso anterior del icono ya no aplica
   if (datos && !(datos.pais || "").trim() && form && form.tipo !== "email") {
     ctxAvisar(tabId, "Denuncias RS: la marca «" + marca + "» no tiene PAÍS configurado y el formulario lo exige. " +
       "Ábrela en Marcas (⚙ Opciones), escribe el país y vuelve a intentarlo.", true);
@@ -1031,18 +1329,27 @@ async function ctxEjecutarPlan(tabId, plan, marca, form, datos, urlEsperada) {
   } catch (e) { /* el informe es solo ayuda */ }
   if (res.clicsReales && res.clicsReales.length) { try { await hacerClics(tabId, res.clicsReales); } catch (e) {} }
   const autoenv = permiteAutoenvio(form);
+  // A qué denuncia del Registro va el comprobante: se fija AQUÍ, antes de arrancar nada
+  // largo (ver guardarComprobante).
+  const idDenuncia = await denunciaEnCurso();
   if (plan.autorepetir) {
-    autorelleno(tabId, plan.pasos.filter((p) => p.tipo !== "dropdown"), { autoenviar: autoenv, marca: marca, enviarLabel: plan.enviarLabel });
+    // ANCLA: va `urlDeReferencia`, NO `plan.url`. Es la página en la que el usuario está de
+    // verdad y que ctxDetectarForm ya validó: con "Rellenar ESTA página", y porque Meta
+    // sirve el mismo formulario en dos direcciones distintas, la del plan puede no ser la
+    // suya y el bucle se cortaría solo estando donde debe. Sin esto, el bucle arrancado por
+    // el clic derecho no comprobaba la URL ni una vez en 30 minutos.
+    autorelleno(tabId, plan.pasos.filter((p) => p.tipo !== "dropdown"),
+      { autoenviar: autoenv, marca: marca, enviarLabel: plan.enviarLabel, urlForm: urlDeReferencia, idDenuncia: idDenuncia });
     ctxAvisar(tabId, "Denuncias RS: " + res.ok + " campo(s) para «" + marca + "». " +
       (autoenv ? "Cuando el formulario quede completo se capturará y enviará solo (5 s para cancelar)." : "Resuelve el captcha y envíalo tú."), false);
     return;
   }
   if (autoenv) {
     ctxAvisar(tabId, "Denuncias RS: " + res.ok + " campo(s) para «" + marca + "». Capturando y enviando (5 s para cancelar)…", false);
-    await finalizarEnvio(tabId, marca, plan.enviarLabel, res.faltan);
+    await finalizarEnvio(tabId, marca, plan.enviarLabel, res.faltan, { idDenuncia: idDenuncia, urlForm: urlDeReferencia });
   } else {
     await activarPestana(tabId);
-    await guardarComprobante(tabId);
+    await guardarComprobante(tabId, idDenuncia);
     ctxAvisar(tabId, "Denuncias RS: " + res.ok + " campo(s) para «" + marca + "». Comprobante capturado. Resuelve el captcha y pulsa Enviar.", false);
   }
 }
@@ -1439,11 +1746,9 @@ async function comprobarActualizacion(motivo) {
       revisado: Date.now(), motivo: motivo || ""
     }
   });
-  // Aviso visible en el icono: "↑" = hay una versión más nueva esperando.
-  try {
-    await chrome.action.setBadgeText({ text: hayNueva ? "↑" : "" });
-    await chrome.action.setBadgeBackgroundColor({ color: "#e8402a" });
-  } catch (e) {}
+  // Aviso visible en el icono. Pasa por `pintarAvisoDelIcono` para que la ronda por hora NO
+  // borre el "!" de una denuncia que quedó a medias (antes ponía "" a secas y se lo comía).
+  await pintarAvisoDelIcono();
 
   if (!hayNueva && !listaEnDisco) return;
   if (ocupadaRellenando()) return; // se aplicará en la siguiente ronda
@@ -1480,6 +1785,7 @@ chrome.runtime.onStartup.addListener(() => comprobarActualizacion("arranque del 
 chrome.runtime.onInstalled.addListener(() => {
   // Tras aplicarse una versión nueva: se limpia el aviso y se vuelve a comprobar.
   chrome.storage.local.remove("reintento_recarga");
-  try { chrome.action.setBadgeText({ text: "" }); } catch (e) {}
+  // Se quita el "↑" de la versión, pero se respeta el "!" de una denuncia pendiente de mirar.
+  pintarAvisoDelIcono();
   comprobarActualizacion("instalacion/actualizacion");
 });

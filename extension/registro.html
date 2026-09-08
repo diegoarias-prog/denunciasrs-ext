@@ -4,226 +4,391 @@
 <meta charset="UTF-8">
 <title>Registro · Denuncias RS</title>
 <style>
-  body { font-family: "Segoe UI", Arial, sans-serif; max-width: 1200px; margin: 24px auto; color: #1f2937; padding: 0 16px; }
-  h1 { font-size: 18px; margin: 0 0 4px; }
-  p.sub { color: #6b7280; font-size: 13px; margin: 0 0 16px; }
-  h2 { font-size: 14px; margin: 22px 0 10px; border-bottom: 2px solid #1d4ed8; padding-bottom: 4px; }
+/* ===========================================================================
+   Registro de denuncias — tablero con cajón lateral.
+   Sin CDN ni fuentes remotas: sólo tipografías del sistema. Todo offline.
+   Nombres de clase en español y específicos de esta página.
+   =========================================================================== */
+* { box-sizing: border-box; }
+body { margin: 0; background: #e2e8f0; color: #0f172a; font-family: "Segoe UI", system-ui, Arial, sans-serif; }
 
-  /* --- Formulario de alta / edición --- */
-  .formulario_alta_denuncia { border: 1px solid #e5e7eb; border-radius: 9px; padding: 14px 16px; background: #f8fafc; }
-  .rejilla_campos { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px 14px; }
-  .campo_alta { display: flex; flex-direction: column; }
-  .campo_alta.ancho_total { grid-column: 1 / -1; }
-  label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .3px; color: #374151; margin: 0 0 4px; }
-  input, select, textarea { width: 100%; box-sizing: border-box; border: 1px solid #cbd5e1; border-radius: 7px; padding: 8px 10px; font-size: 13px; font-family: inherit; background: #fff; }
-  textarea { min-height: 70px; line-height: 1.5; resize: vertical; }
+/* ------------------------------ Barra superior tipo aplicación ------------ */
+.barra_app { background: linear-gradient(180deg,#0f172a,#1e293b); color: #fff; padding: 14px 20px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.barra_app .sello { width: 34px; height: 34px; border-radius: 9px; background: linear-gradient(135deg,#2563eb,#38bdf8); display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 13px; letter-spacing: .5px; flex: 0 0 auto; }
+.titulo_app { font-size: 15px; font-weight: 700; line-height: 1.2; }
+.titulo_app small { display: block; font-weight: 400; font-size: 11.5px; color: #94a3b8; margin-top: 2px; }
+.buscador_app { margin-left: auto; position: relative; }
+.buscador_app input { width: 300px; max-width: 100%; background: #0b1220; border: 1px solid #334155; color: #e2e8f0; border-radius: 8px; padding: 8px 10px 8px 30px; font-size: 12.5px; font-family: inherit; outline: none; }
+.buscador_app input:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,.25); }
+.buscador_app input::placeholder { color: #64748b; }
+.buscador_app .lupa_buscador { position: absolute; left: 9px; top: 7px; font-size: 13px; opacity: .7; }
 
-  .barra { margin-top: 12px; display: flex; gap: 10px; align-items: center; }
-  .boton { padding: 8px 14px; border: 0; border-radius: 7px; background: #1d4ed8; color: #fff; font-weight: 600; cursor: pointer; font-size: 13px; }
-  .boton:hover { background: #1741b6; }
-  .boton.sec { background: #e5e7eb; color: #111827; }
-  .boton.sec:hover { background: #d1d5db; }
-  .boton.del { background: #ef4444; padding: 4px 8px; }
-  .boton.mini { padding: 4px 8px; font-size: 12px; }
-  #aviso { color: #065f46; font-size: 13px; margin-left: auto; }
+/* ------------------------------ Botones ----------------------------------- */
+.boton { border: 0; border-radius: 8px; padding: 9px 14px; font: 600 12.5px "Segoe UI", Arial, sans-serif; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.boton.primario { background: #2563eb; color: #fff; box-shadow: 0 6px 14px -8px #2563eb; }
+.boton.primario:hover { background: #1d4ed8; }
+.boton.gris { background: #e2e8f0; color: #0f172a; }
+.boton.gris:hover { background: #cbd5e1; }
+.boton.exito { background: #059669; color: #fff; }
+.boton.mini { padding: 5px 9px; font-size: 11.5px; border-radius: 7px; }
 
-  /* --- Contadores --- */
-  .contadores_registro { display: flex; gap: 12px; margin: 16px 0 0; flex-wrap: wrap; }
-  .tarjeta_contador { flex: 1; min-width: 140px; border: 1px solid #e5e7eb; border-radius: 9px; padding: 10px 14px; background: #fff; }
-  .tarjeta_contador .numero { font-size: 22px; font-weight: 700; color: #1d4ed8; }
-  .tarjeta_contador .etiqueta { font-size: 12px; color: #6b7280; }
-  .falta_captura { color: #dc2626; font-weight: 700; margin-left: 3px; }
-  .aviso_falta_captura { background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c; border-radius: 8px; padding: 10px 12px; margin-top: 12px; font-size: 13px; font-weight: 600; }
+/* ------------------------------ Cuerpo ------------------------------------ */
+.cuerpo_registro_app { padding: 20px; max-width: 1320px; margin: 0 auto; }
 
-  /* --- Filtros --- */
-  .barra_filtros_registro { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; margin-top: 8px; }
-  .barra_filtros_registro .campo_filtro { display: flex; flex-direction: column; }
-  .barra_filtros_registro input[type="search"] { min-width: 240px; }
+/* ------------------------------ Indicadores (KPI) ------------------------- */
+.tira_kpi { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+.kpi { background: #fff; border: 1px solid #e2e8f0; border-radius: 11px; padding: 13px 15px; box-shadow: 0 1px 2px rgba(15,23,42,.05); position: relative; overflow: hidden; }
+.kpi:before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: #2563eb; }
+.kpi.ok:before { background: #059669; }
+.kpi.alerta:before { background: #dc2626; }
+.kpi.neutro:before { background: #64748b; }
+.kpi .cifra { font-size: 25px; font-weight: 800; letter-spacing: -.5px; }
+.kpi .rotulo { font-size: 11.5px; color: #64748b; text-transform: uppercase; letter-spacing: .4px; font-weight: 600; margin-top: 2px; }
+.kpi.ok .cifra { color: #059669; }
+.kpi.alerta .cifra { color: #dc2626; }
 
-  /* --- Tabla --- */
-  .tabla_registro_scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-  table.tabla_registro_denuncias { width: 100%; min-width: 980px; border-collapse: separate; border-spacing: 0; margin-top: 12px; }
-  table.tabla_registro_denuncias th, table.tabla_registro_denuncias td { border: 1px solid #e5e7eb; padding: 8px 10px; font-size: 13px; text-align: left; vertical-align: middle; }
-  table.tabla_registro_denuncias th { background: #f8fafc; white-space: nowrap; }
-  td.celda_accion { white-space: nowrap; text-align: center; }
-  td.celda_destino { max-width: 190px; word-break: break-word; font-weight: 600; color: #1e40af; }
-  .celda_accion .boton { margin: 0 1px; }
-  .etiqueta_estado { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; }
-  .etiqueta_estado.pendiente { background: #fef3c7; color: #92400e; }
-  .etiqueta_estado.borrador { background: #f3f4f6; color: #374151; }
-  .etiqueta_estado.enviada { background: #dbeafe; color: #1e40af; }
-  .etiqueta_estado.resuelta { background: #d1fae5; color: #065f46; }
-  .vacio_tabla { color: #6b7280; font-size: 13px; padding: 16px 4px; }
+/* Aviso accionable: las denuncias sin N.º de caso (5.º dato, con botón) */
+.aviso_accion { margin-top: 14px; background: #fff7ed; border: 1px solid #fed7aa; color: #9a3412; border-radius: 10px; padding: 11px 14px; display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 600; }
+.aviso_accion .boton { margin-left: auto; }
 
-  /* --- Modal --- */
-  .fondo_modal { display: none; position: fixed; inset: 0; background: rgba(17,24,39,.45); z-index: 50; align-items: flex-start; justify-content: center; padding: 32px 16px; overflow: auto; }
-  .fondo_modal.abierto { display: flex; }
-  .caja_modal { background: #fff; border-radius: 12px; max-width: 640px; width: 100%; padding: 22px 26px; box-shadow: 0 12px 40px rgba(0,0,0,.25); }
+/* ------------------------------ Panel del listado ------------------------- */
+.panel { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 1px 2px rgba(15,23,42,.05); margin-top: 16px; }
+.filtros { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; padding: 12px 16px; border-bottom: 1px solid #e2e8f0; background: #f8fafc; border-radius: 12px 12px 0 0; }
+.filtros select { border: 1px solid #cbd5e1; border-radius: 8px; padding: 7px 10px; font-size: 12.5px; font-family: inherit; background: #fff; color: #0f172a; }
+.separador_filtros { width: 1px; height: 22px; background: #cbd5e1; margin: 0 4px; }
+.chip_filtro { background: #fff; border: 1px solid #cbd5e1; border-radius: 999px; padding: 6px 12px; font: 600 12px "Segoe UI", Arial, sans-serif; cursor: pointer; color: #475569; }
+.chip_filtro:hover { border-color: #94a3b8; }
+.chip_filtro.activo { background: #0f172a; color: #fff; border-color: #0f172a; }
 
-  /* --- Comprobante --- */
-  .comprobante_encabezado { border-bottom: 2px solid #1d4ed8; padding-bottom: 10px; margin-bottom: 14px; }
-  .comprobante_encabezado h3 { margin: 0; font-size: 18px; color: #1d4ed8; }
-  .comprobante_encabezado .marca_grande { font-size: 15px; font-weight: 700; margin-top: 4px; }
-  .comprobante_encabezado .sub_compro { font-size: 12px; color: #6b7280; }
-  .lista_datos_comprobante { margin: 0; }
-  .lista_datos_comprobante .fila_dato { display: flex; gap: 10px; padding: 6px 0; border-bottom: 1px dashed #e5e7eb; font-size: 13px; }
-  .lista_datos_comprobante .fila_dato .clave { width: 150px; flex: 0 0 150px; font-weight: 700; color: #374151; }
-  .lista_datos_comprobante .fila_dato .valor { color: #1f2937; word-break: break-word; white-space: pre-wrap; }
+/* Buscador dedicado SOLO a los números de caso (el de la barra de arriba busca
+   en todo; éste lleva su rótulo delante para que no se confundan). */
+.busqueda_caso { display: flex; align-items: center; gap: 7px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; padding: 0 9px; }
+.busqueda_caso:focus-within { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,.15); }
+.busqueda_caso .rotulo_busqueda_caso { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; color: #2563eb; white-space: nowrap; }
+.busqueda_caso input { border: 0; outline: none; background: transparent; padding: 7px 0; font-size: 12.5px; font-family: Consolas, "Courier New", monospace; color: #0f172a; min-width: 175px; }
 
-  /* --- Respuesta de la red social (área para PEGAR con Ctrl+V) --- */
-  .seccion_respuesta_red { margin-top: 18px; border-top: 1px dashed #cbd5e1; padding-top: 14px; }
-  .titulo_seccion_respuesta { font-size: 13px; font-weight: 700; color: #1d4ed8; margin: 0 0 8px; }
-  .titulo_seccion_respuesta span { font-weight: 400; color: #6b7280; }
-  .area_pegar_respuesta {
-    border: 2px dashed #94a3b8; border-radius: 8px; padding: 20px 14px; text-align: center;
-    color: #6b7280; font-size: 13px; background: #f8fafc; cursor: text; outline: none; user-select: none;
-  }
-  .area_pegar_respuesta:hover { border-color: #1d4ed8; background: #eff6ff; color: #1d4ed8; }
-  .area_pegar_respuesta:focus { border-color: #1d4ed8; background: #eff6ff; color: #1d4ed8; box-shadow: 0 0 0 3px rgba(29,78,216,.18); }
-  /* Título que SOLO aparece al imprimir (en pantalla lo cubre el título de sección). */
-  .titulo_respuesta_impresion { display: none; }
-  /* Galería de respuestas: una imagen debajo de otra, cada una con su botón Quitar. */
-  .conteo_respuestas { font-size: 12px; color: #6b7280; margin: 0 0 8px; }
-  .titulo_correo_enviado { margin: 0 0 8px; font-size: 14px; color: #111827; }
-  .cuerpo_correo_enviado { white-space: pre-wrap; word-break: break-word; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 7px; padding: 10px 12px; font-size: 12.5px; line-height: 1.5; color: #111827; max-height: 320px; overflow: auto; }
-  .galeria_respuestas { display: flex; flex-direction: column; gap: 14px; }
-  .item_respuesta_galeria { display: flex; flex-direction: column; }
-  .img_respuesta_galeria { max-width: 100%; border: 1px solid #e5e7eb; border-radius: 7px; display: block; }
+/* Desplegable de fechas con casillas (fechas concretas, no un rango) */
+.menu_fechas { position: relative; }
+.boton_menu_fechas { display: inline-flex; align-items: center; gap: 6px; border: 1px solid #cbd5e1; background: #fff; border-radius: 8px; padding: 7px 10px; font: 600 12.5px "Segoe UI", Arial, sans-serif; color: #0f172a; cursor: pointer; }
+.boton_menu_fechas:hover { border-color: #94a3b8; }
+.boton_menu_fechas.con_filtro { border-color: #2563eb; background: #eff6ff; color: #1d4ed8; }
+.panel_menu_fechas { position: absolute; top: calc(100% + 6px); left: 0; z-index: 40; background: #fff; border: 1px solid #cbd5e1; border-radius: 10px; box-shadow: 0 14px 30px -14px rgba(15,23,42,.5); min-width: 235px; padding: 6px; }
+.panel_menu_fechas[hidden] { display: none; }
+.lista_fechas { max-height: 260px; overflow: auto; }
+.opcion_fecha { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 7px; font-size: 12.5px; cursor: pointer; }
+.opcion_fecha:hover { background: #f1f5f9; }
+.opcion_fecha input { margin: 0; }
+.opcion_fecha .conteo_fecha { margin-left: auto; color: #94a3b8; font-size: 11.5px; }
+.opcion_todas { font-weight: 700; border-bottom: 1px solid #e2e8f0; border-radius: 7px 7px 0 0; margin-bottom: 4px; }
+.pie_menu_fechas { display: flex; border-top: 1px solid #e2e8f0; margin-top: 4px; padding-top: 6px; }
+.sin_fechas { padding: 10px 8px; color: #64748b; font-size: 12px; }
 
-  /* --- Impresión: solo el comprobante --- */
-  @media print {
-    body * { visibility: hidden; }
-    #modal_comprobante, #modal_comprobante * { visibility: visible; }
-    .fondo_modal { position: static; background: none; display: block; padding: 0; }
-    .caja_modal { box-shadow: none; max-width: 100%; padding: 0; }
-    .no_imprimir { display: none !important; }
-    .seccion_respuesta_red { border-top: 0; }
-    .titulo_respuesta_impresion { display: block !important; font-size: 15px; color: #1d4ed8; margin: 10px 0 6px; }
-    /* Cada imagen de respuesta procura no partirse entre páginas. */
-    .item_respuesta_galeria { page-break-inside: avoid; break-inside: avoid; }
-  }
+/* ------------------------------ Tabla ------------------------------------- */
+.tabla_registro_scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+table.tabla_registro_denuncias { width: 100%; min-width: 940px; border-collapse: collapse; font-size: 12.5px; }
+table.tabla_registro_denuncias th { background: #f8fafc; text-align: left; padding: 10px 12px; font-size: 11px; text-transform: uppercase; letter-spacing: .4px; color: #64748b; border-bottom: 1px solid #e2e8f0; white-space: nowrap; }
+table.tabla_registro_denuncias td { padding: 10px 12px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
+table.tabla_registro_denuncias tr:hover td { background: #f8fbff; }
+.celda_indice { color: #94a3b8; font-weight: 700; }
+.marca_celda { font-weight: 600; }
+.sub_celda { display: block; color: #94a3b8; font-size: 11px; margin-top: 1px; }
+.celda_destino { max-width: 200px; word-break: break-word; font-weight: 600; color: #1e40af; }
+.celda_adjuntos { text-align: center; white-space: nowrap; }
+.pastilla { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+.pastilla.pendiente { background: #fef3c7; color: #92400e; }
+.pastilla.borrador { background: #f3f4f6; color: #374151; }
+.pastilla.enviada { background: #dbeafe; color: #1e40af; }
+.pastilla.resuelta { background: #d1fae5; color: #065f46; }
+.falta_captura { color: #dc2626; font-weight: 700; margin-left: 3px; }
+.acciones_fila { white-space: nowrap; text-align: right; }
+.icono_btn { background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 7px; width: 27px; height: 27px; cursor: pointer; font-size: 12px; margin-left: 3px; padding: 0; }
+.icono_btn:hover { background: #e2e8f0; }
+.icono_btn.rojo { background: #fef2f2; border-color: #fecaca; }
+.icono_btn.rojo:hover { background: #fee2e2; }
+.vacio_tabla { color: #64748b; font-size: 13px; padding: 18px 16px; }
+
+/* N.º de caso editable dentro de la propia tabla (carga en tanda).
+   Una denuncia puede tener VARIOS números: se pintan uno debajo de otro. */
+.celda_caso { min-width: 190px; }
+.lista_casos_celda { display: inline-flex; flex-direction: column; gap: 3px; align-items: flex-start; cursor: pointer; }
+.caso_num { font-family: Consolas, "Courier New", monospace; font-size: 12.5px; font-weight: 600; border-bottom: 1px dashed #cbd5e1; }
+.lista_casos_celda:hover .caso_num { color: #1d4ed8; border-bottom-color: #1d4ed8; }
+.caso_vacio { border: 1px dashed #93c5fd; color: #2563eb; background: #eff6ff; border-radius: 7px; padding: 4px 9px; font: 600 11.5px "Segoe UI", Arial, sans-serif; cursor: pointer; }
+.caso_vacio:hover { background: #dbeafe; }
+.caso_editando { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+.lineas_caso { display: flex; flex-direction: column; gap: 4px; }
+.linea_caso { display: flex; gap: 4px; align-items: center; }
+.caso_editando input { border: 1px solid #2563eb; border-radius: 7px; padding: 5px 8px; font-size: 12px; font-family: Consolas, "Courier New", monospace; width: 150px; box-shadow: 0 0 0 3px rgba(37,99,235,.15); outline: none; }
+.quitar_caso { border: 1px solid #fecaca; background: #fef2f2; color: #b91c1c; border-radius: 6px; width: 23px; height: 27px; padding: 0; font-size: 11px; cursor: pointer; }
+.quitar_caso:hover { background: #fee2e2; }
+.acciones_caso { display: flex; gap: 5px; align-items: center; }
+.boton_anadir_caso { border: 1px dashed #93c5fd; background: #eff6ff; color: #2563eb; border-radius: 7px; padding: 4px 8px; font: 600 11px "Segoe UI", Arial, sans-serif; cursor: pointer; }
+.boton_anadir_caso:hover { background: #dbeafe; }
+
+/* ------------------------------ Cajón lateral (alta / edición) ------------ */
+.fondo_cajon { display: none; position: fixed; inset: 0; background: rgba(15,23,42,.42); z-index: 60; }
+.fondo_cajon.abierto { display: block; }
+.cajon { position: absolute; top: 0; right: 0; bottom: 0; width: 460px; max-width: 100%; background: #fff; box-shadow: -18px 0 40px -20px rgba(15,23,42,.6); display: flex; flex-direction: column; }
+.cajon_cabeza { padding: 15px 18px; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; gap: 10px; }
+.cajon_cabeza h2 { margin: 0; font-size: 14px; font-weight: 700; }
+.cajon_cabeza .boton { margin-left: auto; }
+.cajon_cuerpo { padding: 16px 18px; overflow: auto; flex: 1; }
+.rejilla_campos { display: grid; grid-template-columns: repeat(2, 1fr); gap: 11px 13px; }
+.campo_alta.ancho_total { grid-column: 1 / -1; }
+.campo_alta label { display: block; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; color: #64748b; margin-bottom: 4px; }
+.campo_alta input, .campo_alta select, .campo_alta textarea { width: 100%; border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 10px; font-size: 12.5px; font-family: inherit; background: #fff; color: #0f172a; }
+.campo_alta textarea { min-height: 62px; line-height: 1.5; resize: vertical; }
+.campo_alta .ayuda_campo { display: block; margin-top: 4px; font-size: 11px; color: #64748b; line-height: 1.4; }
+.campo_alta input[type="file"] { padding: 6px 8px; background: #f8fafc; }
+.pie_form { display: flex; gap: 8px; align-items: center; padding: 12px 16px; border-top: 1px solid #e2e8f0; background: #f8fafc; flex-wrap: wrap; }
+#aviso { color: #b45309; font-size: 12.5px; margin-left: auto; font-weight: 600; }
+
+/* Barra flotante de confirmación (se ve aunque el cajón se haya cerrado) */
+.toast_registro { display: none; position: fixed; right: 20px; bottom: 20px; z-index: 80; background: #0f172a; color: #fff; border-radius: 10px; padding: 11px 16px; font-size: 12.5px; font-weight: 600; box-shadow: 0 14px 30px -14px rgba(15,23,42,.9); max-width: 340px; }
+.toast_registro.visible { display: block; }
+/* Fallo al guardar: rojo y más tiempo en pantalla (el usuario TIENE que verlo). */
+.toast_registro.error { background: #b91c1c; }
+
+/* ------------------------------ Modal del comprobante --------------------- */
+.fondo_modal { display: none; position: fixed; inset: 0; background: rgba(17,24,39,.45); z-index: 70; align-items: flex-start; justify-content: center; padding: 32px 16px; overflow: auto; }
+.fondo_modal.abierto { display: flex; }
+.caja_modal { background: #fff; border-radius: 12px; max-width: 640px; width: 100%; padding: 22px 26px; box-shadow: 0 12px 40px rgba(0,0,0,.25); color: #1f2937; }
+.barra { margin-top: 12px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+
+.comprobante_encabezado { border-bottom: 2px solid #1d4ed8; padding-bottom: 10px; margin-bottom: 14px; }
+.comprobante_encabezado h3 { margin: 0; font-size: 18px; color: #1d4ed8; }
+.comprobante_encabezado .marca_grande { font-size: 15px; font-weight: 700; margin-top: 4px; }
+.comprobante_encabezado .sub_compro { font-size: 12px; color: #6b7280; }
+.aviso_falta_captura { background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c; border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; font-size: 13px; font-weight: 600; }
+.lista_datos_comprobante { margin: 0; }
+.lista_datos_comprobante .fila_dato { display: flex; gap: 10px; padding: 6px 0; border-bottom: 1px dashed #e5e7eb; font-size: 13px; }
+.lista_datos_comprobante .fila_dato .clave { width: 150px; flex: 0 0 150px; font-weight: 700; color: #374151; }
+.lista_datos_comprobante .fila_dato .valor { color: #1f2937; word-break: break-word; white-space: pre-wrap; }
+
+/* --- Respuesta de la red social (área para PEGAR con Ctrl+V) --- */
+.seccion_respuesta_red { margin-top: 18px; border-top: 1px dashed #cbd5e1; padding-top: 14px; }
+.titulo_seccion_respuesta { font-size: 13px; font-weight: 700; color: #1d4ed8; margin: 0 0 8px; }
+.titulo_seccion_respuesta span { font-weight: 400; color: #6b7280; }
+.area_pegar_respuesta {
+  border: 2px dashed #94a3b8; border-radius: 8px; padding: 20px 14px; text-align: center;
+  color: #6b7280; font-size: 13px; background: #f8fafc; cursor: text; outline: none; user-select: none;
+}
+.area_pegar_respuesta:hover { border-color: #1d4ed8; background: #eff6ff; color: #1d4ed8; }
+.area_pegar_respuesta:focus { border-color: #1d4ed8; background: #eff6ff; color: #1d4ed8; box-shadow: 0 0 0 3px rgba(29,78,216,.18); }
+/* Título que SOLO aparece al imprimir (en pantalla lo cubre el título de sección). */
+.titulo_respuesta_impresion { display: none; }
+/* Galería de respuestas: una imagen debajo de otra, cada una con su botón Quitar. */
+.conteo_respuestas { font-size: 12px; color: #6b7280; margin: 0 0 8px; }
+.titulo_correo_enviado { margin: 0 0 8px; font-size: 14px; color: #111827; }
+.cuerpo_correo_enviado { white-space: pre-wrap; word-break: break-word; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 7px; padding: 10px 12px; font-size: 12.5px; line-height: 1.5; color: #111827; max-height: 320px; overflow: auto; }
+.galeria_respuestas { display: flex; flex-direction: column; gap: 14px; }
+.item_respuesta_galeria { display: flex; flex-direction: column; }
+.img_respuesta_galeria { max-width: 100%; border: 1px solid #e5e7eb; border-radius: 7px; display: block; }
+
+/* ------------------------------ Responsivo -------------------------------- */
+@media (max-width: 1100px) {
+  .tira_kpi { grid-template-columns: repeat(2, 1fr); }
+  .cajon { width: 100%; }
+  .buscador_app { margin-left: 0; width: 100%; }
+  .buscador_app input { width: 100%; }
+}
+
+/* ------------------------------ Impresión: SOLO el comprobante ------------ */
+@media print {
+  body * { visibility: hidden; }
+  #modal_comprobante, #modal_comprobante * { visibility: visible; }
+  /* Lo demás se saca del flujo: si sólo se ocultara con visibility dejaría
+     páginas en blanco (la barra, el tablero, el cajón y el toast son fijos). */
+  .barra_app, .cuerpo_registro_app, .fondo_cajon, .toast_registro { display: none !important; }
+  .fondo_modal { position: static; background: none; display: block; padding: 0; }
+  .caja_modal { box-shadow: none; max-width: 100%; padding: 0; }
+  .no_imprimir { display: none !important; }
+  .seccion_respuesta_red { border-top: 0; }
+  .titulo_respuesta_impresion { display: block !important; font-size: 15px; color: #1d4ed8; margin: 10px 0 6px; }
+  /* Cada imagen de respuesta procura no partirse entre páginas. */
+  .item_respuesta_galeria { page-break-inside: avoid; break-inside: avoid; }
+}
 </style>
 </head>
 <body>
-  <h1>Registro de denuncias</h1>
-  <p class="sub">Lleva el control de las denuncias enviadas por marca, su número de caso y un comprobante imprimible. Se guarda en este navegador.</p>
 
-  <!-- ====================== FORMULARIO DE ALTA / EDICIÓN ====================== -->
-  <h2 id="titulo_formulario">Agregar denuncia</h2>
-  <div class="formulario_alta_denuncia">
-    <input type="hidden" id="campo_id_edicion" value="">
-    <div class="rejilla_campos">
-      <div class="campo_alta">
-        <label for="campo_marca">Marca *</label>
-        <select id="campo_marca"></select>
-      </div>
-      <div class="campo_alta">
-        <label for="campo_plataforma">Plataforma *</label>
-        <select id="campo_plataforma"></select>
-      </div>
-      <div class="campo_alta">
-        <label for="campo_tipo">Tipo</label>
-        <select id="campo_tipo">
-          <option value="formulario">Formulario</option>
-          <option value="correo">Correo</option>
-        </select>
-      </div>
-      <div class="campo_alta">
-        <label for="campo_categoria">Categoría</label>
-        <input id="campo_categoria" placeholder="Ej. derechos de autor, phishing…">
-      </div>
-      <div class="campo_alta">
-        <label for="campo_estado">Estado</label>
-        <select id="campo_estado">
+  <!-- ====================== BARRA SUPERIOR ====================== -->
+  <header class="barra_app">
+    <div class="sello">DR</div>
+    <div class="titulo_app">Registro de denuncias
+      <!-- El subtítulo lo actualiza refrescar_contadores() con el total real. -->
+      <small id="subtitulo_registro">0 denuncias · guardado en este navegador</small>
+    </div>
+    <div class="buscador_app">
+      <span class="lupa_buscador" aria-hidden="true">🔎</span>
+      <!-- MISMO id de siempre (registro.js lo usa en denuncias_filtradas y en el
+           listener de "input"); sólo cambió de sitio y de estilo. -->
+      <input type="search" id="filtro_busqueda" aria-label="Buscar denuncias" placeholder="Buscar N.º de caso, marca, sitio o URL…">
+    </div>
+    <button type="button" class="boton primario" id="boton_nueva_denuncia">＋ Nueva denuncia</button>
+  </header>
+
+  <main class="cuerpo_registro_app">
+
+    <!-- ====================== INDICADORES ====================== -->
+    <div class="tira_kpi">
+      <div class="kpi"><div class="cifra" id="contador_total">0</div><div class="rotulo">Denuncias totales</div></div>
+      <div class="kpi neutro"><div class="cifra" id="contador_con_caso">0</div><div class="rotulo">Con número de caso</div></div>
+      <div class="kpi ok"><div class="cifra" id="contador_resueltas">0</div><div class="rotulo">Resueltas</div></div>
+      <div class="kpi alerta"><div class="cifra" id="contador_sin_captura">0</div><div class="rotulo">Formularios sin captura</div></div>
+    </div>
+
+    <!-- 5.º dato: NO es una tarjeta más, es un aviso que lleva al trabajo pendiente.
+         Se oculta solo cuando no queda ninguna denuncia sin número de caso. -->
+    <div class="aviso_accion" id="aviso_sin_caso" style="display:none;">
+      <span>⚠ Hay <b id="conteo_sin_caso">0</b> denuncias sin número de caso.</span>
+      <button type="button" class="boton primario mini" id="boton_ir_sin_caso">Registrarlos ahora</button>
+    </div>
+
+    <!-- ====================== PANEL: FILTROS + TABLA ====================== -->
+    <section class="panel">
+      <div class="filtros">
+        <select id="filtro_marca" aria-label="Filtrar por marca"><option value="">Todas las marcas</option></select>
+        <select id="filtro_plataforma" aria-label="Filtrar por plataforma"><option value="">Todas las plataformas</option></select>
+        <select id="filtro_estado" aria-label="Filtrar por estado">
+          <option value="">Todos los estados</option>
           <option value="pendiente">Pendiente</option>
-          <option value="enviada" selected>Enviada</option>
+          <option value="enviada">Enviada</option>
           <option value="resuelta">Resuelta</option>
         </select>
+        <!-- Fechas CONCRETAS (no un rango): casillas con los días que existen de
+             verdad en el registro. La lista la arma renderizar_menu_de_fechas(). -->
+        <div class="menu_fechas" id="menu_fechas">
+          <button type="button" class="boton_menu_fechas" id="boton_menu_fechas" aria-haspopup="true" aria-expanded="false">
+            <span aria-hidden="true">📅</span><span id="resumen_fechas">Todas las fechas</span><span aria-hidden="true">▾</span>
+          </button>
+          <div class="panel_menu_fechas" id="panel_menu_fechas" hidden>
+            <label class="opcion_fecha opcion_todas">
+              <input type="checkbox" id="casilla_todas_las_fechas" checked>
+              <span>Todas las fechas</span>
+            </label>
+            <div class="lista_fechas" id="lista_fechas"></div>
+            <div class="pie_menu_fechas">
+              <button type="button" class="boton gris mini" id="boton_limpiar_fechas">Limpiar</button>
+            </div>
+          </div>
+        </div>
+        <span class="separador_filtros" aria-hidden="true"></span>
+        <!-- Buscador que mira SÓLO los números de caso (todos los de cada denuncia). -->
+        <div class="busqueda_caso">
+          <label class="rotulo_busqueda_caso" for="filtro_numero_caso">N.º de caso</label>
+          <input type="search" id="filtro_numero_caso" placeholder="Buscar por N.º de caso…">
+        </div>
+        <span class="separador_filtros" aria-hidden="true"></span>
+        <!-- Chips excluyentes entre sí; se combinan con los selects y el buscador. -->
+        <button type="button" class="chip_filtro activo" data-chip="todas" aria-pressed="true">Todas</button>
+        <button type="button" class="chip_filtro" data-chip="sin_caso" aria-pressed="false">Sin N.º de caso</button>
+        <button type="button" class="chip_filtro" data-chip="sin_captura" aria-pressed="false">Sin captura</button>
       </div>
-      <div class="campo_alta">
-        <label for="campo_numero_caso">N.º de caso</label>
-        <input id="campo_numero_caso" placeholder="Respuesta de la red (opcional)">
+
+      <div class="tabla_registro_scroll">
+        <table class="tabla_registro_denuncias">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Fecha</th>
+              <th>Marca / Plataforma</th>
+              <th title="Sitio o correo concreto al que se envió la denuncia (softonic.com, appbrain.com…)">Enviado a</th>
+              <th>Categoría</th>
+              <th title="Clic en la celda para escribir el N.º de caso; Tab pasa al siguiente">N.º de caso</th>
+              <th>Estado</th>
+              <th title="Adjuntos: 📎 comprobante · 💬 respuesta de la red · ✉ correo">📎💬</th>
+              <th class="acciones_fila">Acción</th>
+            </tr>
+          </thead>
+          <tbody id="cuerpo_registro"></tbody>
+        </table>
       </div>
-      <div class="campo_alta ancho_total">
-        <label for="campo_destino">Enviado a (sitio o correo)</label>
-        <input id="campo_destino" placeholder="softonic.com, appbrain.com… (si lo dejas vacío se deduce de la URL denunciada o del correo)">
+      <div class="vacio_tabla" id="mensaje_vacio" style="display:none;">No hay denuncias que coincidan con la búsqueda.</div>
+    </section>
+
+  </main>
+
+  <!-- ====================== CAJÓN LATERAL: ALTA / EDICIÓN ======================
+       Mismos campos y MISMOS ids que antes (registro.js depende de ellos); lo
+       único que cambia es que ahora viven en un cajón que se abre y se cierra. -->
+  <div class="fondo_cajon" id="fondo_cajon">
+    <aside class="cajon" id="cajon_denuncia" role="dialog" aria-modal="true" aria-labelledby="titulo_formulario">
+      <div class="cajon_cabeza">
+        <h2 id="titulo_formulario">Agregar denuncia</h2>
+        <button type="button" class="boton gris mini" id="boton_cerrar_cajon" aria-label="Cerrar">✕</button>
       </div>
-      <div class="campo_alta ancho_total">
-        <label for="campo_url_denunciada">URL denunciada</label>
-        <input id="campo_url_denunciada" placeholder="https://…">
-      </div>
-      <div class="campo_alta ancho_total">
-        <label for="campo_notas">Notas</label>
-        <textarea id="campo_notas" placeholder="Observaciones, seguimiento, etc."></textarea>
-      </div>
-      <div class="campo_alta ancho_total">
-        <label for="campo_comprobante_img">Adjuntar comprobante (imagen)</label>
-        <input type="file" id="campo_comprobante_img" accept="image/*">
-        <div id="previsualizacion_comprobante" style="display:none; margin-top:8px;">
-          <img id="img_previsualizacion_comprobante" alt="Vista previa del comprobante" style="max-width:100%; max-height:200px; border:1px solid #e5e7eb; border-radius:7px; display:block;">
-          <button type="button" class="boton sec mini" id="boton_quitar_comprobante" style="margin-top:6px;">Quitar imagen</button>
+      <div class="cajon_cuerpo">
+        <input type="hidden" id="campo_id_edicion" value="">
+        <div class="rejilla_campos">
+          <div class="campo_alta">
+            <label for="campo_marca">Marca *</label>
+            <select id="campo_marca"></select>
+          </div>
+          <div class="campo_alta">
+            <label for="campo_plataforma">Plataforma *</label>
+            <select id="campo_plataforma"></select>
+          </div>
+          <div class="campo_alta">
+            <label for="campo_tipo">Tipo</label>
+            <select id="campo_tipo">
+              <option value="formulario">Formulario</option>
+              <option value="correo">Correo</option>
+            </select>
+          </div>
+          <div class="campo_alta">
+            <label for="campo_estado">Estado</label>
+            <select id="campo_estado">
+              <option value="pendiente">Pendiente</option>
+              <option value="enviada" selected>Enviada</option>
+              <option value="resuelta">Resuelta</option>
+            </select>
+          </div>
+          <div class="campo_alta ancho_total">
+            <label for="campo_categoria">Categoría</label>
+            <input id="campo_categoria" placeholder="Ej. derechos de autor, phishing…">
+          </div>
+          <div class="campo_alta ancho_total">
+            <label for="campo_numero_caso">N.º de caso</label>
+            <input id="campo_numero_caso" placeholder="Ej. 1546706843456927, 0148-77321 (varios separados por coma)">
+            <small class="ayuda_campo">Si la red social dio más de un número, escríbelos separados por coma.</small>
+          </div>
+          <div class="campo_alta ancho_total">
+            <label for="campo_destino">Enviado a (sitio o correo)</label>
+            <input id="campo_destino" placeholder="softonic.com, appbrain.com… (si lo dejas vacío se deduce de la URL denunciada o del correo)">
+          </div>
+          <div class="campo_alta ancho_total">
+            <label for="campo_url_denunciada">URL denunciada</label>
+            <input id="campo_url_denunciada" placeholder="https://…">
+          </div>
+          <div class="campo_alta ancho_total">
+            <label for="campo_notas">Notas</label>
+            <textarea id="campo_notas" placeholder="Observaciones, seguimiento, etc."></textarea>
+          </div>
+          <div class="campo_alta ancho_total">
+            <label for="campo_comprobante_img">Adjuntar comprobante (imagen)</label>
+            <input type="file" id="campo_comprobante_img" accept="image/*">
+            <div id="previsualizacion_comprobante" style="display:none; margin-top:8px;">
+              <img id="img_previsualizacion_comprobante" alt="Vista previa del comprobante" style="max-width:100%; max-height:200px; border:1px solid #e2e8f0; border-radius:8px; display:block;">
+              <button type="button" class="boton gris mini" id="boton_quitar_comprobante" style="margin-top:6px;">Quitar imagen</button>
+            </div>
+          </div>
         </div>
       </div>
-    </div>
-    <div class="barra">
-      <button class="boton" id="boton_guardar_denuncia">Guardar denuncia</button>
-      <button class="boton sec" id="boton_cancelar_edicion" style="display:none;">Cancelar edición</button>
-      <button class="boton sec" id="boton_limpiar_formulario">Limpiar</button>
-      <span id="aviso"></span>
-    </div>
+      <div class="pie_form">
+        <button type="button" class="boton primario" id="boton_guardar_denuncia">Guardar denuncia</button>
+        <button type="button" class="boton gris" id="boton_cancelar_edicion" style="display:none;">Cancelar edición</button>
+        <button type="button" class="boton gris" id="boton_limpiar_formulario">Limpiar</button>
+        <!-- Errores de validación ("Elige una marca."): se ven aquí, dentro del cajón. -->
+        <span id="aviso"></span>
+      </div>
+    </aside>
   </div>
 
-  <!-- ====================== CONTADORES ====================== -->
-  <div class="contadores_registro">
-    <div class="tarjeta_contador"><div class="numero" id="contador_total">0</div><div class="etiqueta">Denuncias totales</div></div>
-    <div class="tarjeta_contador"><div class="numero" id="contador_con_caso">0</div><div class="etiqueta">Con número de caso</div></div>
-    <div class="tarjeta_contador"><div class="numero" id="contador_resueltas">0</div><div class="etiqueta">Resueltas</div></div>
-    <div class="tarjeta_contador"><div class="numero" id="contador_sin_captura" style="color:#dc2626;">0</div><div class="etiqueta">Formularios sin captura</div></div>
-  </div>
+  <!-- Confirmaciones que deben verse aunque el cajón ya se haya cerrado. -->
+  <div class="toast_registro" id="toast_registro" role="status" aria-live="polite"></div>
 
-  <!-- ====================== FILTROS ====================== -->
-  <h2>Denuncias registradas</h2>
-  <div class="barra_filtros_registro">
-    <div class="campo_filtro">
-      <label for="filtro_busqueda">Buscar</label>
-      <input type="search" id="filtro_busqueda" placeholder="N.º de caso, marca, sitio o URL…">
-    </div>
-    <div class="campo_filtro">
-      <label for="filtro_marca">Marca</label>
-      <select id="filtro_marca"><option value="">Todas</option></select>
-    </div>
-    <div class="campo_filtro">
-      <label for="filtro_plataforma">Plataforma</label>
-      <select id="filtro_plataforma"><option value="">Todas</option></select>
-    </div>
-    <div class="campo_filtro">
-      <label for="filtro_estado">Estado</label>
-      <select id="filtro_estado">
-        <option value="">Todos</option>
-        <option value="pendiente">Pendiente</option>
-        <option value="enviada">Enviada</option>
-        <option value="resuelta">Resuelta</option>
-      </select>
-    </div>
-  </div>
-
-  <!-- ====================== TABLA ====================== -->
-  <div class="tabla_registro_scroll">
-    <table class="tabla_registro_denuncias">
-      <thead>
-        <tr>
-          <th>#</th><th>Fecha</th><th>Marca</th><th>Plataforma</th>
-          <th title="Sitio o correo concreto al que se envió la denuncia (softonic.com, appbrain.com…)">Enviado a</th>
-          <th>Tipo</th>
-          <th>Categoría</th><th>N.º de caso</th><th>Estado</th><th title="Adjuntos: 📎 comprobante · 💬 respuesta de la red">📎💬</th><th class="celda_accion">Acción</th>
-        </tr>
-      </thead>
-      <tbody id="cuerpo_registro"></tbody>
-    </table>
-  </div>
-  <div class="vacio_tabla" id="mensaje_vacio" style="display:none;">No hay denuncias que coincidan con la búsqueda.</div>
-
-  <!-- ====================== MODAL COMPROBANTE ====================== -->
+  <!-- ====================== MODAL COMPROBANTE (sin cambios) ====================== -->
   <div class="fondo_modal" id="fondo_comprobante">
     <div class="caja_modal" id="modal_comprobante">
       <div class="comprobante_encabezado">
@@ -236,7 +401,7 @@
       <div class="bloque_imagen_comprobante" id="bloque_imagen_comprobante" style="display:none; margin-top:14px;">
         <img id="img_comprobante" alt="Captura del comprobante" style="max-width:100%; border:1px solid #e5e7eb; border-radius:7px; display:block;">
         <div class="barra no_imprimir">
-          <button class="boton sec mini" id="boton_quitar_imagen_comprobante">Quitar imagen del comprobante</button>
+          <button class="boton gris mini" id="boton_quitar_imagen_comprobante">Quitar imagen del comprobante</button>
         </div>
       </div>
 
@@ -246,7 +411,7 @@
         <div class="lista_datos_comprobante" id="correo_meta"></div>
         <div class="cuerpo_correo_enviado" id="correo_cuerpo"></div>
         <div class="barra no_imprimir">
-          <button type="button" class="boton sec mini" id="boton_copiar_correo">Copiar correo</button>
+          <button type="button" class="boton gris mini" id="boton_copiar_correo">Copiar correo</button>
         </div>
       </div>
 
@@ -267,8 +432,8 @@
       </div>
 
       <div class="barra no_imprimir">
-        <button class="boton" id="boton_imprimir_comprobante">Imprimir</button>
-        <button class="boton sec" id="boton_cerrar_comprobante">Cerrar</button>
+        <button class="boton primario" id="boton_imprimir_comprobante">Imprimir</button>
+        <button class="boton gris" id="boton_cerrar_comprobante">Cerrar</button>
       </div>
     </div>
   </div>

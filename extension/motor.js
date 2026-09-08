@@ -998,11 +998,24 @@ async function APLICAR(pasos, opciones) {
       // Estos campos se listan igual (para saber que existen y por qué no se rellenaron),
       // pero con "(campo protegido)" en lugar del valor.
       const AUTOCOMPLETADO_SECRETO = /current-password|new-password|one-time-code|cc-number|cc-csc|cc-exp/;
-      const esSecreto = (e) => {
+      // Y TAMBIÉN POR RÓTULO. Con `type=password` y `autocomplete` no basta: la caja de
+      // "Verifica tu correo electrónico" de TikTok y la del código de 6 dígitos son
+      // `type="text"` pelados y sin `autocomplete`, así que el correo tecleado y el código
+      // de un solo uso acababan en el informe que el usuario copia y nos manda por correo o
+      // chat. Se miran el rótulo reconocido, el placeholder, el `name` y el `id`.
+      // "codigo" excluye "código postal", que sí interesa ver en el informe y no es secreto.
+      const PALABRAS_SECRETAS = new RegExp(
+        "verificacion|verificar|verifica tu|codigo(?!\\s*postal)|(^|[^a-z])code([^a-z]|$)|" +
+        "(^|[^a-z])otp([^a-z]|$)|token|(^|[^a-z])pin([^a-z]|$)|passcode|" +
+        "confirmacion|confirmation|one[\\s-]?time|un solo uso|single[\\s-]?use|" +
+        "contrasena|password|clave de acceso|security code|codigo de seguridad");
+      const esSecreto = (e, rotulo) => {
         const t = (e.type || "").toLowerCase();
         if (t === "password") return true;
         const ac = ((e.getAttribute && e.getAttribute("autocomplete")) || "").toLowerCase();
-        return AUTOCOMPLETADO_SECRETO.test(ac);
+        if (AUTOCOMPLETADO_SECRETO.test(ac)) return true;
+        const senas = norm([rotulo || "", e.placeholder || "", e.name || "", e.id || ""].join(" "));
+        return PALABRAS_SECRETAS.test(senas);
       };
       Array.prototype.slice.call(document.querySelectorAll('textarea,input,select')).forEach(function (e) {
         const t = (e.type || "").toLowerCase();
@@ -1010,15 +1023,25 @@ async function APLICAR(pasos, opciones) {
         if (t === "radio" || t === "checkbox") {
           inventario.opciones.push({ rotulo: rotuloDe(e), tipo: t, marcado: !!e.checked });
         } else {
+          // El rótulo se lista SIEMPRE (hace falta para saber que el campo existe y por qué
+          // no se rellenó); lo único que se tapa es el VALOR.
+          const rot = rotuloDe(e);
           inventario.campos.push({
-            rotulo: rotuloDe(e), tag: e.tagName.toLowerCase(),
-            valor: esSecreto(e) ? "(campo protegido)" : ((e.value || "") + "").replace(/\s+/g, " ").slice(0, 70),
+            rotulo: rot, tag: e.tagName.toLowerCase(),
+            valor: esSecreto(e, rot) ? "(campo protegido)" : ((e.value || "") + "").replace(/\s+/g, " ").slice(0, 70),
             bloqueado: !!(e.disabled || e.readOnly)
           });
         }
       });
       inventario.titulo = (document.title || "").slice(0, 120);
-      inventario.url = (location.href || "").slice(0, 200);
+      // URL SIN QUERY NI ANCLA: la barra de direcciones lleva a veces el correo o un token
+      // en la query (?email=…, ?code=…, ?token=…) y este informe se comparte. Se deja
+      // esquema + host + ruta, que es lo único que hace falta para saber en qué formulario
+      // se estaba.
+      inventario.url = (function () {
+        try { const u = new URL(location.href); return (u.origin + u.pathname).slice(0, 200); }
+        catch (x) { return ((location.href || "").split("?")[0].split("#")[0]).slice(0, 200); }
+      })();
     } catch (e) { inventario = { error: e.message }; }
   }
   return {
