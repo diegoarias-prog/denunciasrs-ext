@@ -18,6 +18,15 @@ const REDES_AUTOENVIO_POPUP = ["Facebook", "Instagram", "WhatsApp", "TikTok", "G
   } catch (e) { /* la página no admite content scripts: nada que activar */ }
 })();
 
+// El icono puede llevar un "!" porque la última denuncia se quedó a medias, no se rellenó
+// nada o la pestaña se salió del formulario (el toast dura 6 s y el usuario suele estar en
+// otra pestaña verificando su correo, así que se lo pierde). Abrir el popup significa que ya
+// está mirando: el aviso ha cumplido y se quita. Ver pintarAvisoDelIcono en background.js.
+(function limpiar_aviso_del_icono_al_abrir_el_popup() {
+  try { chrome.runtime.sendMessage({ accion: "limpiarAvisoDenuncia" }, () => void chrome.runtime.lastError); }
+  catch (e) { /* el service worker ya lo limpiará en el siguiente Rellenar */ }
+})();
+
 // Claves que NUNCA se copian a un objeto de marca: un nombre de marca o un campo
 // llamado así contaminaría el prototipo de todos los objetos. Mismo guardián que
 // usa background.js (se replica en vez de compartir archivo: son tres cargas).
@@ -1188,8 +1197,9 @@ async function rellenar() {
     }
     // AUTORRELLENO PERSISTENTE de la 2.ª etapa (TikTok): campos como "Tipo de obra",
     // "Origen", "Descripción", firma, casillas y URL solo aparecen DESPUÉS de verificar el
-    // correo. El service worker repite APLICAR + clics reales cada pocos segundos hasta ~5 min
-    // (o hasta completar), así el usuario NO tiene que volver a pulsar Rellenar. Vive en el
+    // correo. El service worker VIGILA la pestaña con una sonda de solo lectura y, en cuanto el
+    // formulario aparece, repite APLICAR + clics reales cada pocos segundos hasta 30 min (o hasta
+    // completar), así el usuario NO tiene que volver a pulsar Rellenar. Vive en el
     // service worker (no en el popup ni en un timer de la página), así sobrevive a cerrar el
     // popup y a irse a verificar el correo. Ver autorelleno() en background.js.
     const autoEnviable = REDES_AUTOENVIO_POPUP.indexOf(form.red) >= 0;
@@ -1200,7 +1210,10 @@ async function rellenar() {
       // de la 2.ª etapa (Tipo de obra, Origen, Descripción, firma, casillas, URL). Al completar,
       // el service worker captura y envía solo si la red lo permite (autoenviar).
       const pasos2 = plan.pasos.filter(function (p) { return p.tipo !== "dropdown"; });
-      try { await chrome.runtime.sendMessage({ accion: "iniciarAutorelleno", tabId: objetivoTabId, pasos: pasos2, autoenviar: autoEnviable, marca: marca, enviarLabel: plan.enviarLabel }); }
+      // `urlForm` ANCLA el bucle a ESTA página (igual que en insistirRelleno): si la pestaña
+      // se va del formulario, el service worker para en vez de escribir los datos de la marca
+      // en otra pantalla y guardarla como comprobante.
+      try { await chrome.runtime.sendMessage({ accion: "iniciarAutorelleno", tabId: objetivoTabId, pasos: pasos2, autoenviar: autoEnviable, marca: marca, enviarLabel: plan.enviarLabel, urlForm: plan.url }); }
       catch (e) { /* si el service worker no responde, el usuario puede pulsar Rellenar otra vez */ }
     } else if (plan.insistir && nada) {
       // No se reconoció NI UN campo y el plan pide INSISTIR (Meta · Derechos de autor):
