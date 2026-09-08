@@ -8,6 +8,43 @@
 async function APLICAR(pasos, opciones) {
   opciones = opciones || {}; // { unaPasada: true } => una sola pasada (para el bucle del service worker)
   const dur = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // ===========================================================================
+  //  ANCLA DENTRO DE LA PROPIA PÁGINA (opciones.urlForm).
+  //  OJO: ESTA LÓGICA ESTÁ DUPLICADA A PROPÓSITO. Es una copia de
+  //  `mismaPaginaDelFormulario` (background.js); SI SE TOCA UNA, HAY QUE TOCAR LA OTRA.
+  //  No se puede compartir: APLICAR se serializa entero para inyectarlo y no puede usar
+  //  nada de fuera.
+  //  POR QUÉ AQUÍ Y NO SOLO EN EL SERVICE WORKER: entre que el worker pregunta a Chrome
+  //  en qué URL está la pestaña y que `chrome.scripting.executeScript` llega a ejecutar,
+  //  pasan milisegundos, y en ese hueco la pestaña puede navegar. MEDIDO por QA: con la
+  //  navegación justo ahí se coló UNA escritura en la página ajena. `chrome.scripting` no
+  //  valida URL, así que ninguna comprobación desde fuera puede cerrar esa carrera: la
+  //  única que la cierra es esta, hecha en el MISMO contexto y en el MISMO instante que
+  //  la escritura. Importa porque el login de TikTok tiene una caja de correo cuyo rótulo
+  //  casa, y ahí se escribiría el correo de la marca.
+  //  RETROCOMPATIBLE: sin `opciones.urlForm` no se comprueba nada (comportamiento de
+  //  siempre). Lo usan el popup, el clic derecho y los dos bucles.
+  // ===========================================================================
+  function esLaPaginaDelFormulario(urlActual, urlForm) {
+    try {
+      const a = new URL(urlActual), b = new URL(urlForm);
+      const ha = a.host.replace(/^www\./, ""), hb = b.host.replace(/^www\./, "");
+      if (!(ha === hb || ha.endsWith("." + hb))) return false;
+      const pa = a.pathname.toLowerCase().replace(/\/+$/, ""), pb = b.pathname.toLowerCase().replace(/\/+$/, "");
+      if (!pb) return pa === pb;
+      return pa === pb || pa.indexOf(pb + "/") === 0;
+    } catch (e) { return false; }
+  }
+  if (opciones.urlForm && !esLaPaginaDelFormulario(location.href, opciones.urlForm)) {
+    const porQue = "abortado: la pagina ya no es el formulario";
+    return {
+      ok: 0, faltan: [], clicsReales: [], hechos: 0, abortado: porQue,
+      informe: opciones.informe
+        ? { pasos: [{ paso: "(no se ejecutó ningún paso)", estado: porQue, hizo: [], pasada: 0 }], inventario: null }
+        : { pasos: [], inventario: null }
+    };
+  }
   const norm = (s) => (s || "").toString().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
   // ---------------------------------------------------------------------------
   //  INFORME DE DIAGNÓSTICO. Anota QUÉ campo se rellenó/marcó y con qué rótulo lo
@@ -38,6 +75,9 @@ async function APLICAR(pasos, opciones) {
   function setNative(el, v) {
     const proto = el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
     Object.getOwnPropertyDescriptor(proto, "value").set.call(el, v);
+    // Queda marcado que ESTE contenido lo pusimos nosotros: es lo que permite que el
+    // informe muestre nuestros datos y no lo que teclee el usuario (ver el inventario).
+    try { el.setAttribute("data-rs-escrito-por-la-extension", "1"); } catch (e) {}
     el.dispatchEvent(new Event("input", { bubbles: true }));
     el.dispatchEvent(new Event("change", { bubbles: true }));
     anotar("escribio", el, (v == null ? "" : (v + "")).replace(/\s+/g, " ").slice(0, 70));
@@ -47,6 +87,9 @@ async function APLICAR(pasos, opciones) {
   function marcarRadioEl(target) {
     if (!target) return false;
     if (target.checked) return true;
+    // La elección del usuario manda: se devuelve `true` (paso dado por bueno) para que
+    // el reintento no insista y el campo no salga como "falta".
+    if (respetarAlUsuario(target, "marcar")) return true;
     let lab = null;
     try { if (target.id) lab = document.querySelector('label[for="' + (window.CSS ? CSS.escape(target.id) : target.id) + '"]'); } catch (e) {}
     try { target.scrollIntoView({ block: "center" }); } catch (e) {}
@@ -147,13 +190,120 @@ async function APLICAR(pasos, opciones) {
   // Sufijo irrepetible de ESTA invocación (hora en base 36 + azar): solo letras y
   // números, que es lo que admite un nombre de atributo y un selector [data-...].
   const sufijoDeEstaPasada = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  // ===========================================================================
+  //  RESPETAR LA ELECCIÓN DEL USUARIO.
+  //  El propio manual de tk_copy le dice: "Si tu caso es otro tipo de obra (video,
+  //  foto…), cámbialo tú con un clic". Pero el plan marca "Tipo de obra = Logotipo", y
+  //  el bucle del service worker repite la pasada cada pocos segundos durante hasta 30
+  //  minutos. Como los radios son EXCLUYENTES, si el usuario elegía "Vídeo" el radio de
+  //  "Logotipo" quedaba SIN marcar, así que nada frenaba a la extensión —el único freno
+  //  que había miraba si el control a clicar ya estaba marcado— y en la vuelta siguiente
+  //  le deshacía su elección. Cada ~16 s. Lo mismo con "Origen de la obra" y con las
+  //  casillas de la Declaración que el usuario desmarcara a propósito.
+  //  Regla: la elección del usuario MANDA sobre el valor por defecto del plan.
+  // ===========================================================================
+  const MARCA_NUESTRA = "data-rs-marcada-por-la-extension";  // confirmada: la marcamos y quedó marcada
+  const MARCA_PEDIDA = "data-rs-marcado-pedido";             // la pedimos, aún sin confirmar
+  const yaAnotadoRespeto = [];
+
+  // Radios del MISMO grupo excluyente: por `name` cuando lo hay y, si no (TikTok no
+  // siempre lo pone), los que comparten el contenedor más pequeño que agrupa a más de
+  // uno, subiendo como mucho 4 niveles para no acabar cogiendo el formulario entero.
+  function grupoDeRadio(el) {
+    try {
+      if (!el || (el.type || "").toLowerCase() !== "radio") return [];
+      if (el.name) {
+        return Array.prototype.slice.call(
+          document.querySelectorAll('input[type=radio][name="' + (el.name + "").replace(/"/g, '\\"') + '"]'));
+      }
+      let nodo = el.parentElement, k = 0;
+      while (nodo && k < 4) {
+        const rs = Array.prototype.slice.call(nodo.querySelectorAll("input[type=radio]"));
+        if (rs.length > 1) return rs;
+        nodo = nodo.parentElement; k++;
+      }
+      return [el];
+    } catch (e) { return [el]; }
+  }
+
+  // De un elemento cualquiera (un <label>, un <span> de TikTok…) saca el radio/casilla
+  // de verdad al que afecta. `clickOpcion` clica texto visible, no el input.
+  function controlDe(el) {
+    try {
+      if (!el) return null;
+      const t = (el.type || "").toLowerCase();
+      if (t === "radio" || t === "checkbox") return el;
+      const dentro = el.querySelector && el.querySelector("input[type=radio],input[type=checkbox]");
+      if (dentro) return dentro;
+      const lab = el.closest && el.closest("label");
+      if (lab) {
+        const c = lab.querySelector("input[type=radio],input[type=checkbox]");
+        if (c) return c;
+        const f = lab.getAttribute("for");
+        if (f) { const c2 = document.getElementById(f); if (c2) return c2; }
+      }
+      return null;
+    } catch (e) { return null; }
+  }
+
+  // ¿Esto que vamos a tocar lo eligió el USUARIO? Entonces no se toca.
+  function eleccionDelUsuario(c) {
+    try {
+      if (!c) return false;
+      const t = (c.type || "").toLowerCase();
+      if (t === "radio") {
+        if (c.checked) return false;                       // es la nuestra: nada que hacer
+        return grupoDeRadio(c).some((r) => r !== c && r.checked); // otra del grupo: la suya
+      }
+      if (t === "checkbox") {
+        // Solo cuenta si la marcamos NOSOTROS y quedó CONFIRMADA como marcada en una
+        // pasada anterior. Sin esa confirmación no se puede distinguir "el usuario la
+        // desmarcó" de "React revirtió nuestra marca antes de que el clic real llegara",
+        // y confundirlas dejaría la Declaración sin firmar, que es peor.
+        return !c.checked && c.hasAttribute(MARCA_NUESTRA);
+      }
+      return false;
+    } catch (e) { return false; }
+  }
+
+  function respetarAlUsuario(el, quePaso) {
+    const c = controlDe(el);
+    if (!c || !eleccionDelUsuario(c)) return false;
+    if (yaAnotadoRespeto.indexOf(c) < 0) {   // una sola línea por control y pasada
+      yaAnotadoRespeto.push(c);
+      anotar("respetada la eleccion del usuario", c, quePaso || "");
+      // Y ADEMÁS SALE EN `faltan`, pero SOLO si es una CASILLA.
+      // Respetar al usuario no puede significar dar el formulario por completo: una casilla
+      // que él desmarcó lo deja INCOMPLETO. Sin esto, `faltan` volvía vacío, el bucle
+      // encadenaba 3 rondas limpias, se daba por `completado`, guardaba el comprobante y
+      // pulsaba Enviar: TikTok rechaza la denuncia por declaración sin firmar y al usuario
+      // se le decía "denuncia enviada". Medido por QA con una y con dos de las tres
+      // casillas de la Declaración desmarcadas.
+      // UN RADIO NO: si se respeta un radio es porque OTRA opción de su grupo está marcada,
+      // y eso es un formulario válido —justo el caso del manual, "cámbialo tú con un clic"—.
+      if ((c.type || "").toLowerCase() === "checkbox") faltan.push("respetada:" + rotuloDe(c));
+    }
+    return true;
+  }
+
+  // CONFIRMACIÓN, al entrar en la pasada: toda casilla que pedimos marcar y que AHORA
+  // está marcada, pasa a ser "nuestra confirmada". A partir de ahí, si aparece
+  // desmarcada, es que la desmarcó el usuario.
+  try {
+    Array.prototype.slice.call(document.querySelectorAll("[" + MARCA_PEDIDA + "]"))
+      .forEach(function (c) { try { if (c.checked) c.setAttribute(MARCA_NUESTRA, "1"); } catch (x) {} });
+  } catch (e) { /* página rara: seguimos igual */ }
+
   // Etiqueta un radio/checkbox para que el service worker le dé un CLIC REAL después.
   function marcarParaClicReal(el) {
     if (!el) return;
+    if (respetarAlUsuario(el, "clic real")) return; // el usuario ya eligió: no se toca
     const attr = "data-cr-" + sufijoDeEstaPasada + "-" + clicsReales.length; // ÚNICO en todo el documento
     try { el.setAttribute(attr, "1"); } catch (e) { return; }
     try { (window.__rs_clicsPrevios = window.__rs_clicsPrevios || []).push(attr); } catch (e) {}
     clicsReales.push("[" + attr + "]");
+    // Queda anotado que ESTA casilla la pedimos nosotros (ver la confirmación de arriba).
+    try { const c = controlDe(el); if (c && (c.type || "").toLowerCase() === "checkbox") c.setAttribute(MARCA_PEDIDA, "1"); } catch (e) {}
   }
   // VARIAS PASADAS automáticas: TikTok revela partes del formulario con retraso, así
   // que en vez de obligar al usuario a volver a pulsar "Rellenar", la propia extensión
@@ -738,7 +888,11 @@ async function APLICAR(pasos, opciones) {
             });
           // el más interno (sin hijos con el mismo texto) para no clicar el contenedor
           const el = cands.find((e) => !cands.some((o) => o !== e && e.contains(o))) || cands[0];
-          if (el) {
+          if (el && respetarAlUsuario(el, "clickOpcion:" + p.texto)) {
+            // Aquí se comprueba ANTES del `click()`: este paso clica texto visible, y ese
+            // clic sintético ya cambiaría el radio por sí solo.
+            okC = true;
+          } else if (el) {
             try { el.scrollIntoView({ block: "center" }); } catch (e) {}
             el.click();
             anotar("clic", el, (el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 40));
@@ -997,16 +1151,67 @@ async function APLICAR(pasos, opciones) {
       // puede llevar una contraseña, un código de un solo uso ni un número de tarjeta.
       // Estos campos se listan igual (para saber que existen y por qué no se rellenaron),
       // pero con "(campo protegido)" en lugar del valor.
+      // ===================================================================
+      //  EL CRITERIO DEL INVENTARIO VA AL REVÉS QUE ANTES.
+      //  Este informe existe para diagnosticar QUÉ escribió la extensión, no para leer lo
+      //  que teclea el usuario. Antes se volcaba TODO menos lo que una lista de palabras
+      //  lograra reconocer como secreto, y ninguna lista cubre las formas de pedir un
+      //  código: de 7 redacciones reales medidas por QA ("Introduce los 6 dígitos que te
+      //  enviamos", "Escribe los números que recibiste", "Clave temporal"…), 6 se
+      //  colaban. Ahora solo se muestra el valor que ESCRIBIMOS NOSOTROS (o que coincide
+      //  con un dato del propio plan); todo lo demás sale como "(no lo escribió la
+      //  extensión)". Así los códigos de un solo uso y el correo de verificación quedan
+      //  fuera POR CONSTRUCCIÓN, sin depender de ningún vocabulario. Las listas de abajo
+      //  se quedan como segunda línea, pero ya no son lo único que protege.
+      // ===================================================================
+      const ESCRITO_POR_NOSOTROS = "data-rs-escrito-por-la-extension";
+      // Los valores que el propio plan manda escribir: si un campo tiene exactamente eso,
+      // es nuestro aunque la marca del DOM se haya perdido en un repintado de React.
+      const valoresDelPlan = [];
+      try {
+        (pasos || []).forEach(function (p) {
+          if (p && p.valor != null && (p.valor + "").trim() !== "") valoresDelPlan.push(norm(p.valor));
+          if (p && Array.isArray(p.urls)) p.urls.forEach(function (u) { if (u) valoresDelPlan.push(norm(u)); });
+        });
+      } catch (x) {}
+      const loEscribimosNosotros = (e, contenido) => {
+        try {
+          if (contenido.trim() === "") return true;              // vacío: no hay nada que tapar
+          if (e.hasAttribute(ESCRITO_POR_NOSOTROS)) return true;
+          const v = norm(contenido);
+          return valoresDelPlan.some(function (x) { return x === v || (x.length > 8 && v.indexOf(x) >= 0); });
+        } catch (x) { return false; }
+      };
       const AUTOCOMPLETADO_SECRETO = /current-password|new-password|one-time-code|cc-number|cc-csc|cc-exp/;
       // Y TAMBIÉN POR RÓTULO. Con `type=password` y `autocomplete` no basta: la caja de
       // "Verifica tu correo electrónico" de TikTok y la del código de 6 dígitos son
       // `type="text"` pelados y sin `autocomplete`, así que el correo tecleado y el código
       // de un solo uso acababan en el informe que el usuario copia y nos manda por correo o
       // chat. Se miran el rótulo reconocido, el placeholder, el `name` y el `id`.
-      // "codigo" excluye "código postal", que sí interesa ver en el informe y no es secreto.
+      //
+      // LO QUE NO PUEDE TAPAR (falsos positivos medidos por QA). Tapar de más deja el
+      // informe inservible, que es justo para lo que existe:
+      //   - "código postal" / "postal code" / "ZIP code": no es un secreto y hace falta verlo.
+      //     El `(?![\s_-]*postal)` lleva también `_` y `-` porque los `id` reales vienen como
+      //     `codigo_postal` / `codigo-postal`, y ahí no hay ningún espacio que excluir.
+      //   - "area code" / "código de área" / "country code": son prefijos telefónicos.
+      //   - "¿Puedes verificar a quién afecta esta infracción?": es el rótulo REAL del 2.º
+      //     menú de TikTok. Por eso "verificar" NO va suelta: exige acompañante
+      //     ("verifica tu", "verificacion", "codigo de verificacion").
+      // La lista blanca solo puede ganar cuando lo que hizo saltar la alarma es la palabra
+      // que ella misma excluye ("code"/"codigo"). Si el campo casó por OTRA cosa —"otp",
+      // "token", "contrasena", "passcode"…—, un "postal" o un "prefijo" en el rótulo no
+      // puede destaparlo: se seguiria tapando.
+      // "DEL" además de "de": el rótulo REAL de GitHub es "codigo del pais"
+      // (datos/formularios.js), y sin contemplarlo no casaba ninguna de las dos listas,
+      // ganaba la de secretos y el prefijo telefónico de GitHub salía como
+      // "(campo protegido)". Medido por QA sobre los 286 rótulos que la extensión conoce.
+      const NO_ES_SECRETO = /(codigo|clave)?\s*(postal|zip)|postal\s*code|zip\s*code|area\s*code|country\s*code|codigo\s*(de[l]?\s*)?(area|pais)|prefijo/;
+      const SECRETO_POR_LA_PALABRA_CODIGO = /codigo|(^|[^a-z])code([^a-z]|$)/;
       const PALABRAS_SECRETAS = new RegExp(
-        "verificacion|verificar|verifica tu|codigo(?!\\s*postal)|(^|[^a-z])code([^a-z]|$)|" +
-        "(^|[^a-z])otp([^a-z]|$)|token|(^|[^a-z])pin([^a-z]|$)|passcode|" +
+        "verificacion|verifica tu|codigo de verificacion|" +
+        "codigo(?![\\s_-]*(postal|de\\s*area|del?\\s*pais|zip))|" +
+        "(^|[^a-z])code([^a-z]|$)|(^|[^a-z])otp([^a-z]|$)|token|(^|[^a-z])pin([^a-z]|$)|passcode|" +
         "confirmacion|confirmation|one[\\s-]?time|un solo uso|single[\\s-]?use|" +
         "contrasena|password|clave de acceso|security code|codigo de seguridad");
       const esSecreto = (e, rotulo) => {
@@ -1015,7 +1220,31 @@ async function APLICAR(pasos, opciones) {
         const ac = ((e.getAttribute && e.getAttribute("autocomplete")) || "").toLowerCase();
         if (AUTOCOMPLETADO_SECRETO.test(ac)) return true;
         const senas = norm([rotulo || "", e.placeholder || "", e.name || "", e.id || ""].join(" "));
-        return PALABRAS_SECRETAS.test(senas);
+        if (!PALABRAS_SECRETAS.test(senas)) return false;
+        // Solo se destapa si lo unico que casó fue "codigo"/"code" Y la lista blanca lo
+        // explica (codigo postal, area code…). Si ademas casa cualquier otra palabra
+        // secreta, se tapa.
+        const soloPorCodigo = SECRETO_POR_LA_PALABRA_CODIGO.test(senas) &&
+          !PALABRAS_SECRETAS.test(senas.replace(/codigo|code/g, " "));
+        if (soloPorCodigo && NO_ES_SECRETO.test(senas)) return false;
+        return true;
+      };
+      // ¿Se sabe siquiera QUÉ es este campo? Si no hay forma de saber qué contiene, no puede
+      // saberse tampoco si es un dato de la marca o un código de un solo uso, así que su
+      // valor NO se vuelca al informe. El blindaje no puede depender del HTML de un tercero.
+      // OJO con el detalle: `rotuloDe` NUNCA devuelve vacío —cuando no encuentra nada se
+      // queda con el nombre de la etiqueta ("input"/"textarea"/"select")—, así que preguntar
+      // por el rótulo vacío no detectaba nada. Lo que delata a un campo sin identificar es
+      // justo ese último recurso, y que además no tenga placeholder, ni `name`, ni `id`.
+      // Un rótulo sacado del texto vecino SÍ vale como identificación: así es como TikTok
+      // titula sus campos (un <p class="field-title"> justo encima, sin `name` ni `id`), y
+      // tapar esos dejaría el informe inservible.
+      const SOLO_EL_NOMBRE_DE_LA_ETIQUETA = /^(input|textarea|select|\?)$/;
+      const sinIdentificar = (e, rotulo) => {
+        const otras = norm([e.placeholder || "", e.name || "", e.id || ""].join(" ")).trim();
+        if (otras !== "") return false;
+        const r = norm(rotulo || "").trim();
+        return r === "" || SOLO_EL_NOMBRE_DE_LA_ETIQUETA.test(r);
       };
       Array.prototype.slice.call(document.querySelectorAll('textarea,input,select')).forEach(function (e) {
         const t = (e.type || "").toLowerCase();
@@ -1026,9 +1255,19 @@ async function APLICAR(pasos, opciones) {
           // El rótulo se lista SIEMPRE (hace falta para saber que el campo existe y por qué
           // no se rellenó); lo único que se tapa es el VALOR.
           const rot = rotuloDe(e);
+          const contenido = ((e.value || "") + "").replace(/\s+/g, " ");
+          let valor;
+          if (esSecreto(e, rot)) valor = "(campo protegido)";
+          else if (sinIdentificar(e, rot)) valor = "(campo sin identificar)";
+          else if (!loEscribimosNosotros(e, contenido)) valor = "(no lo escribió la extensión)";
+          else valor = contenido.slice(0, 70);
           inventario.campos.push({
             rotulo: rot, tag: e.tagName.toLowerCase(),
-            valor: esSecreto(e, rot) ? "(campo protegido)" : ((e.value || "") + "").replace(/\s+/g, " ").slice(0, 70),
+            valor: valor,
+            // Con el valor tapado sigue haciendo falta saber si el campo tiene algo o está
+            // vacío: es lo que dice si un campo del plan se quedó sin rellenar, y también
+            // que el correo que TikTok trae puesto ya viene relleno y bloqueado.
+            vacio: contenido.trim() === "",
             bloqueado: !!(e.disabled || e.readOnly)
           });
         }

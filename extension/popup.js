@@ -22,9 +22,21 @@ const REDES_AUTOENVIO_POPUP = ["Facebook", "Instagram", "WhatsApp", "TikTok", "G
 // nada o la pestaña se salió del formulario (el toast dura 6 s y el usuario suele estar en
 // otra pestaña verificando su correo, así que se lo pierde). Abrir el popup significa que ya
 // está mirando: el aviso ha cumplido y se quita. Ver pintarAvisoDelIcono en background.js.
-(function limpiar_aviso_del_icono_al_abrir_el_popup() {
-  try { chrome.runtime.sendMessage({ accion: "limpiarAvisoDenuncia" }, () => void chrome.runtime.lastError); }
-  catch (e) { /* el service worker ya lo limpiará en el siguiente Rellenar */ }
+(function ensenar_y_limpiar_el_aviso_pendiente() {
+  try {
+    chrome.storage.local.get(["aviso_denuncia"], (x) => {
+      // Se ENSEÑA antes de limpiarlo: el aviso se guarda precisamente porque el toast de la
+      // página dura 6 s y el usuario estaba en otra pestaña. Si al abrir el popup no se
+      // mostrara, el texto guardado no lo leería nadie y el "!" del icono no explicaría nada.
+      try {
+        const a = x && x.aviso_denuncia;
+        const caja = document.getElementById("estado");
+        if (a && a.texto && caja) mostrar_estado("error", escapar_html(String(a.texto)));
+      } catch (e) { /* si no se puede pintar, al menos se limpia el icono */ }
+      try { chrome.runtime.sendMessage({ accion: "limpiarAvisoDenuncia" }, () => void chrome.runtime.lastError); }
+      catch (e) { /* el service worker ya lo limpiará en el siguiente Rellenar */ }
+    });
+  } catch (e) { /* sin storage no hay aviso que enseñar */ }
 })();
 
 // Claves que NUNCA se copian a un objeto de marca: un nombre de marca o un campo
@@ -1110,7 +1122,10 @@ async function rellenar() {
   if (!tab || !tab.id) { mostrar_estado("error", "No encuentro la pestaña activa."); return; }
 
   // La acción procede: registramos la denuncia como pendiente (anti-duplicado).
-  await registrar_denuncia_auto(marca, form, urls);
+  // Se GUARDA el id: es a esta denuncia a la que tiene que ir el comprobante. Resolverlo
+  // luego por `ultima_denuncia_registro` seria arriesgado: esa clave la pisa cualquier
+  // denuncia nueva que se de de alta mientras tanto.
+  const id_de_la_denuncia_en_curso = await registrar_denuncia_auto(marca, form, urls);
   $("boton_capturar").disabled = false;
 
   // ¿Estamos ya en el formulario correcto? Si SÍ, se rellena esta misma pestaña.
@@ -1172,7 +1187,14 @@ async function rellenar() {
       // {informe:true} => además de rellenar, devuelve el paso a paso y el inventario
       // de campos de la página. Solo en este primer clic (el bucle del service worker
       // NO lo pide: recorrer la página entera en cada repetición sería lento).
-      args: [plan.pasos, { informe: true }]
+      // `urlForm` ANCLA esta pasada DENTRO de la propia página (ver el aviso de la carrera
+      // en motor.js). Aquí es donde más falta hace: entre que se valida la pestaña y esta
+      // inyección van `chrome.tabs.create`, la espera de carga, un `setTimeout` de 1.800 ms
+      // y dos `sendMessage` —una ventana de SEGUNDOS, no de milisegundos—, y esta es la
+      // pasada que más escribe. No aborta rellenos legítimos: los dos caminos de arriba
+      // terminan en una pestaña que ya cumple host + ruta de `plan.url`, que es la misma
+      // condición que comprueba el ancla.
+      args: [plan.pasos, { informe: true, urlForm: plan.url }]
     });
     const r = (res && res[0] && res[0].result) || { ok: 0, faltan: [], clicsReales: [] };
     // ¿NO se reconoció NADA? Se mide con `hechos` (campos de verdad escritos/marcados),
@@ -1192,7 +1214,10 @@ async function rellenar() {
     // Clics REALES de los radios/casillas (los sintéticos no "pegan" en React).
     if (r.clicsReales && r.clicsReales.length) {
       mostrar_estado("aviso", "Marcando opciones…");
-      try { await chrome.runtime.sendMessage({ accion: "clicsReales", tabId: objetivoTabId, selectores: r.clicsReales }); }
+      // `urlForm` ANCLA los clics REALES a la página del formulario: entre la pasada de
+      // arriba y este mensaje la pestaña puede haberse ido, y estos clics son de confianza
+      // (van por el depurador) sobre las coordenadas de lo que haya cargado.
+      try { await chrome.runtime.sendMessage({ accion: "clicsReales", tabId: objetivoTabId, selectores: r.clicsReales, urlForm: plan.url }); }
       catch (e) { /* si falla el modo avanzado, los radios quedan manuales */ }
     }
     // AUTORRELLENO PERSISTENTE de la 2.ª etapa (TikTok): campos como "Tipo de obra",
@@ -1229,12 +1254,16 @@ async function rellenar() {
       catch (e) { insistiendo = false; /* si el service worker no responde, el usuario puede pulsar Rellenar otra vez */ }
     } else {
       // Formulario NO progresivo: el service worker captura y (si no hay captcha) envía solo.
-      try { await chrome.runtime.sendMessage({ accion: "finalizar", tabId: objetivoTabId, marca: marca, autoenviar: autoEnviable, enviarLabel: plan.enviarLabel, faltan: (r.faltan || []) }); }
+      // `urlForm` ANCLA la captura y el envío; `idDenuncia` fija a qué denuncia del Registro
+      // va el comprobante (si no, una denuncia dada de alta mientras tanto se lo llevaría).
+      try { await chrome.runtime.sendMessage({ accion: "finalizar", tabId: objetivoTabId, marca: marca, autoenviar: autoEnviable, enviarLabel: plan.enviarLabel, faltan: (r.faltan || []), urlForm: plan.url, idDenuncia: id_de_la_denuncia_en_curso }); }
       catch (e) { /* el usuario puede enviar a mano */ }
     }
     let html = "✓ <b>" + (r.hechos != null ? r.hechos : r.ok) + "</b> campo(s) rellenado(s)." +
       (objetivoTabId !== tab.id ? " El formulario se abrió en una <b>pestaña aparte</b>." : "");
-    if (form.manual) html += "<br><br>📌 " + form.manual;
+    // ESCAPADO aunque hoy sea una constante del repo sin HTML: se pinta con innerHTML, y
+    // el día que alguien meta un "<" en el texto de ayuda no debe convertirse en marcado.
+    if (form.manual) html += "<br><br>📌 " + escapar_html(form.manual);
     // AVISOS del plan: datos de la marca que el formulario exige y no están guardados
     // (p. ej. el enlace de ejemplo a la obra en Derechos de autor). No bloquean el
     // relleno, pero hay que verlos ANTES de enviar.

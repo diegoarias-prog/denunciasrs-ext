@@ -142,7 +142,10 @@ function HUELLA_DEL_FORMULARIO() {
         return s.display !== "none" && s.visibility !== "hidden";
       } catch (x) { return false; }
     };
-    var TIPOS_DE_CAJA = ["text", "email", "url", "tel", "number", "search"];
+    // `password` cuenta como caja aunque nunca se rellene: para SABER si en la pantalla
+    // hay un formulario, una caja de contrasena es tan buena senal como cualquier otra
+    // (un login son dos cajas), y no contarla dejaba el login en una sola.
+    var TIPOS_DE_CAJA = ["text", "email", "url", "tel", "number", "search", "password"];
     var cajas = 0, opciones = 0, rotulos = 0;
     var campos = document.querySelectorAll("input,textarea"); // los `select` NO entran (ver arriba)
     for (var i = 0; i < campos.length; i++) {
@@ -175,7 +178,15 @@ function HUELLA_DEL_FORMULARIO() {
 // está tecleando. Con margen, entre "pantalla de verificación" y "formulario" no hay empate.
 function hayFormularioEnLaHuella(h) {
   if (!h) return false;
-  return (h.opciones || 0) > 0 || (h.cajas || 0) >= 3 || (h.rotulos || 0) >= 3;
+  const cajas = h.cajas || 0, opciones = h.opciones || 0, rotulos = h.rotulos || 0;
+  // UNA SOLA CASILLA NO BASTA. Antes valía `opciones > 0`, y un "Recordarme" del login
+  // del mismo sitio ya hacía decir "aquí hay formulario". Ahora una casilla suelta solo
+  // cuenta si viene acompañada: dos o más opciones Y alguna caja de texto.
+  //   formulario real de TikTok  {cajas:9, opciones:13, rotulos:14} -> true
+  //   login con "Recordarme"     {cajas:2, opciones:1,  rotulos:2 } -> false
+  //   pantalla del correo        {cajas:1, opciones:0,  rotulos:1 } -> false
+  //   pantalla del código        {cajas:2, opciones:0,  rotulos:2 } -> false
+  return (opciones >= 2 && cajas >= 1) || cajas >= 3 || rotulos >= 3;
 }
 
 async function autorelleno(tabId, pasos, opts) {
@@ -192,14 +203,26 @@ async function autorelleno(tabId, pasos, opts) {
   // Si quien arranca el bucle ya lo fijó (el clic derecho), se usa el suyo.
   const idDenuncia = (opts.idDenuncia != null ? opts.idDenuncia : await denunciaEnCurso());
 
-  // Si la pestaña NAVEGA fuera del formulario (lo típico: el sitio manda al login), se corta
-  // en el acto, sin esperar a la siguiente vuelta del bucle. Igual que en insistirRelleno.
+  // Si la pestaña NAVEGA, se anota EN EL ACTO si quedó dentro o fuera de la página del
+  // formulario, sin esperar a la siguiente vuelta del bucle. OJO: aquí ya NO se cancela
+  // nada; irse del formulario PAUSA el bucle, no lo mata (ver `dondeEsta`, más abajo).
   const vigilarNavegacion = (id, info, tab) => {
     if (id !== tabId) return;
     const u = (info && info.url) || (tab && tab.url) || "";
-    if (u && !mismaPaginaDelFormulario(u, urlForm)) { estado.cancelar = true; estado.seFue = true; }
+    if (u) estado.fuera = !mismaPaginaDelFormulario(u, urlForm);
   };
   if (urlForm) { try { chrome.tabs.onUpdated.addListener(vigilarNavegacion); } catch (e) {} }
+
+  // ¿Dónde está la pestaña AHORA MISMO? Se le pregunta a Chrome (autoritativo), no se
+  // confía en la última navegación vista. Devuelve "cerrada" | "fuera" | "dentro".
+  // Sin `urlForm` responde siempre "dentro": es el comportamiento de siempre para quien
+  // arranque el bucle sin ancla.
+  const dondeEsta = async () => {
+    let t = null;
+    try { t = await chrome.tabs.get(tabId); } catch (e) { return "cerrada"; }
+    if (!urlForm) return "dentro";
+    return mismaPaginaDelFormulario((t && t.url) || "", urlForm) ? "dentro" : "fuera";
+  };
 
   // 30 MINUTOS. Antes eran 5 y no daban: verificar un correo (ir al buzón, esperar el
   // mensaje, pulsar el enlace, volver) pasa de 5 min con facilidad, y encima esos 5 min se
@@ -211,15 +234,68 @@ async function autorelleno(tabId, pasos, opts) {
   let fallos = 0;          // fallos CONSECUTIVOS de inyección
   let porFallos = false;   // se salió por acumular fallos de inyección
   let cerrada = false;     // la pestaña se cerró
-  let huellaAnterior = null;
+  let pausas = 0;          // veces que el bucle se quedó ESPERANDO a que la pestaña volviera
+  let volvio = false;      // ¿llegó a volver al formulario después de haberse ido?
+  let enPausa = false, inicioDePausa = 0, totalFuera = 0, pausaLarga = false;
+  let porPausa = false;    // se salió porque la pestaña llevaba demasiado tiempo fuera
+  // TOPE DE LA PAUSA: 5 minutos SEGUIDOS fuera, y otros 5 SUMANDO todas las idas y
+  // venidas (si no, entrar y salir sin parar burlaría el tope).
+  // Por qué tan poco comparado con los 30 min del bucle: lo que la pausa cubre es un
+  // rodeo de ruta de TikTok (segundos) o un ida y vuelta rápido. La espera LARGA —la de
+  // verificar el correo— transcurre con la pestaña QUIETA en el formulario, así que ahí
+  // no hay ninguna pausa y los 30 min siguen enteros. Sin este tope, el bucle podía
+  // pasarse 25 minutos dormido y despertarse justo cuando el usuario había vuelto a
+  // rellenar el formulario a mano.
+  const TOPE_DE_PAUSA = 300000;
+  // Y una pausa LARGA (más de 1 min) quita el AUTOENVÍO: un rodeo de ruta dura segundos,
+  // así que si la pestaña estuvo fuera un minuto es que ahí pasó algo que conviene que
+  // mire una persona antes de mandar la denuncia. Se rellena y se captura igual.
+  const PAUSA_QUE_QUITA_EL_AUTOENVIO = 60000;
 
   while (!estado.cancelar && Date.now() < fin) {
-    // 1) ¿La pestaña sigue viva y en la página del formulario? Un fallo de inyección NO
-    //    puede matar el bucle, pero esto sí: si el usuario se fue (o cerró), se para.
-    let t = null;
-    try { t = await chrome.tabs.get(tabId); }
-    catch (e) { cerrada = true; estado.cancelar = true; break; }
-    if (urlForm && !mismaPaginaDelFormulario((t && t.url) || "", urlForm)) { estado.seFue = true; break; }
+    // 1) ¿DÓNDE está la pestaña?
+    const donde = await dondeEsta();
+    if (donde === "cerrada") { cerrada = true; estado.cancelar = true; break; }
+    if (donde === "fuera") {
+      // ============================================================================
+      //  LA PESTAÑA NO ESTÁ EN EL FORMULARIO: SE PAUSA, NO SE MATA. (decisión delicada)
+      //  Antes esto hacía `break` y el autorrelleno TERMINABA. El problema: no sabemos
+      //  con certeza en qué URL deja TikTok la pestaña DESPUÉS de verificar el correo
+      //  (medirlo exigiría un código real del buzón). Si diera un rodeo por otra ruta y
+      //  volviera, el bucle ya se habría rendido justo cuando el usuario regresa: el
+      //  mismo síntoma que este arreglo existe para eliminar.
+      //  Pausar NO relaja nada de lo que exigió Seguridad. Mientras la pestaña esté
+      //  fuera: no se escribe, no se marca, no se dan clics reales, no se captura y no
+      //  se envía. NADA. Ni siquiera se inyecta la sonda de solo lectura: para saber si
+      //  ha vuelto basta con preguntarle a Chrome por la URL, así que no se ejecuta ni
+      //  una línea de código nuestro en una página ajena (podría ser el correo del
+      //  usuario o su banco).
+      //  Si vuelve dentro de los 30 min, se reanuda. Si no vuelve, al agotarse el tiempo
+      //  se avisa y NO se guarda comprobante, igual que hoy.
+      // ============================================================================
+      if (!enPausa) { enPausa = true; pausas++; inicioDePausa = Date.now(); }
+      estado.fuera = true;
+      const llevaFuera = Date.now() - inicioDePausa;
+      if (llevaFuera > TOPE_DE_PAUSA || (totalFuera + llevaFuera) > TOPE_DE_PAUSA) {
+        porPausa = true; estado.seFue = true; break; // demasiado tiempo fuera: se termina
+      }
+      await dormir(2000);
+      continue;
+    }
+    if (enPausa) {
+      // HA VUELTO: se reanuda donde estaba, pero NO en silencio (ver el aviso de abajo).
+      const duroLaPausa = Date.now() - inicioDePausa;
+      totalFuera += duroLaPausa;
+      if (duroLaPausa > PAUSA_QUE_QUITA_EL_AUTOENVIO) pausaLarga = true;
+      enPausa = false; volvio = true;
+      // El usuario tiene que poder darse cuenta y pararlo, en vez de ver campos
+      // moviéndose solos al volver a la pestaña.
+      await avisarDenunciaPendiente(tabId,
+        "Denuncias RS: has vuelto al formulario, así que sigo rellenando esta denuncia. " +
+        "Si no quieres que siga, cierra esta pestaña o pulsa Rellenar en otra denuncia.",
+        "reanudado", false);
+    }
+    estado.fuera = false;
 
     // 2) SONDA barata de SOLO LECTURA: ¿ya hay formulario? Cuesta milisegundos, frente a los
     //    13,7 s de una pasada de APLICAR.
@@ -245,19 +321,25 @@ async function autorelleno(tabId, pasos, opts) {
     //    Se vuelve a sondear en 2 s, así en cuanto aparezca el formulario se reacciona casi
     //    al instante en vez de tardar los ~16 s de una vuelta completa.
     if (!hayFormularioEnLaHuella(huella)) {
-      huellaAnterior = huella;
       await dormir(2000);
       continue;
     }
-    huellaAnterior = huella;
 
     // 4) Ya hay formulario: pasada completa de relleno, como siempre.
+    //    ANCLA JUSTO ANTES DE ESCRIBIR. La comprobacion del punto 1 se hizo antes de la
+    //    sonda, y entre las dos inyecciones cabe una navegacion: medido, APLICAR llegaba a
+    //    RELLENAR EL FORMULARIO con la pestana ya fuera. Esta es la ultima puerta antes de
+    //    tocar la pagina, asi que aqui no se ahorra la pregunta a Chrome.
+    if ((await dondeEsta()) !== "dentro") continue; // PAUSA: se reintenta cuando vuelva
     let res = null;
     try {
       const r = await chrome.scripting.executeScript({
         target: { tabId: tabId },
         func: APLICAR,
-        args: [pasos, { unaPasada: true }]
+        // `urlForm` viaja DENTRO: la comprobación de arriba y esta inyección no son
+        // simultáneas, y APLICAR se planta solo si al ejecutarse ya no está en el
+        // formulario. Es la única forma de cerrar esa carrera (ver el aviso en motor.js).
+        args: [pasos, { unaPasada: true, urlForm: urlForm }]
       });
       res = (r && r[0] && r[0].result) || null;
       fallos = 0;
@@ -271,7 +353,9 @@ async function autorelleno(tabId, pasos, opts) {
       // en las coordenadas de la página que esté cargada EN ESE INSTANTE, y entre la pasada
       // de APLICAR —13,7 s medidos— y este punto la pestaña ha podido irse al login. Sin
       // esta comprobación se daban clics de verdad sobre una pantalla ajena (medido: 6).
-      if (urlForm && !(await sigueEnElFormulario(tabId, urlForm, estado))) break; // deja `seFue` marcado
+      // Si se fue, se PAUSA (`continue`), no se corta: cuando vuelva, la siguiente pasada
+      // volverá a pedir estos mismos clics.
+      if ((await dondeEsta()) !== "dentro") continue;
       try { await hacerClics(tabId, res.clicsReales); } catch (e) { /* seguimos igual */ }
     }
     // ¿Se tocó la página de VERDAD? Se mide con `hechos` (campos escritos/marcados), no con
@@ -290,24 +374,32 @@ async function autorelleno(tabId, pasos, opts) {
 
   // ---- SALIDAS SIN COMPROBANTE ----
   if (cerrada) return;              // la pestaña ya no existe: no hay a quién avisar
-  // ÚLTIMA COMPROBACIÓN DEL ANCLA, YA FUERA DEL BUCLE. Entre la comprobación de la última
-  // vuelta y este punto hay una pasada completa de APLICAR (13,7 s medidos) más los clics
-  // reales: en ese hueco la pestaña ha podido irse al login. Sin esto se capturaba esa
-  // pantalla ajena como comprobante de la denuncia y, en las redes con autoenvío, se seguía
-  // hasta `clicRealEnviar`, que busca el botón por texto y se queda con el ÚLTIMO que case.
-  if (!estado.seFue && urlForm && !(await sigueEnElFormulario(tabId, urlForm, estado))) {
-    // sigueEnElFormulario ya deja marcado `seFue` (o `cancelar` si la pestaña se cerró).
-  }
+
+  // ÚLTIMA COMPROBACIÓN DEL ANCLA, YA FUERA DEL BUCLE.
+  // NO SE BORRA. Entre la comprobación de la última vuelta y este punto hay una pasada
+  // completa de APLICAR (13,7 s medidos) más los clics reales: en ese hueco la pestaña
+  // puede haberse ido. Si se quita esta comprobación, vuelve el fallo entero: se captura
+  // como comprobante de la denuncia una pantalla ajena (un login, el correo del usuario)
+  // y, en las redes con autoenvío, se sigue hasta `clicRealEnviar`, que busca el botón por
+  // su TEXTO y se queda con el ÚLTIMO que case —en el login de TikTok, "Iniciar sesión"—.
+  const dondeAcabo = await dondeEsta();
+  if (dondeAcabo === "cerrada") return;         // se cerró justo al final: nadie a quien avisar
+  if (dondeAcabo === "fuera") estado.seFue = true;
   if (estado.seFue) {
-    // Misma razón que en insistirRelleno: esa pantalla (un login, otra web…) no es la
-    // denuncia; guardarla como prueba falsearía el Registro y expondría lo que hubiera en ella.
-    await avisarDenunciaPendiente(tabId, "Denuncias RS: la pestaña salió de la página del formulario, así que dejé de rellenar " +
-      "(no se capturó comprobante ni se envió nada). Vuelve al formulario y pulsa Rellenar otra vez.", "se fue");
+    // La pestaña NO estaba en el formulario al terminar. Esa pantalla (un login, otra web…)
+    // no es la denuncia; guardarla como prueba falsearía el Registro y además expondría lo
+    // que hubiera en ella. Solo se avisa.
+    await avisarDenunciaPendiente(tabId, porPausa
+      ? "Denuncias RS: la pestaña estuvo más de 5 minutos fuera de la página del formulario, así que dejé de " +
+        "rellenar (no se capturó comprobante ni se envió nada). Vuelve al formulario y pulsa Rellenar otra vez."
+      : "Denuncias RS: la pestaña no volvió a la página del formulario, así que dejé de " +
+        "rellenar (no se capturó comprobante ni se envió nada). Vuelve al formulario y pulsa Rellenar otra vez.",
+      "se fue");
     return;
   }
   if (estado.cancelar) return;      // lo paró el usuario u otra denuncia del mismo tab
 
-  const agotado = !completado && !porFallos && Date.now() >= fin;
+  const agotado = !completado && !porFallos && !porPausa && Date.now() >= fin;
   const motivo = porFallos ? " porque no pude escribir en la pestaña varias veces seguidas"
     : agotado ? " porque pasaron los 30 minutos de espera" : "";
 
@@ -324,8 +416,16 @@ async function autorelleno(tabId, pasos, opts) {
   // Al COMPLETARSE y si la red lo permite: enviar solo (con la cuenta atrás de 5 s).
   // enviarFormulario ya captura el comprobante antes de pulsar Enviar, comprueba otra vez
   // el ancla y lo pega a la denuncia que arrancó ESTE bucle.
-  if (completado && opts.autoenviar) {
+  if (completado && opts.autoenviar && !pausaLarga) {
     try { await enviarFormulario(tabId, opts.marca || "", opts.enviarLabel, { idDenuncia: idDenuncia, urlForm: urlForm }); } catch (e) { /* el usuario puede enviar a mano */ }
+    return;
+  }
+  // AUTOENVÍO RETIRADO por una pausa larga: se rellena y se captura igual, pero el botón
+  // Enviar lo pulsa una persona. Ver PAUSA_QUE_QUITA_EL_AUTOENVIO, arriba.
+  if (completado && opts.autoenviar && pausaLarga) {
+    try { await activarPestana(tabId); await guardarComprobante(tabId, idDenuncia); } catch (e) {}
+    await avisarDenunciaPendiente(tabId, "Denuncias RS: el formulario quedó completo y el comprobante guardado, pero la " +
+      "pestaña estuvo un buen rato fuera, así que NO lo envié sola. Revísalo y pulsa Enviar tú.", "sin autoenvio");
     return;
   }
   // EN CUALQUIER OTRO CASO se captura igual: red con captcha, tiempo agotado o parada.
@@ -435,7 +535,10 @@ async function insistirRelleno(tabId, pasos, opts) {
       const r = await chrome.scripting.executeScript({
         target: { tabId: tabId }, // SOLO el marco principal (ver el aviso de los iframes, arriba)
         func: APLICAR,
-        args: [pasos, { unaPasada: true }]
+        // `urlForm` viaja DENTRO: entre la comprobación de la línea de arriba y esta
+        // inyección pasan milisegundos, y ahí cabe una navegación. Estas pasadas cortas
+        // ESCRIBEN, así que necesitan el ancla igual que la pasada completa de abajo.
+        args: [pasos, { unaPasada: true, urlForm: urlForm }]
       });
       res = (r && r[0] && r[0].result) || null;
     } catch (e) {
@@ -450,12 +553,23 @@ async function insistirRelleno(tabId, pasos, opts) {
   // haga sus reintentos internos) + los clics reales de radios/casillas.
   if (relleno && !estado.cancelar && (await sigueEnElFormulario(tabId, urlForm, estado))) {
     try {
-      const r2 = await chrome.scripting.executeScript({ target: { tabId: tabId }, func: APLICAR, args: [pasos, {}] });
+      // `urlForm` dentro de las opciones: APLICAR aborta solo si al ejecutarse la página
+      // ya no es el formulario (ver el aviso en motor.js).
+      const r2 = await chrome.scripting.executeScript({ target: { tabId: tabId }, func: APLICAR, args: [pasos, { urlForm: urlForm }] });
       const res2 = (r2 && r2[0] && r2[0].result) || null;
       if (res2) {
         if (res2.faltan) ultimoFaltan = res2.faltan;
         if (res2.clicsReales && res2.clicsReales.length) {
-          try { await hacerClics(tabId, res2.clicsReales); } catch (e) { /* radios a mano y ya */ }
+          // ANCLA OTRA VEZ. La comprobación de arriba se hizo ANTES de la pasada completa
+          // de APLICAR, que tarda segundos: en ese hueco la pestaña puede haberse ido al
+          // login, y `hacerClics` dispara clics REALES (de confianza, vía depurador) en las
+          // coordenadas de la página que esté cargada EN ESE INSTANTE. Mismo agujero que se
+          // cerró en autorelleno, donde se midieron 6 clics cayendo sobre el login.
+          if (await sigueEnElFormulario(tabId, urlForm, estado)) {
+            try { await hacerClics(tabId, res2.clicsReales); } catch (e) { /* radios a mano y ya */ }
+          } else {
+            cortado = true; // se fue: ni clics, ni comprobante, ni envío
+          }
         }
       }
     } catch (e) { cortado = true; }
@@ -697,7 +811,10 @@ async function pintarAvisoDelIcono() {
     const g = await chrome.storage.local.get(["estado_version", "aviso_denuncia"]);
     const hayNueva = !!(g.estado_version && g.estado_version.hayNueva);
     const hayAviso = !!(g.aviso_denuncia && g.aviso_denuncia.texto);
-    await chrome.action.setBadgeText({ text: hayNueva ? "↑" : (hayAviso ? "!" : "") });
+    // Los DOS a la vez si toca ("!↑"): antes el "↑" de la versión tapaba el "!" de una
+    // denuncia a medias hasta que se aplicara la actualización, y el usuario no volvía a
+    // enterarse. Caben de sobra: el icono admite unos 4 caracteres.
+    await chrome.action.setBadgeText({ text: (hayAviso ? "!" : "") + (hayNueva ? "↑" : "") });
     await chrome.action.setBadgeBackgroundColor({ color: "#e8402a" });
   } catch (e) { /* sin icono que marcar: el toast ya salió */ }
 }
@@ -705,8 +822,8 @@ async function pintarAvisoDelIcono() {
 // Avisa POR PARTIDA DOBLE: toast en la pestaña (si el usuario está mirando) + marca en el
 // icono (si no lo está). `motivo` identifica el caso para el popup: "nada", "a medias",
 // "se fue".
-async function avisarDenunciaPendiente(tabId, texto, motivo) {
-  ctxAvisar(tabId, texto, true);
+async function avisarDenunciaPendiente(tabId, texto, motivo, esError) {
+  ctxAvisar(tabId, texto, esError !== false);
   try {
     await chrome.storage.local.set({ aviso_denuncia: { texto: texto, motivo: motivo || "", fecha: Date.now() } });
     await pintarAvisoDelIcono();
@@ -794,6 +911,175 @@ async function clicRealEnviar(tabId, labelRegexSrc) {
   finally { if (attached) await detach(tabId); }
 }
 
+// ============================================================================
+//  ¿SE ENVIÓ DE VERDAD? (señales de solo lectura, sin permisos nuevos)
+//  Hasta ahora el "denuncia enviada" salía de si se ENCONTRÓ y se pulsó el botón, no de si
+//  la red aceptó nada. Con la declaración sin firmar, TikTok rechaza y al usuario se le
+//  decía que estaba enviada. (El Registro no se marcaba como enviada —se queda en
+//  "pendiente"—; lo engañoso era solo el aviso, pero es el que la persona lee.)
+//  Esta función se INYECTA en la página y solo MIRA: no escribe, no marca, no pulsa nada.
+//  Devuelve las tres señales; quien llama decide.
+// ============================================================================
+function SENALES_DE_ENVIO(urlForm, labelRegexSrc) {
+  // SOLO BOOLEANOS: aquí NO sale ni una URL, ni recortada. La ruta se necesita para
+  // decidir `rutaDeAutenticacion` y `rutaDistinta`, pero eso se calcula DENTRO de la
+  // página y solo cruza el booleano. Un campo con la ruta, aunque nadie lo lea hoy, es
+  // el que alguien acaba volcando a un registro, y una ruta lleva identificadores: la
+  // confirmación de Meta es `/requests/1523801815366035`.
+  const r = { rutaDistinta: false, hayFormulario: false, hayBoton: false,
+              hayPassword: false, rutaDeAutenticacion: false };
+  try {
+    // ¿Esto es una pantalla de INICIO DE SESIÓN? Si lo es, ninguna de las tres señales
+    // significa nada: en un login típico (usuario + contraseña, sin `.field-title` y con
+    // el botón diciendo "Iniciar sesión") el recuento da `hayFormulario:false` y
+    // `hayBoton:false`, o sea que las señales 2 y 3 se cumplen SOLAS dos tomas seguidas y
+    // se afirmaría "enviada" sobre un login. Se mira por dos vías independientes: que haya
+    // una caja de contraseña y que la ruta sea de autenticación.
+    // POR SEGMENTOS COMPLETOS, NUNCA POR SUBCADENA. Es la diferencia entre que funcione y
+    // que rompa cosas buenas, y está MEDIDO sobre las 23 URLs de formulario que la
+    // extensión conoce más 8 pantallas legítimas y 6 de sesión caducada:
+    //     por subcadena -> 5 falsos descartes de 8 legítimas | 0 malas coladas
+    //     por segmentos -> 0 falsos descartes de 8 legítimas | 0 malas coladas
+    // El caso que lo destapa: los formularios de suplantación de X viven bajo
+    // `/es/forms/AUTHenticity/impersonation/...` y hay otro en `/auth-to-rep`. Por
+    // subcadena, "auth" se los lleva por delante y X deja de confirmar envíos buenos SIN
+    // QUE NADIE SE ENTERE; por segmentos, "authenticity" no es "auth" y se salvan.
+    // La prueba lleva esas dos URLs como caso de control: si alguien relaja esto a
+    // `indexOf`, la prueba lo dice sola.
+    //
+    // La lista es LARGA a propósito. Los dos modos de fallo no son simétricos: si sobra una
+    // palabra, la extensión no confirma y le dice al usuario "pulsé Enviar, mira la
+    // pantalla" —que es lo honesto y lo que hacía antes—; si falta, dice "denuncia
+    // enviada" sobre un login, que es una mentira sobre la prueba legal del usuario.
+    // Las 10 primeras las validó QA; `signup`, `challenge`, `verify` y `two-factor` se
+    // midieron aparte contra las mismas 23 URLs: 0 falsos descartes cada una.
+    const SEGMENTOS_DE_AUTENTICACION = [
+      "login", "log-in", "log_in", "signin", "sign-in", "sign_in",
+      "signup", "sign-up", "sign_up", "auth", "oauth", "authenticate", "authorize",
+      "session", "checkpoint", "challenge", "verify", "accounts",
+      "two-factor", "two_factor"
+    ];
+    // SUFIJOS: `facebook.com/login.php` es la URL de inicio de sesión canónica de Facebook,
+    // y `login.php` no es el segmento `login`. Se compara también el segmento sin su
+    // extensión, y se descodifica antes (`/Log%2Din` -> `log-in`). Gana además
+    // `instagram.com/signin.html`. Medido: 0 falsos descartes sobre las 23 URLs reales.
+    //
+    // OJO, Y ESTO NO SE "MEJORA": sigue siendo comparación EXACTA, nunca por prefijo, así
+    // que `/login2` y `/oauth2` NO se cubren. Es deliberado. Cubrirlos exigiría comparar
+    // por prefijo, y el prefijo es justo lo que se midió como incorrecto: `authenticity`
+    // empieza por `auth` y se llevaría por delante los dos formularios de suplantación de
+    // X. El coste de no cubrir `/login2` es que el usuario recibe el texto honesto; el de
+    // cubrirlo mal es dejar de confirmar envíos buenos sin que nadie se entere.
+    try {
+      const partes = (new URL(location.href)).pathname.toLowerCase().split("/").filter(Boolean);
+      r.rutaDeAutenticacion = partes.some(function (x) {
+        let y = x;
+        try { y = decodeURIComponent(x); } catch (e) {}
+        y = y.split(".")[0];   // "login.php" -> "login"
+        return SEGMENTOS_DE_AUTENTICACION.indexOf(x) >= 0 ||
+               SEGMENTOS_DE_AUTENTICACION.indexOf(y) >= 0;
+      });
+    } catch (x) {}
+    // (1) MISMO sitio, RUTA DISTINTA. Ojo: irse de la ruta dentro del MISMO sitio es la
+    //     señal buena —Meta y Cloudflare navegan a su pantalla de confirmación—, no un
+    //     motivo para callarse. Cambiar de HOST es otra cosa y lo decide quien llama.
+    try {
+      const a = new URL(location.href), b = new URL(urlForm);
+      const ha = a.host.replace(/^www\./, ""), hb = b.host.replace(/^www\./, "");
+      const mismoSitio = (ha === hb || ha.endsWith("." + hb));
+      const pa = a.pathname.toLowerCase().replace(/\/+$/, ""), pb = b.pathname.toLowerCase().replace(/\/+$/, "");
+      r.rutaDistinta = mismoSitio && pa !== pb;
+    } catch (x) {}
+    // (2) ¿Sigue habiendo formulario? Mismo recuento que la sonda del bucle.
+    try {
+      const seVe = (e) => {
+        const rr = e.getBoundingClientRect();
+        if (rr.width < 1 && rr.height < 1) return false;
+        const st = window.getComputedStyle(e);
+        return st.display !== "none" && st.visibility !== "hidden";
+      };
+      const TIPOS = ["text", "email", "url", "tel", "number", "search", "password"];
+      let cajas = 0, opciones = 0, rotulos = 0;
+      const campos = document.querySelectorAll("input,textarea");
+      for (let i = 0; i < campos.length; i++) {
+        const e = campos[i], et = (e.tagName || "").toLowerCase(), tp = (e.type || "").toLowerCase();
+        if (!seVe(e)) continue;
+        if (tp === "password") r.hayPassword = true; // sale gratis: ya se recorren los input
+        if (tp === "radio" || tp === "checkbox") { opciones++; continue; }
+        if (et === "textarea") { cajas++; continue; }
+        if (et === "input" && TIPOS.indexOf(tp) >= 0) cajas++;
+      }
+      const tit = document.querySelectorAll(".field-title");
+      for (let j = 0; j < tit.length; j++) if (seVe(tit[j])) rotulos++;
+      r.hayFormulario = (opciones >= 2 && cajas >= 1) || cajas >= 3 || rotulos >= 3;
+    } catch (x) {}
+    // (3) ¿Sigue estando el botón de envío?
+    try {
+      const norm = (s) => (s || "").toString().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+      const ok = new RegExp(labelRegexSrc);
+      const no = /(siguiente|next|continuar|continue|cancel|cancelar|atras|back|volver|adjuntar|upload|examinar|browse|guardar borrador|save draft|anadir|add)/;
+      const els = Array.prototype.slice.call(document.querySelectorAll("button,input[type=submit],input[type=button],[role=button],a[role=button]"));
+      r.hayBoton = els.some(function (e) {
+        if (e.disabled) return false;
+        const txt = norm(e.innerText || e.value || (e.getAttribute && e.getAttribute("aria-label")) || "");
+        if (!txt || !ok.test(txt) || no.test(txt)) return false;
+        const rr = e.getBoundingClientRect();
+        return rr.width > 2 && rr.height > 2;
+      });
+    } catch (x) {}
+  } catch (e) {}
+  return r;
+}
+
+// Tras pulsar Enviar, MIRA la pantalla a los 3, 6 y 10 s y decide si puede afirmarse que
+// se envió. Corta a los 10 s pase lo que pase. Devuelve { confirmada, porQue }.
+async function confirmarEnvio(tabId, urlForm, labelRegexSrc) {
+  const momentos = [3000, 3000, 4000]; // 3 s, 6 s, 10 s
+  let anterior = null;
+  for (let i = 0; i < momentos.length; i++) {
+    await dormir(momentos[i]);
+    // Si la pestaña se cerró o se fue a OTRO SITIO: no se afirma nada y no se sondea más.
+    let t = null;
+    try { t = await chrome.tabs.get(tabId); } catch (e) { return { confirmada: false, porQue: "la pestaña se cerró" }; }
+    if (urlForm) {
+      try {
+        const a = new URL((t && t.url) || ""), b = new URL(urlForm);
+        const ha = a.host.replace(/^www\./, ""), hb = b.host.replace(/^www\./, "");
+        if (!(ha === hb || ha.endsWith("." + hb))) return { confirmada: false, porQue: "la pestaña se fue a otro sitio" };
+      } catch (e) { return { confirmada: false, porQue: "no se pudo leer la dirección" }; }
+    }
+    let s = null;
+    try {
+      const r = await chrome.scripting.executeScript({ target: { tabId: tabId }, func: SENALES_DE_ENVIO, args: [urlForm || "", labelRegexSrc] });
+      s = (r && r[0] && r[0].result) || null;
+    } catch (e) { s = null; }
+    if (!s) { anterior = null; continue; }
+    // PUERTA DE AUTENTICACIÓN, LO PRIMERO DE CADA TOMA y antes de mirar ninguna señal.
+    // Va aquí y no dentro de la señal 1 porque en un login se disparan solas las TRES.
+    // Se recalcula en cada toma (no hay estado): a los 3 s se suele seguir viendo el
+    // formulario y no pasa nada; si a los 6 la pestaña acabó en un login, se corta.
+    if (s.hayPassword || s.rutaDeAutenticacion) {
+      return { confirmada: false, porQue: "la pestaña acabó en una pantalla de inicio de sesión" };
+    }
+    // SEÑAL (1): mismo sitio, RUTA DISTINTA. Vale SOLA a partir de la toma de los 6 s.
+    // En la primera (3 s) no, porque una SPA puede empujar una ruta intermedia y volver;
+    // ahí se exige que aguante a la toma siguiente. Y no se le pide siempre dos tomas: si
+    // la navegación llega a los 7 s, la única que la ve es la de los 10 y no hay una cuarta
+    // para confirmarla —se diría "no puedo confirmar" de un envío que sí funcionó, que es
+    // justo el caso lento para el que existe esa última toma—.
+    if (s.rutaDistinta && i > 0) return { confirmada: true, porQue: "la página cambió de pantalla" };
+    // SEÑALES (2) y (3): siempre dos tomas seguidas. Al pulsar Enviar, React desmonta el
+    // formulario un instante para pintar su spinner, y una toma única diría "confirmado"
+    // sin haberse enviado nada —justo la mentira que estamos quitando—.
+    if (anterior) {
+      if (!s.hayFormulario && !anterior.hayFormulario) return { confirmada: true, porQue: "el formulario ya no está" };
+      if (!s.hayBoton && !anterior.hayBoton) return { confirmada: true, porQue: "el botón Enviar ya no está" };
+    }
+    anterior = s;
+  }
+  return { confirmada: false, porQue: "la pantalla no cambió" };
+}
+
 // FLUJO DE ENVÍO: activar pestaña -> capturar comprobante -> cuenta atrás 5 s -> clic Enviar.
 // `extra` es OPCIONAL: { idDenuncia, urlForm }. Sin él se comporta como siempre.
 //   idDenuncia -> a qué denuncia del Registro se pega el comprobante (ver guardarComprobante).
@@ -831,10 +1117,20 @@ async function enviarFormulario(tabId, marca, enviarLabel, extra) {
         "así que NO pulsé Enviar. Vuelve al formulario y envíalo tú.", "se fue");
       return;
     }
-    const ok = await clicRealEnviar(tabId, enviarLabel || ENVIAR_LABEL_DEFECTO);
-    ctxAvisar(tabId, ok
-      ? "Denuncias RS: denuncia enviada. El comprobante quedó guardado en el Registro."
-      : "Denuncias RS: no encontré el botón «Enviar». Revisa y envíalo tú (el comprobante ya se guardó).", !ok);
+    const etiqueta = enviarLabel || ENVIAR_LABEL_DEFECTO;
+    const ok = await clicRealEnviar(tabId, etiqueta);
+    if (!ok) {
+      ctxAvisar(tabId, "Denuncias RS: no encontré el botón «Enviar». Revisa y envíalo tú (el comprobante ya se guardó).", true);
+      return;
+    }
+    // Se pulsó el botón. Eso NO es lo mismo que "la red lo aceptó": hay que mirar.
+    const conf = await confirmarEnvio(tabId, urlForm, etiqueta);
+    ctxAvisar(tabId, conf.confirmada
+      ? "Denuncias RS: denuncia enviada (" + conf.porQue + "). El comprobante quedó guardado en el Registro."
+      // Sin señal NO se afirma que se envió: se dice exactamente lo que pasó.
+      : "Denuncias RS: pulsé el botón Enviar. Mira la pantalla para confirmar que la red lo aceptó; " +
+        "si sale un número de caso, apúntalo en el Registro. El comprobante ya se guardó.",
+      !conf.confirmada);
   } catch (e) { /* si algo falla, el usuario envía a mano */ }
 }
 
@@ -889,8 +1185,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // El popup manda `msg.tabId`; el VIGILANTE (mundo isolated) no lo conoce, así que
     // usamos la pestaña del emisor (`sender.tab.id`), igual que en `capturaCompleta`.
     const tabId = msg.tabId || (sender && sender.tab && sender.tab.id);
-    if (tabId) { hacerClics(tabId, msg.selectores || []).then(sendResponse); return true; } // respuesta asíncrona
-    return; // sin pestaña: nada que clicar
+    if (!tabId) return; // sin pestaña: nada que clicar
+    // ANCLA. Este es el camino que usa el popup en CADA relleno, o sea TODAS las redes.
+    // Entre la pasada de APLICAR del popup (segundos) y este mensaje la pestaña puede
+    // haberse ido, y aquí se dan clics REALES con el depurador sobre lo que haya cargado.
+    // `urlForm` es OPCIONAL por retrocompatibilidad, PERO hoy no hay ningún emisor sin
+    // ella: el único que manda `clicsReales` es popup.js y sí la pone. O sea que la rama
+    // sin ancla no la usa nadie. Si algún día se añade otro emisor (un content script, un
+    // vigilante inyectado…) y se olvida el `urlForm`, se quedará SIN ancla y en silencio.
+    (async () => {
+      if (msg.urlForm && !(await sigueEnElFormulario(tabId, msg.urlForm, {}))) {
+        ctxAvisar(tabId, "Denuncias RS: la pestaña salió de la página del formulario, así que no marqué las opciones.", true);
+        return { ok: 0, fuera: true };
+      }
+      return hacerClics(tabId, msg.selectores || []);
+    })().then(sendResponse, () => sendResponse({ ok: 0 }));
+    return true; // respuesta asíncrona
   }
   if (msg && msg.accion === "capturaCompleta") {
     // El popup manda `msg.tabId`; el content script no lo conoce, así que
@@ -925,9 +1235,21 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // en las de captcha, captura + avisa. Corre en el service worker (sobrevive a cerrar el popup).
     const tabId = msg.tabId || (sender && sender.tab && sender.tab.id);
     if (tabId) {
+      // Este es el camino de los formularios NO progresivos (Meta, Cloudflare, Google, X,
+      // LinkedIn), o sea la mayoría. `urlForm` ANCLA la captura y el envío, e `idDenuncia`
+      // fija a qué denuncia del Registro va el comprobante: los dos son OPCIONALES, así que
+      // un mensaje viejo sin ellos se comporta exactamente como antes.
+      const extra = { idDenuncia: msg.idDenuncia, urlForm: msg.urlForm || "" };
       (async () => {
-        if (msg.autoenviar) await finalizarEnvio(tabId, msg.marca || "", msg.enviarLabel, msg.faltan || []);
-        else { await activarPestana(tabId); await guardarComprobante(tabId); ctxAvisar(tabId, "Denuncias RS: comprobante capturado. Resuelve el captcha y pulsa Enviar.", false); }
+        if (msg.autoenviar) { await finalizarEnvio(tabId, msg.marca || "", msg.enviarLabel, msg.faltan || [], extra); return; }
+        if (extra.urlForm && !(await sigueEnElFormulario(tabId, extra.urlForm, {}))) {
+          await avisarDenunciaPendiente(tabId, "Denuncias RS: la pestaña salió de la página del formulario, así que no " +
+            "capturé comprobante. Vuelve al formulario y pulsa Rellenar otra vez.", "se fue");
+          return;
+        }
+        await activarPestana(tabId);
+        await guardarComprobante(tabId, extra.idDenuncia);
+        ctxAvisar(tabId, "Denuncias RS: comprobante capturado. Resuelve el captcha y pulsa Enviar.", false);
       })().then(() => sendResponse({ ok: true }), () => sendResponse({ ok: false }));
       return true; // respuesta asíncrona
     }
@@ -1317,7 +1639,10 @@ async function ctxEjecutarPlan(tabId, plan, marca, form, datos, urlEsperada) {
   }
   // {informe:true}: guarda también el paso a paso para el botón "📋 Copiar informe"
   // del popup, igual que cuando se rellena desde ahí (aquí se llega por el clic derecho).
-  const r = await chrome.scripting.executeScript({ target: { tabId }, func: APLICAR, args: [plan.pasos, { informe: true }] });
+  // `urlForm` dentro de las opciones: APLICAR aborta solo si al ejecutarse la página ya no
+  // es el formulario (ver el aviso en motor.js). Va `urlDeReferencia` por lo mismo que el
+  // resto de esta función: es la página en la que el usuario está de verdad.
+  const r = await chrome.scripting.executeScript({ target: { tabId }, func: APLICAR, args: [plan.pasos, { informe: true, urlForm: urlDeReferencia }] });
   const res = (r && r[0] && r[0].result) || { ok: 0, faltan: [], clicsReales: [] };
   try {
     const inf = res.informe || {};
@@ -1327,7 +1652,19 @@ async function ctxEjecutarPlan(tabId, plan, marca, form, datos, urlEsperada) {
       ok: res.ok, faltan: res.faltan || [], pasos: inf.pasos || [], inventario: inf.inventario || null
     } });
   } catch (e) { /* el informe es solo ayuda */ }
-  if (res.clicsReales && res.clicsReales.length) { try { await hacerClics(tabId, res.clicsReales); } catch (e) {} }
+  if (res.clicsReales && res.clicsReales.length) {
+    // ANCLA OTRA VEZ. La URL se comprobó al ENTRAR en esta función; entre medias va una
+    // pasada de APLICAR con `{informe:true}` (la variante más lenta, porque además arma el
+    // inventario). Si en ese hueco la pestaña se fue, `hacerClics` daría clics REALES sobre
+    // una pantalla ajena. Sin `urlDeReferencia` no hay nada que comparar: se hace como siempre.
+    if (!urlDeReferencia || (await sigueEnElFormulario(tabId, urlDeReferencia, {}))) {
+      try { await hacerClics(tabId, res.clicsReales); } catch (e) {}
+    } else {
+      ctxAvisar(tabId, "Denuncias RS: la pestaña salió de la página del formulario, así que no marqué las opciones " +
+        "ni capturé comprobante. Vuelve al formulario y repítelo.", true);
+      return;
+    }
+  }
   const autoenv = permiteAutoenvio(form);
   // A qué denuncia del Registro va el comprobante: se fija AQUÍ, antes de arrancar nada
   // largo (ver guardarComprobante).
