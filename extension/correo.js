@@ -27,11 +27,16 @@ function es_workspace(correo) {
 // Datos del reporte que se está redactando (red, categoría y enlaces denunciados).
 // Los usa la MEMORIA DE CORREOS para proponer y recordar destinatarios.
 const CD = window.CORREOS_DENUNCIA;
-let REPORTE = { red: "", cat: "", urls: [] };
+let REPORTE = { red: "", cat: "", urls: [], modo_prueba: false };
 
 chrome.storage.local.get("email_reporte", (d) => {
   const e = d.email_reporte || {};
-  REPORTE = { red: e.red || "", cat: e.cat || "", urls: Array.isArray(e.urls) ? e.urls : [] };
+  // `modo_prueba` lo pone el popup: con el encendido NO se dio de alta ninguna denuncia,
+  // asi que esta pagina no debe tocar el Registro (ver actualizar_correo_denuncia).
+  REPORTE = { red: e.red || "", cat: e.cat || "", urls: Array.isArray(e.urls) ? e.urls : [], modo_prueba: !!e.modo_prueba };
+  // El cintillo ambar de MODO PRUEBA: quien abra esta pestana tiene que saber, sin
+  // leer nada mas, que esto no va a quedar registrado.
+  if (REPORTE.modo_prueba && $("aviso_modo_prueba_correo")) $("aviso_modo_prueba_correo").style.display = "block";
   // Destinos FIJOS de la red (p. ej. TikTok: sus tres buzones de propiedad
   // intelectual). Van SIEMPRE, aunque el correo se hubiera generado antes.
   $("para").value = CD ? CD.unir_correos(e.to || "", CD.fijos_de_red(REPORTE.red)) : (e.to || "");
@@ -213,6 +218,10 @@ function construir_raw(remite, para, asunto, html) {
 // poder verlo y copiarlo después. No debe bloquear el envío si algo falla.
 async function actualizar_correo_denuncia(enviado) {
   try {
+    // MODO PRUEBA: el popup generó este correo sin dar de alta ninguna denuncia, así que
+    // aquí NO hay a qué escribir. Sin esta salida se escribiría sobre la ÚLTIMA denuncia
+    // de verdad (la que apunta `ultima_denuncia_registro`), pisándole su correo.
+    if (REPORTE && REPORTE.modo_prueba) return;
     const st = await new Promise((res) =>
       chrome.storage.local.get(["ultima_denuncia_registro", "denuncias_registro"], res));
     const id = st.ultima_denuncia_registro;
@@ -235,6 +244,18 @@ async function actualizar_correo_denuncia(enviado) {
       asunto_es: $("asunto_es").value || "", cuerpo_es: cuerpo_es,
       enviado: !!enviado, fecha: new Date().toISOString()
     });
+    // ENVIAR EL CORREO ES LA CONFIRMACIÓN. La denuncia nace PROVISIONAL en el popup (no
+    // sale en el Registro hasta que el usuario dice que sí); si el correo se envió, la
+    // denuncia se hizo: deja de ser provisional aquí mismo y no hace falta preguntar.
+    // El consecutivo se recalcula igual que en popup.js (confirmar_denuncia_provisional):
+    // sobre las denuncias de verdad de esa marca, para no dejar huecos en la numeración.
+    if (enviado && d.provisional === true) {
+      d.consecutivo = lista.filter((x) => x.marca === d.marca && x !== d && x.provisional !== true)
+        .reduce((m, x) => Math.max(m, parseInt(x.consecutivo, 10) || 0), 0) + 1;
+      delete d.provisional;
+      delete d.campos_rellenados;
+      delete d.rotulos_no_encontrados;
+    }
     await new Promise((res) => chrome.storage.local.set({ denuncias_registro: lista }, res));
   } catch (e) { /* no bloquear por esto */ }
 }

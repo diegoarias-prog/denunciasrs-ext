@@ -43,6 +43,14 @@
 </head>
 <body>
   <h1>Reporte por correo</h1>
+  <!-- Solo se ve si el popup genero este correo con el MODO PRUEBA encendido: entonces
+       no hay denuncia dada de alta y el Registro no se toca. Lo enciende correo.js. -->
+  <p id="aviso_modo_prueba_correo" style="display:none;margin:0 0 10px;padding:8px 10px;
+     border-radius:6px;background:#fffbeb;border-left:4px solid #f59e0b;color:#92400e;font-size:13px;">
+    <b>🧪 MODO PRUEBA.</b> Este correo se genero solo para que revises la plantilla:
+    <b>no se registro ninguna denuncia</b> y, si lo envias desde aqui, <b>no quedara anotado
+    en el Registro</b>. Apaga el modo prueba en el popup para denunciar de verdad.
+  </p>
   <p class="sub">Lo que se <b>ENVÍA es la versión en inglés</b>. La versión en español es solo para que verifiques el contenido.</p>
 
   <label for="para">Para</label>

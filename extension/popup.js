@@ -8,6 +8,12 @@
 // solo se rellena y captura, el usuario resuelve el captcha y envía.
 const REDES_AUTOENVIO_POPUP = ["Facebook", "Instagram", "WhatsApp", "TikTok", "Google"];
 
+// Clave donde vive el interruptor 🧪 MODO PRUEBA. La leen TAMBIÉN background.js (para no
+// capturar ni enviar) y las pruebas: por eso está en storage y no en una variable.
+const CLAVE_MODO_PRUEBA = "modo_prueba_denuncias";
+// Clave del Registro de denuncias (la misma que usan registro.js y background.js).
+const CLAVE_REGISTRO_POPUP = "denuncias_registro";
+
 // El botón flotante "📸 Capturar comprobante" NO debe salir mientras uno simplemente
 // navega por la red social: solo cuando se ACTIVA la extensión. Abrir este popup en una
 // pestaña es justo eso, así que se lo avisamos al content script de esa pestaña.
@@ -296,6 +302,12 @@ async function inicializar() {
   llenar_select($("sel_marca"), Object.keys(MARCAS).sort().map((m) => ({ value: m, texto: m })));
   refrescar_redes();
   refrescar_correos_de_marca();
+  // El interruptor se recuerda entre usos: se pinta DESPUES de refrescar_redes(), que es
+  // quien escribe el texto del boton principal.
+  pintar_modo_prueba(await leer_modo_prueba());
+  // Denuncias que se empezaron y quedaron sin contestar: si no se preguntara aqui, se
+  // acumularian invisibles (no salen en el Registro y nadie volveria a mirarlas).
+  await preguntar_por_denuncias_provisionales();
 }
 
 // Repuebla las redes con las del tipo elegido. Si la red que estaba puesta también
@@ -311,8 +323,10 @@ function refrescar_redes() {
     .concat([{ value: OPCION_NUEVA_PLATAFORMA, texto: "➕ Nueva plataforma…" }]));
   if (antes && redes.indexOf(antes) >= 0) $("sel_red").value = antes;
   al_cambiar_de_red();
-  // El botón principal dice lo que va a pasar de verdad al pulsarlo.
+  // El botón principal dice lo que va a pasar de verdad al pulsarlo (y si el modo
+  // prueba está encendido, lo dice también aquí: pintar_modo_prueba reescribe el texto).
   $("boton_rellenar").textContent = (tipo === "correo") ? "✉ Generar correo" : "Rellenar formulario";
+  if ($("casilla_modo_prueba") && $("casilla_modo_prueba").checked) pintar_modo_prueba(true);
 }
 
 // Al elegir una red: si es "➕ Nueva plataforma…" se abre el panel de alta; si no,
@@ -896,9 +910,11 @@ chrome.storage.local.remove([CLAVE_URLS_MANUALES], () => { pintar_estado_urls_ma
 // misma denuncia NO llena el registro). Devuelve el id de la entrada y guarda
 // `ultima_denuncia_registro` para que la captura sepa a cuál adjuntar.
 async function registrar_denuncia_auto(marca, form, urls) {
-  const CLAVE = "denuncias_registro";
-  const lista = await new Promise((res) =>
-    chrome.storage.local.get([CLAVE], (x) => res(Array.isArray(x[CLAVE]) ? x[CLAVE] : [])));
+  return await cambiar_el_registro((lista) => registrar_denuncia_en(lista, marca, form, urls));
+}
+
+// El cuerpo de arriba, ya DENTRO de la cola: recibe la lista fresca y la muta.
+function registrar_denuncia_en(lista, marca, form, urls) {
   const plataforma = form.red;
   const tipo = form.tipo === "email" ? "correo" : "formulario";
   const categoria = form.nombre;
@@ -919,17 +935,22 @@ async function registrar_denuncia_auto(marca, form, urls) {
   // doble-clic inmediato (< 60 s) reutiliza la anterior.
   const VENTANA_ANTIDOBLE_MS = 60 * 1000;
   const ahora = Date.now();
+  // SOLO se reutiliza una denuncia que siga siendo PROVISIONAL. Si el usuario ya
+  // contesto que si (dejo de ser provisional), esa denuncia esta cerrada: pulsar
+  // Rellenar otra vez es una denuncia NUEVA. Sin esto, un segundo Rellenar dentro
+  // del minuto devolveria el id de una denuncia ya confirmada y la pregunta se
+  // haria sobre ella: decir "No" la borraria del Registro.
   const existente = lista.find((d) =>
-    d.estado === "pendiente" && d.marca === marca &&
+    d.estado === "pendiente" && d.provisional === true && d.marca === marca &&
     d.plataforma === plataforma && d.categoria === categoria &&
     (ahora - new Date(d.fecha).getTime()) < VENTANA_ANTIDOBLE_MS);
   if (existente) {
     // Completa lo que faltara (p. ej. si la 1.ª vez aún no había URLs cargadas).
     if (destino && !existente.destino) existente.destino = destino;
     if (url_denunciada && !existente.url_denunciada) existente.url_denunciada = url_denunciada;
-    await new Promise((res) =>
-      chrome.storage.local.set({ [CLAVE]: lista, ultima_denuncia_registro: existente.id }, res));
-    return existente.id;
+    // OJO: si esa denuncia YA se confirmó, aquí NO se vuelve a marcar provisional. Volver
+    // a ponerla provisional la sacaría del Registro sin que nadie lo pidiera.
+    return { valor: existente.id, extra: { ultima_denuncia_registro: existente.id } };
   }
 
   // Consecutivo correlativo POR MARCA (máximo existente + 1), igual que registro.js.
@@ -940,11 +961,13 @@ async function registrar_denuncia_auto(marca, form, urls) {
     id: id, marca: marca, plataforma: plataforma, tipo: tipo, categoria: categoria,
     destino: destino, url_denunciada: url_denunciada, numero_caso: "",
     estado: "pendiente", consecutivo: consecutivo,
+    // PROVISIONAL: la fila existe (el comprobante necesita a qué pegarse) pero NO es
+    // todavía una denuncia. El Registro no la lista ni la cuenta hasta que el usuario
+    // confirme que el formulario se rellenó bien. Ver confirmar_denuncia_provisional().
+    provisional: true,
     notas: "", fecha: new Date().toISOString()
   });
-  await new Promise((res) =>
-    chrome.storage.local.set({ [CLAVE]: lista, ultima_denuncia_registro: id }, res));
-  return id;
+  return { valor: id, extra: { ultima_denuncia_registro: id } };
 }
 
 // Adjunta a la denuncia el CONTENIDO del correo generado (asunto + cuerpo, en/es),
@@ -953,17 +976,354 @@ async function registrar_denuncia_auto(marca, form, urls) {
 // actualiza con el texto FINAL (por si lo editó).
 async function guardar_correo_en_denuncia(id, em) {
   if (!id || !em) return;
-  const CLAVE = "denuncias_registro";
-  const lista = await new Promise((res) =>
-    chrome.storage.local.get([CLAVE], (x) => res(Array.isArray(x[CLAVE]) ? x[CLAVE] : [])));
-  const d = lista.find((x) => String(x.id) === String(id));
-  if (!d) return;
-  d.correo = {
-    to: em.to || "", asunto: em.asunto || "", cuerpo: em.cuerpo || "",
-    asunto_es: em.asunto_es || "", cuerpo_es: em.cuerpo_es || "",
-    enviado: false, fecha: new Date().toISOString()
+  await cambiar_el_registro((lista) => {
+    const d = lista.find((x) => String(x.id) === String(id));
+    if (!d) return { guardar: false };
+    d.correo = {
+      to: em.to || "", asunto: em.asunto || "", cuerpo: em.cuerpo || "",
+      asunto_es: em.asunto_es || "", cuerpo_es: em.cuerpo_es || "",
+      enviado: false, fecha: new Date().toISOString()
+    };
+    return {};
+  });
+}
+
+// ===========================================================================
+//  MODO PRUEBA (🧪) — probar los formularios sin dejar rastro
+// ===========================================================================
+// Con el modo prueba encendido se rellena el formulario EXACTAMENTE igual que
+// siempre, pero: no se da de alta la denuncia, no se guarda comprobante y no se
+// envia nada (tampoco en Facebook / Instagram / WhatsApp / TikTok / Google, que
+// son las que se envian solas). El interruptor vive en chrome.storage porque el
+// service worker tambien lo consulta antes de capturar o enviar: si viviera solo
+// en el popup, un bucle de TikTok arrancado en modo prueba enviaria la denuncia
+// media hora despues, con el popup ya cerrado.
+async function leer_modo_prueba() {
+  return await new Promise((res) =>
+    chrome.storage.local.get([CLAVE_MODO_PRUEBA], (x) => res(!!(x && x[CLAVE_MODO_PRUEBA]))));
+}
+
+// Pinta el estado del interruptor en TODO el popup: la casilla en ambar, el
+// parrafo de aviso y el propio boton principal. Que nadie mande una denuncia de
+// verdad creyendo que era una prueba, ni al reves.
+function pintar_modo_prueba(activo) {
+  const fila = $("fila_modo_prueba"), aviso = $("aviso_de_modo_prueba");
+  if (fila) fila.classList.toggle("encendido", !!activo);
+  if (aviso) aviso.classList.toggle("encendido", !!activo);
+  if ($("casilla_modo_prueba")) $("casilla_modo_prueba").checked = !!activo;
+  // El boton principal dice lo que va a pasar de verdad al pulsarlo.
+  const boton = $("boton_rellenar");
+  if (boton) {
+    const base = (tipo_de_denuncia() === "correo") ? "✉ Generar correo" : "Rellenar formulario";
+    boton.textContent = activo ? "🧪 " + base + " (PRUEBA)" : base;
+  }
+  // En modo prueba no se guardan comprobantes: el boton de la camara no tiene a que pegarlos.
+  const cam = $("boton_capturar");
+  if (!cam) return;
+  if (activo) {
+    cam.disabled = true;
+    cam.title = "🧪 Modo prueba: no se guardan comprobantes. Apaga el modo prueba para capturar.";
+  } else if (cam.title.indexOf("Modo prueba") >= 0) {
+    // Al APAGARLO se devuelve la explicacion de siempre (el boton sigue deshabilitado
+    // hasta el proximo Rellenar, como ha sido siempre: es quien lo enciende).
+    cam.title = "Adjunta una captura de esta pestaña al comprobante de la denuncia en curso. Atajo: Alt+Shift+S, captura sin abrir este popup (se puede cambiar en chrome://extensions/shortcuts).";
+  }
+}
+
+if ($("casilla_modo_prueba")) {
+  $("casilla_modo_prueba").addEventListener("change", () => {
+    const activo = $("casilla_modo_prueba").checked;
+    chrome.storage.local.set({ [CLAVE_MODO_PRUEBA]: activo }, () => {
+      pintar_modo_prueba(activo);
+      mostrar_estado("aviso", activo
+        ? "🧪 <b>Modo prueba ENCENDIDO.</b> Se rellenaran los formularios para que los revises, pero " +
+          "<b>no se registra la denuncia, no se guarda comprobante y no se envia nada</b>."
+        : "✅ <b>Modo prueba APAGADO.</b> Las denuncias vuelven a registrarse, capturarse y enviarse con normalidad.");
+    });
+  });
+}
+
+// ===========================================================================
+//  CONFIRMAR ANTES DE GUARDAR EN EL REGISTRO
+// ===========================================================================
+// Problema que resuelve: la denuncia se daba de alta ANTES de rellenar (el
+// comprobante necesita a que fila pegarse), asi que cuando el relleno salia mal
+// quedaba una fila vacia en el Registro. Ahora nace PROVISIONAL —el Registro no
+// la lista ni la cuenta— y solo deja de serlo cuando el usuario confirma aqui.
+// Si dice que no, se borra entera (y con ella su comprobante, que va dentro del
+// mismo objeto: `comprobante_img`).
+
+function leer_registro_del_popup() {
+  return new Promise((res) =>
+    chrome.storage.local.get([CLAVE_REGISTRO_POPUP], (x) =>
+      res(Array.isArray(x[CLAVE_REGISTRO_POPUP]) ? x[CLAVE_REGISTRO_POPUP] : [])));
+}
+
+// `extra` son claves sueltas que van en el MISMO set (hoy solo
+// `ultima_denuncia_registro`): asi la denuncia y el puntero a la denuncia en curso
+// nunca quedan a medias, uno escrito y el otro no.
+function escribir_registro_del_popup(lista, extra) {
+  const aGuardar = Object.assign({ [CLAVE_REGISTRO_POPUP]: lista }, extra || {});
+  return new Promise((res) => chrome.storage.local.set(aGuardar, res));
+}
+
+// ---------------------------------------------------------------------------
+//  GUARDADO EN COLA (read-modify-write, DE UNO EN UNO).
+//  Mismo problema y misma solucion que `cola_de_guardado` en registro.js. Aqui
+//  hacia falta igual: entre el `get` y el `set` de cada cambio hay saltos
+//  asincronos, y en el popup pueden solaparse de verdad —la lista de denuncias
+//  sin confirmar tiene un boton por FILA, y cada uno solo deshabilita los suyos,
+//  asi que pulsar el ✅ de una y el 🗑️ de otra seguidas lanza dos cambios a la
+//  vez—. El segundo leeria la lista ANTES de que el primero escribiera y la
+//  pisaria: la denuncia confirmada volveria a estar sin confirmar, o la
+//  descartada resucitaria.
+//  El read-modify-write (leer siempre lo ULTIMO que hay en el navegador, nunca
+//  una copia vieja en memoria) es ademas lo que evita pisar lo que escriban el
+//  service worker o la pagina del Registro mientras tanto.
+//
+//  `cambio(lista)` recibe la lista FRESCA, la muta a su gusto y devuelve
+//  { guardar, valor, extra }:  guardar=false -> no se escribe nada (no habia
+//  nada que cambiar);  valor -> lo que recibe quien llamo;  extra -> claves
+//  sueltas para el mismo set.
+// ---------------------------------------------------------------------------
+let cola_del_registro = Promise.resolve();
+
+function cambiar_el_registro(cambio) {
+  // Se encadena con los DOS manejadores: si un cambio falla, el siguiente se
+  // ejecuta igual y la cola no se queda atascada (igual que en registro.js).
+  cola_del_registro = cola_del_registro.then(
+    () => aplicar_cambio_en_el_registro(cambio),
+    () => aplicar_cambio_en_el_registro(cambio)
+  );
+  return cola_del_registro;
+}
+
+async function aplicar_cambio_en_el_registro(cambio) {
+  const lista = await leer_registro_del_popup();   // lo ULTIMO que hay guardado
+  const r = (await cambio(lista)) || {};
+  if (r.guardar === false) return r.valor;
+  await escribir_registro_del_popup(lista, r.extra);
+  return r.valor;
+}
+
+// Denuncias empezadas y aun sin responder, de la mas reciente a la mas antigua.
+async function listar_denuncias_provisionales() {
+  const lista = await leer_registro_del_popup();
+  return lista.filter((d) => d && d.provisional === true)
+    .sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
+}
+
+// SI: deja de ser provisional y pasa a ser una denuncia normal (pendiente, con su
+// comprobante). El consecutivo se RECALCULA aqui sobre las denuncias de verdad de
+// esa marca: si se quedara con el que se le puso al crearla, descartar una
+// provisional dejaria un hueco en la numeracion del Registro.
+// Devuelve "ok" | "no_esta" | "ya_confirmada". Los tres estados hacen falta: el
+// panel sigue en pantalla mientras el usuario hace otras cosas, y para cuando
+// pulsa, la denuncia puede haber dejado de ser provisional por su cuenta (enviar
+// el correo la confirma desde correo.html) o haberse borrado desde el Registro.
+async function confirmar_denuncia_provisional(id) {
+  return await cambiar_el_registro((lista) => {
+    const d = lista.find((x) => String(x.id) === String(id));
+    if (!d) return { guardar: false, valor: "no_esta" };
+    // YA CONFIRMADA: no se toca. Recalcularle el consecutivo aquí le CAMBIARÍA el
+    // número en el Registro a una denuncia que ya estaba cerrada.
+    if (d.provisional !== true) return { guardar: false, valor: "ya_confirmada" };
+    d.consecutivo = lista.filter((x) => x.marca === d.marca && x !== d && x.provisional !== true)
+      .reduce((m, x) => Math.max(m, parseInt(x.consecutivo, 10) || 0), 0) + 1;
+    delete d.provisional;
+    delete d.campos_rellenados;   // datos de ayuda de la pregunta: no son de la denuncia
+    delete d.rotulos_no_encontrados;
+    return { valor: "ok" };
+  });
+}
+
+// NO: la denuncia se borra del Registro y con ella su comprobante. Que no quede
+// rastro. Si era la "denuncia en curso" se suelta tambien esa referencia, para que
+// una captura posterior (boton de la camara o el atajo) no se pegue a una fila que
+// ya no esta.
+// Devuelve "ok" | "no_esta" | "ya_confirmada", igual que confirmar.
+// El "ya_confirmada" es lo que impide el peor caso: la denuncia por correo se
+// confirma SOLA en cuanto el correo se envía (correo.js), y si el popup seguía
+// abierto, pulsar "🗑️ No" borraba una denuncia YA PRESENTADA, con su comprobante
+// y su correo dentro. Descartar es para lo que aún no es una denuncia; borrar una
+// de verdad se hace desde el Registro, a conciencia.
+async function descartar_denuncia_provisional(id) {
+  const r = await cambiar_el_registro((lista) => {
+    const i = lista.findIndex((x) => String(x.id) === String(id));
+    if (i === -1) return { guardar: false, valor: "no_esta" };
+    if (lista[i].provisional !== true) return { guardar: false, valor: "ya_confirmada" };
+    lista.splice(i, 1);
+    return { valor: "ok" };
+  });
+  if (r !== "ok") return r;
+  // Se suelta la referencia a la denuncia en curso: si no, una captura posterior
+  // (botón 📸 o el atajo) buscaría una fila que ya no está.
+  const g = await new Promise((res) => chrome.storage.local.get(["ultima_denuncia_registro"], res));
+  if (g && String(g.ultima_denuncia_registro) === String(id)) {
+    await new Promise((res) => chrome.storage.local.remove(["ultima_denuncia_registro"], res));
+  }
+  return "ok";
+}
+
+// Corta el bucle del service worker en la pestana del formulario. Se usa al decir
+// que NO: si la denuncia no vale, la extension no debe seguir rellenandola —ni,
+// en las redes de autoenvio, acabar mandandola— durante los 30 min siguientes.
+async function detener_bucle_en_la_pestana(tabId) {
+  if (!tabId) return;
+  try { await chrome.runtime.sendMessage({ accion: "detenerAutorelleno", tabId: tabId }); }
+  catch (e) { /* si el service worker no responde, no hay bucle vivo que parar */ }
+}
+
+// Guarda en la propia denuncia provisional lo que la extension SABE del relleno,
+// para poder ensenarselo al usuario tambien si contesta la proxima vez que abra
+// el popup (no solo en caliente).
+async function anotar_relleno_en_la_provisional(id, hechos, faltan) {
+  if (!id) return;
+  await cambiar_el_registro((lista) => {
+    const d = lista.find((x) => String(x.id) === String(id));
+    if (!d || d.provisional !== true) return { guardar: false };
+    d.campos_rellenados = hechos;
+    d.rotulos_no_encontrados = (faltan || []).slice(0, 12);
+    return {};
+  });
+}
+
+// El resumen honesto de lo que paso, para que el usuario pueda decidir. Devuelve
+// HTML ya escapado (se pinta con innerHTML) y si la extension RECOMIENDA no guardar.
+function resumen_del_relleno(hechos, faltan, sigue_rellenando) {
+  const n = (hechos == null ? 0 : hechos);
+  let html = "";
+  if (n === 0) {
+    html += "⚠ <b>No se reconocio NINGUN campo</b> de esta pagina. Lo mas probable es que la " +
+            "denuncia no se haya hecho: <b>lo recomendable es NO guardarla</b>.";
+  } else {
+    html += "Se rellenaron <b>" + n + "</b> campo(s).";
+  }
+  if (faltan && faltan.length) {
+    html += "<br>No se encontraron: " + escapar_html(faltan.slice(0, 8).join(", ")) +
+            (faltan.length > 8 ? " (+" + (faltan.length - 8) + ")" : "") + ".";
+  }
+  if (sigue_rellenando) {
+    html += "<br><br>⏳ <b>La extension SIGUE rellenando este formulario sola</b> (puede tardar hasta " +
+            "30 min si estas verificando el correo). <b>Contesta cuando de verdad haya terminado</b>, " +
+            "no ahora mismo: puedes cerrar el popup y te lo preguntara la proxima vez que lo abras.";
+  }
+  return { html: html, recomienda_no_guardar: n === 0 };
+}
+
+// Ensena la pregunta de los dos botones para la denuncia recien empezada.
+function preguntar_si_se_guarda(id, titulo, resumen, tabId) {
+  const panel = $("panel_confirmar_denuncia");
+  if (!panel) return;
+  // textContent (no innerHTML): el titulo lleva el nombre de la marca y el de la
+  // plataforma, que los escribe el usuario.
+  $("titulo_confirmar_denuncia").textContent = "¿Se relleno bien? — " + titulo;
+  $("detalle_confirmar_denuncia").innerHTML = resumen.html +
+    "<br><br>Hasta que contestes, <b>esta denuncia NO esta en el Registro</b>.";
+  const si = $("boton_confirmar_guardar"), no = $("boton_confirmar_descartar");
+  // Con cero campos el boton recomendado es el de NO: se le quita el verde al "Si"
+  // para no empujar a guardar una denuncia que la extension cree fallida.
+  si.classList.toggle("sec", resumen.recomienda_no_guardar);
+  panel.style.display = "";
+  si.onclick = async () => {
+    si.disabled = no.disabled = true;
+    const r = await confirmar_denuncia_provisional(id);
+    panel.style.display = "none";
+    si.disabled = no.disabled = false;
+    mostrar_estado(r === "no_esta" ? "error" : "ok",
+      r === "ok" ? "📓 <b>Guardada en el Registro</b> — agrega el N.º de caso cuando la plataforma te lo de."
+      : r === "ya_confirmada" ? "📓 <b>Ya estaba guardada</b> en el Registro (se confirmó sola al enviar el correo). No hice nada."
+      : "No encontré esa denuncia en el Registro (¿se borró desde otra ventana?).");
   };
-  await new Promise((res) => chrome.storage.local.set({ [CLAVE]: lista }, res));
+  no.onclick = async () => {
+    si.disabled = no.disabled = true;
+    await detener_bucle_en_la_pestana(tabId);
+    const r = await descartar_denuncia_provisional(id);
+    panel.style.display = "none";
+    si.disabled = no.disabled = false;
+    mostrar_estado(r === "ya_confirmada" ? "error" : "aviso",
+      r === "ok" ? "🗑️ <b>No se guardó nada.</b> La denuncia y su comprobante se borraron: el Registro queda como estaba."
+      // Llegó tarde: mientras el popup seguía abierto, esa denuncia dejó de ser
+      // provisional (el correo se envió). NO se borra: ya es una denuncia de verdad.
+      : r === "ya_confirmada" ? "⚠ <b>No la borré: ya es una denuncia de verdad.</b> Se confirmó sola al enviarse el correo. " +
+          "Si aun así quieres quitarla, hazlo desde <b>📓 Registro</b>."
+      : "Esa denuncia ya no estaba en el Registro.");
+  };
+}
+
+// ---------------------------------------------------------------------------
+//  Provisionales que quedaron sin contestar (el popup se cerro antes)
+// ---------------------------------------------------------------------------
+// Sin esto se acumularian para siempre, invisibles: no salen en el Registro y
+// nadie volveria a preguntar por ellas.
+async function preguntar_por_denuncias_provisionales() {
+  const panel = $("panel_provisionales_pendientes");
+  if (!panel) return;
+  const pendientes = await listar_denuncias_provisionales();
+  if (!pendientes.length) { panel.style.display = "none"; return; }
+  $("detalle_provisionales_pendientes").innerHTML =
+    "Se empezaron pero no dijiste si el formulario quedo bien, asi que <b>no estan en el " +
+    "Registro</b>. ✅ = guardarla · 🗑️ = borrarla.";
+  const caja = $("lista_provisionales_pendientes");
+  caja.textContent = "";
+  pendientes.forEach((d) => caja.appendChild(fila_de_provisional(d)));
+  panel.style.display = "";
+}
+
+// Una fila de la lista de pendientes. Se construye con el DOM (no con innerHTML):
+// el nombre de la marca y el de la plataforma los escribe el usuario en Marcas y
+// en "Nueva plataforma...", asi que aqui son datos, nunca marcado.
+function fila_de_provisional(d) {
+  const fila = document.createElement("div");
+  fila.className = "fila_provisional";
+  const txt = document.createElement("span");
+  txt.className = "texto_de_la_provisional";
+  const titulo = document.createElement("b");
+  titulo.textContent = String(d.marca || "(sin marca)") + " · " + String(d.plataforma || "");
+  txt.appendChild(titulo);
+  const detalle = [];
+  if (d.categoria) detalle.push(String(d.categoria));
+  detalle.push(fecha_corta_de_denuncia(d.fecha));
+  if (d.campos_rellenados != null) {
+    detalle.push(d.campos_rellenados === 0 ? "⚠ 0 campos" : d.campos_rellenados + " campos");
+  }
+  txt.appendChild(document.createTextNode(detalle.join(" · ")));
+  fila.appendChild(txt);
+
+  const si = document.createElement("button");
+  si.type = "button"; si.className = "boton_de_la_provisional si"; si.textContent = "✅";
+  si.title = "Guardarla en el Registro";
+  const no = document.createElement("button");
+  no.type = "button"; no.className = "boton_de_la_provisional no"; no.textContent = "🗑️";
+  no.title = "No guardarla (se borra, con su comprobante)";
+  const quien = () => escapar_html(String(d.marca || "")) + " · " + escapar_html(String(d.plataforma || ""));
+  si.addEventListener("click", async () => {
+    si.disabled = no.disabled = true;
+    const r = await confirmar_denuncia_provisional(d.id);
+    await preguntar_por_denuncias_provisionales();
+    mostrar_estado(r === "no_esta" ? "error" : "ok",
+      r === "ok" ? "📓 Guardada en el Registro: " + quien() + "."
+      : r === "ya_confirmada" ? "📓 " + quien() + " ya estaba guardada. No hice nada."
+      : "Esa denuncia ya no está en el Registro: " + quien() + ".");
+  });
+  no.addEventListener("click", async () => {
+    si.disabled = no.disabled = true;
+    const r = await descartar_denuncia_provisional(d.id);
+    await preguntar_por_denuncias_provisionales();
+    mostrar_estado(r === "ya_confirmada" ? "error" : "aviso",
+      r === "ok" ? "🗑️ Borrada sin guardar: " + quien() + "."
+      : r === "ya_confirmada" ? "⚠ No borré " + quien() + ": ya es una denuncia de verdad. Quítala desde 📓 Registro si quieres."
+      : "Esa denuncia ya no está en el Registro: " + quien() + ".");
+  });
+  fila.appendChild(si); fila.appendChild(no);
+  return fila;
+}
+
+function fecha_corta_de_denuncia(iso) {
+  const f = new Date(iso);
+  if (isNaN(f.getTime())) return "";
+  const p = (n) => String(n).padStart(2, "0");
+  return p(f.getDate()) + "/" + p(f.getMonth() + 1) + " " + p(f.getHours()) + ":" + p(f.getMinutes());
 }
 
 // Redimensiona un dataURL (img) a 'maxAncho' px de ancho y lo recomprime a JPEG
@@ -987,6 +1347,12 @@ function redimensionar_imagen(dataUrl, maxAncho, calidad) {
 // Captura la pestaña visible y la adjunta (campo `comprobante_img`) a la denuncia
 // apuntada por `ultima_denuncia_registro`.
 async function capturar_pantalla() {
+  // En modo prueba no hay denuncia en curso: capturar pegaria la foto a la ULTIMA
+  // denuncia de verdad y falsearia su comprobante.
+  if (await leer_modo_prueba()) {
+    mostrar_estado("aviso", "🧪 <b>Modo prueba:</b> no se guardan comprobantes. Apágalo para capturar.");
+    return;
+  }
   const d = await new Promise((res) =>
     chrome.storage.local.get(["ultima_denuncia_registro"], (x) => res(x)));
   const idDest = d.ultima_denuncia_registro;
@@ -1002,13 +1368,16 @@ async function capturar_pantalla() {
     if (!resp || resp.error || !resp.dataUrl) throw new Error((resp && resp.error) || "no se obtuvo la imagen");
     const dataUrl = resp.dataUrl;
     const reducida = await redimensionar_imagen(dataUrl, 1280, 0.7);
-    const CLAVE = "denuncias_registro";
-    const lista = await new Promise((res) =>
-      chrome.storage.local.get([CLAVE], (x) => res(Array.isArray(x[CLAVE]) ? x[CLAVE] : [])));
-    const ent = lista.find((x) => x.id === idDest);
-    if (!ent) { mostrar_estado("aviso", "No encuentro la denuncia para adjuntar la captura."); return; }
-    ent.comprobante_img = reducida;
-    await new Promise((res) => chrome.storage.local.set({ [CLAVE]: lista }, res));
+    // Por la cola, y leyendo la lista FRESCA: entre pedir la foto y guardarla pasan
+    // segundos, y en ese hueco la denuncia puede haberse descartado o el Registro
+    // puede haber cambiado desde otra ventana.
+    const puesta = await cambiar_el_registro((lista) => {
+      const ent = lista.find((x) => String(x.id) === String(idDest));
+      if (!ent) return { guardar: false, valor: false };
+      ent.comprobante_img = reducida;
+      return { valor: true };
+    });
+    if (!puesta) { mostrar_estado("aviso", "No encuentro la denuncia para adjuntar la captura."); return; }
     mostrar_estado("ok", "✓ Captura guardada en el comprobante.");
   } catch (e) {
     // El mensaje de error puede traer la URL de la pestaña: se escapa, igual que en el
@@ -1041,10 +1410,27 @@ function esperar_carga(tabId) {
 // datos de la marca a páginas ajenas. Si algún día vuelve a hacer falta, hay que resolverlo
 // de otra forma, no inyectando el plan entero en marcos desconocidos.
 
+// Avisos de los datos de la marca que la plantilla de perfil malicioso no pudo poner
+// (N.º de registro, clases, perfil oficial de esa red, sitio web). Se escapan porque
+// mostrar_estado pinta con innerHTML y el nombre de la marca lo escribe el usuario.
+let avisos_de_la_marca = [];
+function avisos_de_la_marca_en_html() {
+  if (!avisos_de_la_marca.length) return "";
+  return "<br><br>ℹ️ " + avisos_de_la_marca.map(escapar_html).join("<br>ℹ️ ");
+}
+
 async function rellenar() {
   const formKey = $("sel_form").value;
   const marca = $("sel_marca").value;
   if (!formKey || !marca) { mostrar_estado("aviso", "Elige plataforma, reporte y marca."); return; }
+
+  // MODO PRUEBA: se lee del storage en cada Rellenar (no de la casilla) porque es lo
+  // mismo que consultara el service worker cuando le toque capturar o enviar; asi las
+  // dos mitades del flujo no pueden discrepar. Con el encendido: se rellena igual, pero
+  // no se registra la denuncia, no se guarda comprobante y no se envia nada.
+  const modo_prueba = await leer_modo_prueba();
+  // La pregunta de la denuncia anterior no debe quedarse encima de la nueva.
+  if ($("panel_confirmar_denuncia")) $("panel_confirmar_denuncia").style.display = "none";
 
   const form = window.FORMULARIOS[formKey];
   const datos = datos_de_la_marca(marca);
@@ -1073,13 +1459,23 @@ async function rellenar() {
   // contextual); los correos van en inglés con la versión española de referencia. Toda
   // descripción termina con la política infringida + el PERFIL OFICIAL de la marca en la
   // red que se denuncia, para que la plataforma sepa cuál es la cuenta auténtica.
+  // Cuando lo denunciado es un PERFIL que usurpa la marca, la descripcion es la
+  // plantilla larga con los datos registrales de la marca y las TRES politicas de esa
+  // red; en los demas casos, el texto de siempre. Lo decide JUSTIF.descripcionDeDenuncia
+  // (mismo criterio que el menu del clic derecho).
   const lang = form.tipo === "email" ? "en" : "es";
-  const justif = window.JUSTIF.conPerfilOficial(
-    window.JUSTIF.conPolitica(window.JUSTIF.justificacion(form.cat, redCode, marca, pais, lang), formKey, lang),
-    form.red, marca, datos, lang);
-  const justif_es = window.JUSTIF.conPerfilOficial(
-    window.JUSTIF.conPolitica(window.JUSTIF.justificacion(form.cat, redCode, marca, pais, "es"), formKey, "es"),
-    form.red, marca, datos, "es");
+  const desc = window.JUSTIF.descripcionDeDenuncia(form.cat, formKey, redCode, marca, datos, form.red, lang);
+  const desc_es = window.JUSTIF.descripcionDeDenuncia(form.cat, formKey, redCode, marca, datos, form.red, "es");
+  const justif = desc.texto;
+  const justif_es = desc_es.texto;
+  // Datos de la marca que la plantilla no pudo poner (N.o de registro, clases, perfil
+  // oficial de esa red, sitio web). El texto ya viene reescrito sin ellos: esto es solo
+  // el aviso para que el usuario los complete en ⚙ Marcas y la proxima denuncia salga
+  // completa. Se juntan los de las dos versiones sin repetir.
+  avisos_de_la_marca = [];
+  (desc.faltan || []).concat(desc_es.faltan || []).forEach(function (f) {
+    if (f && f.aviso && avisos_de_la_marca.indexOf(f.aviso) < 0) avisos_de_la_marca.push(f.aviso);
+  });
 
   // URLs a denunciar: las escritas a mano en el popup si las hay; si no, la lista del
   // Excel. Se usan tanto en los formularios (cajas "Enlace 1..30" / caja única) como en
@@ -1090,20 +1486,39 @@ async function rellenar() {
   // Redes SIN formulario web (Telegram): se genera un CORREO en una pestaña aparte.
   if (form.tipo === "email") {
     const em = form.construirEmail(ctx);
-    const idDen = await registrar_denuncia_auto(marca, form, urls);
-    await guardar_correo_en_denuncia(idDen, em); // adjunta el contenido para verlo/copiarlo en el Registro
-    $("boton_capturar").disabled = false;
+    // En modo prueba NO se da de alta la denuncia: el correo se genera igual para poder
+    // revisar la plantilla, pero el Registro no se toca.
+    const idDen = modo_prueba ? null : await registrar_denuncia_auto(marca, form, urls);
+    if (idDen) await guardar_correo_en_denuncia(idDen, em); // adjunta el contenido para verlo/copiarlo en el Registro
+    $("boton_capturar").disabled = !!modo_prueba;
     // 'from' = correo de contacto de la marca; si es una cuenta de Google Workspace
     // propia, correo.html abre el borrador de Gmail DESDE esa cuenta (envío directo).
     // 'red'/'cat'/'urls' viajan para la MEMORIA DE CORREOS: correo.html propone los
     // destinatarios que ya se usaron para ese mismo sitio y apunta los nuevos.
+    // `modo_prueba` viaja con el reporte: correo.html NO debe tocar el Registro en una
+    // prueba (si no, escribiria sobre la ULTIMA denuncia de verdad, que es a la que
+    // apunta `ultima_denuncia_registro`).
     chrome.storage.local.set({ email_reporte: Object.assign({}, em, {
-      from: datos.correo || "", red: form.red || "", cat: form.cat || "", urls: urls || []
+      from: datos.correo || "", red: form.red || "", cat: form.cat || "", urls: urls || [],
+      modo_prueba: !!modo_prueba
     }) }, () => {
       chrome.tabs.create({ url: chrome.runtime.getURL("correo.html") });
     });
-    mostrar_estado("ok", "Correo de " + form.red + " generado: revisa la pestaña, pega el/los enlace(s) y envíalo." +
-      "<br><br>📓 Registrada como pendiente — agrega el N.º de caso en Registro.");
+    if (modo_prueba) {
+      mostrar_estado("aviso", "🧪 <b>PRUEBA.</b> Correo de " + escapar_html(form.red) + " generado en la pestaña de al lado " +
+        "para que lo revises. <b>No se registró denuncia</b> y, si lo envías desde ahí, no quedará anotado en el Registro." +
+        avisos_de_la_marca_en_html());
+      return;
+    }
+    // La pregunta se enseña igual, aunque al abrirse la pestaña del correo el popup suele
+    // cerrarse: entonces la denuncia se queda PROVISIONAL y se pregunta por ella la
+    // próxima vez que se abra el popup (o se confirma sola al enviar el correo).
+    preguntar_si_se_guarda(idDen, form.red + " · " + form.nombre,
+      { html: "El correo se generó y se abrió en una pestaña aparte. <b>Enviarlo desde ahí la guarda sola</b>; " +
+              "si no piensas enviarlo, dile que no y no quedará nada en el Registro.",
+        recomienda_no_guardar: false }, null);
+    mostrar_estado("ok", "Correo de " + escapar_html(form.red) + " generado: revisa la pestaña, pega el/los enlace(s) y envíalo." +
+      avisos_de_la_marca_en_html());
     return;
   }
 
@@ -1125,8 +1540,10 @@ async function rellenar() {
   // Se GUARDA el id: es a esta denuncia a la que tiene que ir el comprobante. Resolverlo
   // luego por `ultima_denuncia_registro` seria arriesgado: esa clave la pisa cualquier
   // denuncia nueva que se de de alta mientras tanto.
-  const id_de_la_denuncia_en_curso = await registrar_denuncia_auto(marca, form, urls);
-  $("boton_capturar").disabled = false;
+  // En modo prueba NO se da de alta nada: `id_de_la_denuncia_en_curso` queda en null y
+  // con el viajan en null el comprobante y el envio (ver mas abajo).
+  const id_de_la_denuncia_en_curso = modo_prueba ? null : await registrar_denuncia_auto(marca, form, urls);
+  $("boton_capturar").disabled = !!modo_prueba;
 
   // ¿Estamos ya en el formulario correcto? Si SÍ, se rellena esta misma pestaña.
   // Si NO, se abre el formulario en una pestaña APARTE en segundo plano (active:false)
@@ -1172,8 +1589,12 @@ async function rellenar() {
   // el botón flotante "📸 Capturar comprobante" (es la prueba de que se hizo la denuncia),
   // y debe seguir viéndose aunque el formulario avance de paso y recargue la página.
   // Sin esto el botón no aparecía nunca en la pestaña nueva. Ver background.js.
-  try { await chrome.runtime.sendMessage({ accion: "activarCaptura", tabId: objetivoTabId }); }
-  catch (e) { /* si el service worker no responde, queda el botón del popup */ }
+  // En modo prueba el botón flotante NO se enciende: no hay denuncia a la que pegar
+  // un comprobante y una captura acabaría en la denuncia anterior.
+  if (!modo_prueba) {
+    try { await chrome.runtime.sendMessage({ accion: "activarCaptura", tabId: objetivoTabId }); }
+    catch (e) { /* si el service worker no responde, queda el botón del popup */ }
+  }
   // Se corta cualquier bucle VIEJO que siguiera vivo en esta pestaña (de una denuncia
   // anterior). Si no, ese bucle podría capturar un comprobante o enviar por su cuenta
   // encima de la denuncia nueva, mezclando las dos.
@@ -1227,18 +1648,32 @@ async function rellenar() {
     // completar), así el usuario NO tiene que volver a pulsar Rellenar. Vive en el
     // service worker (no en el popup ni en un timer de la página), así sobrevive a cerrar el
     // popup y a irse a verificar el correo. Ver autorelleno() en background.js.
-    const autoEnviable = REDES_AUTOENVIO_POPUP.indexOf(form.red) >= 0;
+    // `red_con_autoenvio` = lo que la RED permite (para explicarlo bien en el estado).
+    // `autoEnviable` = lo que va a pasar HOY: en modo prueba, jamas se envia.
+    const red_con_autoenvio = REDES_AUTOENVIO_POPUP.indexOf(form.red) >= 0;
+    const autoEnviable = red_con_autoenvio && !modo_prueba;
     let insistiendo = false; // true = el service worker se quedó reintentando en segundo plano
     if (plan.autorepetir) {
-      // La 1.ª etapa (los desplegables) ya quedó hecha en este primer clic; se excluye de la
-      // repetición para NO reabrirlos cada pocos segundos. El bucle solo insiste en los campos
-      // de la 2.ª etapa (Tipo de obra, Origen, Descripción, firma, casillas, URL). Al completar,
-      // el service worker captura y envía solo si la red lo permite (autoenviar).
-      const pasos2 = plan.pasos.filter(function (p) { return p.tipo !== "dropdown"; });
+      // La 1.ª etapa (los desplegables) ya quedó hecha en este primer clic, así que en la
+      // repetición van marcados `soloSiVacio`: si siguen respondidos, el paso se salta sin
+      // reabrirlos cada pocos segundos; si alguno volvió a "Select" (la página se recargó, la
+      // sesión se reinició, el usuario llegó por otro camino), se vuelve a elegir.
+      // ANTES se QUITABAN de la repetición, y ahí estaba el fallo: sin el desplegable
+      // "¿Qué problema tienes?" TikTok no muestra NI UN campo, así que el bucle se pasaba
+      // 30 minutos rellenando una página que nunca iba a enseñar el formulario y el usuario
+      // veía Marca comercial TODO EN BLANCO. Se copia el paso (Object.assign) para no tocar
+      // el plan original, que se sigue usando para el informe de este mismo clic.
+      const pasos2 = plan.pasos.map(function (p) {
+        return p.tipo === "dropdown" ? Object.assign({}, p, { soloSiVacio: true }) : p;
+      });
       // `urlForm` ANCLA el bucle a ESTA página (igual que en insistirRelleno): si la pestaña
       // se va del formulario, el service worker para en vez de escribir los datos de la marca
       // en otra pantalla y guardarla como comprobante.
-      try { await chrome.runtime.sendMessage({ accion: "iniciarAutorelleno", tabId: objetivoTabId, pasos: pasos2, autoenviar: autoEnviable, marca: marca, enviarLabel: plan.enviarLabel, urlForm: plan.url }); }
+      // `modoPrueba` e `idDenuncia` viajan SIEMPRE: el bucle dura hasta 30 min y para
+      // entonces el popup ya no existe. Sin `idDenuncia` el bucle resolveria el destino
+      // del comprobante por `ultima_denuncia_registro`, que en una prueba apunta a la
+      // ULTIMA denuncia de verdad.
+      try { await chrome.runtime.sendMessage({ accion: "iniciarAutorelleno", tabId: objetivoTabId, pasos: pasos2, autoenviar: autoEnviable, marca: marca, enviarLabel: plan.enviarLabel, urlForm: plan.url, idDenuncia: id_de_la_denuncia_en_curso, modoPrueba: modo_prueba }); }
       catch (e) { /* si el service worker no responde, el usuario puede pulsar Rellenar otra vez */ }
     } else if (plan.insistir && nada) {
       // No se reconoció NI UN campo y el plan pide INSISTIR (Meta · Derechos de autor):
@@ -1250,13 +1685,13 @@ async function rellenar() {
       // `urlForm` ANCLA el bucle a ESTA página: si la pestaña se va (Meta redirige al
       // login, el usuario navega), el service worker para en vez de escribir los datos de
       // la marca en otra pantalla y guardarla como comprobante. Ver insistirRelleno.
-      try { await chrome.runtime.sendMessage({ accion: "insistirRelleno", tabId: objetivoTabId, pasos: plan.pasos, autoenviar: autoEnviable, marca: marca, enviarLabel: plan.enviarLabel, urlForm: plan.url }); }
+      try { await chrome.runtime.sendMessage({ accion: "insistirRelleno", tabId: objetivoTabId, pasos: plan.pasos, autoenviar: autoEnviable, marca: marca, enviarLabel: plan.enviarLabel, urlForm: plan.url, idDenuncia: id_de_la_denuncia_en_curso, modoPrueba: modo_prueba }); }
       catch (e) { insistiendo = false; /* si el service worker no responde, el usuario puede pulsar Rellenar otra vez */ }
     } else {
       // Formulario NO progresivo: el service worker captura y (si no hay captcha) envía solo.
       // `urlForm` ANCLA la captura y el envío; `idDenuncia` fija a qué denuncia del Registro
       // va el comprobante (si no, una denuncia dada de alta mientras tanto se lo llevaría).
-      try { await chrome.runtime.sendMessage({ accion: "finalizar", tabId: objetivoTabId, marca: marca, autoenviar: autoEnviable, enviarLabel: plan.enviarLabel, faltan: (r.faltan || []), urlForm: plan.url, idDenuncia: id_de_la_denuncia_en_curso }); }
+      try { await chrome.runtime.sendMessage({ accion: "finalizar", tabId: objetivoTabId, marca: marca, autoenviar: autoEnviable, enviarLabel: plan.enviarLabel, faltan: (r.faltan || []), urlForm: plan.url, idDenuncia: id_de_la_denuncia_en_curso, modoPrueba: modo_prueba }); }
       catch (e) { /* el usuario puede enviar a mano */ }
     }
     let html = "✓ <b>" + (r.hechos != null ? r.hechos : r.ok) + "</b> campo(s) rellenado(s)." +
@@ -1267,7 +1702,16 @@ async function rellenar() {
     // AVISOS del plan: datos de la marca que el formulario exige y no están guardados
     // (p. ej. el enlace de ejemplo a la obra en Derechos de autor). No bloquean el
     // relleno, pero hay que verlos ANTES de enviar.
+    // Los avisos del plan SE PINTAN COMO HTML a propósito: llevan <b> para destacar el
+    // campo del que hablan. NO se escapan aquí: lo que hay que escapar es el DATO que
+    // viene del usuario (el nombre de la marca, su correo, su país), y eso ya se hace en
+    // el punto donde se interpola, con `textoSeguro()` de datos/formularios.js. Escapar
+    // el aviso entero AQUÍ además de allí lo escapaba dos veces: se veían las etiquetas
+    // <b> literales y el nombre de la marca con &amp; y &lt; a la vista del usuario.
     if (plan.avisos && plan.avisos.length) html += "<br><br>⚠ " + plan.avisos.join("<br>⚠ ");
+    // Datos de la marca que faltaban para la plantilla de perfil malicioso: la denuncia
+    // salió correcta sin ellos, pero conviene completarlos en ⚙ Marcas.
+    html += avisos_de_la_marca_en_html();
     // `faltan` sale de los rótulos del PLAN, pero mostrar_estado escribe con innerHTML:
     // se escapa igual que `marca`, para que ningún texto pueda inyectar HTML en el popup.
     if (r.faltan && r.faltan.length) html += "<br><br>No se encontraron (revisa a mano): " + escapar_html(r.faltan.join(", ")) +
@@ -1280,17 +1724,40 @@ async function rellenar() {
     if (insistiendo) html += "<br><br>⏳ <b>La página todavía no muestra el formulario.</b> " +
       "La extensión <b>seguirá intentándolo sola hasta 3 minutos</b> y lo rellenará en cuanto aparezca: " +
       "<b>no hace falta que vuelvas a pulsar nada</b>. Deja abierta la pestaña del formulario.";
-    if (autoEnviable) {
-      html += (plan.autorepetir || insistiendo)
-        ? "<br><br>🚀 Cuando el formulario quede completo, la extensión <b>capturará el comprobante y lo enviará sola</b> (5 s para cancelar en la pestaña del formulario)."
-        : "<br><br>🚀 La extensión está <b>capturando el comprobante y enviando</b> (5 s para cancelar en la pestaña del formulario).";
+    if (modo_prueba) {
+      // Lo que NO va a pasar se dice entero: es justo lo que el usuario necesita saber
+      // para no confundir una prueba con una denuncia de verdad.
+      html += "<br><br>🧪 <b>MODO PRUEBA.</b> No se registró la denuncia, no se guardó comprobante y " +
+        (red_con_autoenvio
+          ? "<b>no se enviará nada</b> (esta red normalmente se envía sola: aquí NO)."
+          : "<b>no se envió nada</b>.") +
+        "<br>Revisa cómo quedó el formulario y <b>ciérralo sin enviar</b>. Apaga 🧪 Modo prueba para denunciar de verdad.";
     } else {
-      html += "<br><br>⚠ Este formulario tiene <b>captcha</b>: la extensión capturó el comprobante; <b>resuelve el captcha y pulsa Enviar</b> tú.";
+      if (autoEnviable) {
+        html += (plan.autorepetir || insistiendo)
+          ? "<br><br>🚀 Cuando el formulario quede completo, la extensión <b>capturará el comprobante y lo enviará sola</b> (5 s para cancelar en la pestaña del formulario)."
+          : "<br><br>🚀 La extensión está <b>capturando el comprobante y enviando</b> (5 s para cancelar en la pestaña del formulario).";
+      } else {
+        html += "<br><br>⚠ Este formulario tiene <b>captcha</b>: la extensión capturó el comprobante; <b>resuelve el captcha y pulsa Enviar</b> tú.";
+      }
+      html += "<br><br>📓 <b>Todavía NO está en el Registro</b>: contesta abajo si el formulario quedó bien.";
     }
-    html += "<br><br>📓 Registrada como pendiente — agrega el N.º de caso en Registro.";
     // El color del aviso sigue a `nada`, no a `ok`: con ok=1 por el paso del botón
     // "Siguiente" saldría en verde una página en la que no se reconoció ni un campo.
     mostrar_estado(nada ? "aviso" : "ok", html);
+
+    // LA PREGUNTA. La denuncia existe pero es PROVISIONAL: no está en el Registro hasta
+    // que el usuario diga aquí que el formulario se rellenó. Se le enseña lo que la
+    // extensión sabe (campos rellenados, rótulos no encontrados) para que pueda decidir,
+    // y en los formularios que siguen rellenándose solos (TikTok, o Meta insistiendo) se
+    // le dice que conteste cuando de verdad haya acabado, no a los 3 segundos.
+    if (!modo_prueba && id_de_la_denuncia_en_curso) {
+      const sigue = !!(plan.autorepetir || insistiendo);
+      await anotar_relleno_en_la_provisional(id_de_la_denuncia_en_curso,
+        (r.hechos != null ? r.hechos : r.ok), r.faltan || []);
+      preguntar_si_se_guarda(id_de_la_denuncia_en_curso, form.red + " · " + form.nombre,
+        resumen_del_relleno((r.hechos != null ? r.hechos : r.ok), r.faltan || [], sigue), objetivoTabId);
+    }
   } catch (e) {
     // Igual que arriba: el error de chrome.scripting puede citar la URL de la pestaña.
     mostrar_estado("error", "Error al rellenar: " + escapar_html(e && e.message ? e.message : e) +

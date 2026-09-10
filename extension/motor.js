@@ -520,29 +520,80 @@ async function APLICAR(pasos, opciones) {
         const sinValor = !String(p.opcion || "").trim() && typeof p.opcionIndice !== "number";
         const ds = sinValor ? [] : Array.prototype.slice.call(document.querySelectorAll('[aria-haspopup="listbox"],[role="combobox"]'));
         if (sinValor) faltan.push(p.desc || "opcion vacia");
-        // Preferimos los menús AÚN SIN SELECCIONAR (muestran "Select"/"Seleccionar"):
-        // el siguiente a llenar es el primero sin selección.
+        // Alternativas (es|en) de la opción buscada, con los espacios RECORTADOS: el país
+        // de la marca lo escribe el usuario y puede traer espacios sobrantes ("Ecuador ").
+        const ops = norm(p.opcion || "").split("|").map((s) => s.trim()).filter(Boolean);
+        // ¿El texto de este menú es YA la opción que buscamos? Se compara igual que se
+        // elige (palabras clave con "&"), para no depender de la redacción exacta.
+        const casaConLoBuscado = (t) => ops.some((kw) => kw.indexOf("&") >= 0
+          ? kw.split("&").every((tok) => (tok = tok.trim()) && t.indexOf(tok) >= 0)
+          : t.indexOf(kw) >= 0);
+        // MENÚ DE **ESTA** PREGUNTA. Se busca el ancestro MÁS AJUSTADO (el de texto más
+        // corto) que contenga la pregunta, igual que hace `radioPregunta`: subir un número
+        // fijo de niveles no vale, porque TikTok mete el botón dentro de 3 o 4 <div> y el
+        // título vive fuera de todos ellos, mientras que subir de más acaba abarcando el
+        // formulario entero y casaría con cualquier menú.
+        const cercaniaDe = (d) => {
+          const partes = norm(p.pregunta || "").split("|").filter(Boolean);
+          if (!partes.length) return -1;
+          let par = d.parentElement, k = 0;
+          while (par && k < 6) {
+            const t = norm(par.innerText || "");
+            if (partes.some((kw) => t.indexOf(kw) >= 0)) return t.length;
+            par = par.parentElement; k++;
+          }
+          return -1;
+        };
+        const menuDeLaPregunta = () => {
+          const conPregunta = ds.map((d) => ({ d: d, cerca: cercaniaDe(d) }))
+                                .filter((x) => x.cerca >= 0)
+                                .sort((a, b) => a.cerca - b.cerca);
+          return conPregunta.length ? conPregunta[0].d : null;
+        };
+        // Menús aún SIN RESPONDER (muestran "Select"/"Seleccionar"): el siguiente a llenar
+        // es el primero sin selección. Solo se usa en el PRIMER clic, con el usuario delante.
         const sinSel = ds.filter((d) => {
           const t = norm(d.innerText);
           return !t || t.indexOf("select") >= 0 || t.indexOf("seleccion") >= 0 || t.indexOf("elegir") >= 0 || t.indexOf("choose") >= 0;
         });
-        const pool = sinSel.length ? sinSel : ds;
-        let btn = null;
-        if (p.pregunta) {
-          const partes = norm(p.pregunta).split("|");
-          btn = pool.find((d) => {
-            let ctx = "", par = d.parentElement, k = 0;
-            while (par && k < 2) { ctx += " " + (par.innerText || ""); par = par.parentElement; k++; }
-            const c = norm(ctx);
-            return partes.some((kw) => kw && c.indexOf(kw) >= 0);
-          });
+        // ------------------------------------------------------------------------------
+        //  soloSiVacio: lo pone la REPETICIÓN AUTOMÁTICA del service worker (ver popup.js).
+        //  Ese bucle corre cada pocos segundos hasta 30 minutos SIN NADIE MIRANDO, sobre una
+        //  denuncia que se firma bajo pena de perjurio, así que aquí las reglas son otras:
+        //   1) NUNCA a ciegas: sin `pregunta` que lo ancle, el paso no toca ningún menú.
+        //      Coger "el primer menú sin responder" podía abrir CUALQUIER otro desplegable
+        //      del formulario y ponerle una respuesta que el usuario no eligió.
+        //   2) "Ya respondido" NO se adivina por el texto del hueco: se comprueba que el
+        //      menú YA MUESTRE la opción que buscábamos. Adivinarlo por palabras ("Select",
+        //      "Elegir"…) fallaba con cualquier otra redacción ("Elige una opción") y dejaba
+        //      el formulario en blanco dando el paso por hecho.
+        //   3) Si su menú todavía no está en pantalla, no pasa nada: el bucle vuelve.
+        //  Y si vuelve a estar vacío (recarga, sesión reiniciada), SÍ se re-elige: sin el
+        //  desplegable "¿Qué problema tienes?" TikTok no enseña ni un campo.
+        // ------------------------------------------------------------------------------
+        let btn = null, saltar = false;
+        if (p.soloSiVacio) {
+          const suyo = p.pregunta ? menuDeLaPregunta() : null;
+          if (!suyo) saltar = true; // sin ancla o aún no aparece: no se toca nada
+          else if (casaConLoBuscado(norm(suyo.innerText).replace(/\s+/g, " ").trim())) saltar = true; // ya puesto
+          else btn = suyo;
+        } else {
+          const pool = sinSel.length ? sinSel : ds;
+          if (p.pregunta) {
+            const suyo = menuDeLaPregunta();
+            // SU menú ya está respondido (lo puso el usuario a mano, o una pasada anterior):
+            // no hay nada que hacer y NO se cae al "primer menú sin responder", que es OTRA
+            // pregunta. Caer ahí llegaba a marcar la respuesta de otro campo: en TikTok
+            // Derechos de autor declaraba «Soy el propietario de los derechos de autor»
+            // cuando el resto de la denuncia dice que actuamos como agente autorizado, y eso
+            // se firma bajo pena de perjurio. Se salta sin `anotar()`: no se tocó nada.
+            if (suyo && pool.indexOf(suyo) < 0 && sinSel.length) { saltar = true; }
+            else btn = suyo;
+          }
+          if (!btn && !saltar) btn = pool[p.indice || 0] || pool[0];
         }
-        if (!btn) btn = pool[p.indice || 0] || pool[0];
         if (btn) {
           btn.click();
-          // Alternativas (es|en), con los espacios RECORTADOS: el país de la marca lo
-          // escribe el usuario a mano y puede traer espacios sobrantes ("Ecuador ").
-          const ops = norm(p.opcion || "").split("|").map((s) => s.trim()).filter(Boolean);
           // Coincidencia por PALABRAS CLAVE: una alternativa con "&" casa si TODAS sus
           // palabras están presentes (en cualquier orden). Así NO dependemos de la frase
           // exacta de TikTok, que cambia de redacción e idioma. Ej.: "marca&contenido"
@@ -581,7 +632,9 @@ async function APLICAR(pasos, opciones) {
           }
           // Respaldo por POSICIÓN: si no casó por texto (TikTok cambió la redacción) y el
           // paso indica la opción por orden, la tomamos por índice (p.ej. la 1.ª).
-          if (!o && typeof p.opcionIndice === "number" && lista.length) o = lista[p.opcionIndice] || null;
+          // NUNCA dentro de la repetición automática (`soloSiVacio`): elegir "la primera
+          // opción de la lista" a ciegas, sin nadie mirando, puede responder cualquier cosa.
+          if (!o && !p.soloSiVacio && typeof p.opcionIndice === "number" && lista.length) o = lista[p.opcionIndice] || null;
           if (o) { o.click(); anotar("eligio", btn, (o.textContent || "").replace(/\s+/g, " ").trim().slice(0, 70)); ok++; }
           else {
             // Mensaje entendible: dice QUÉ se buscó y que no está en la lista.
@@ -589,8 +642,18 @@ async function APLICAR(pasos, opciones) {
                                : ("opcion:" + (p.opcion || p.opcionIndice)));
             try { document.body.click(); } catch (e) {}
           }
+        } else if (saltar) {
+          // Nada que hacer: su menú ya trae la opción buscada, o todavía no está en
+          // pantalla. NO se llama a `anotar()` A PROPÓSITO: `hechos` cuenta los campos que
+          // se TOCARON de verdad, y es lo que impide guardar el comprobante de un
+          // formulario vacío (ver background.js). Un paso que no escribe nada no puede
+          // hacer creer que se rellenó algo.
+          ok++;
         } else if (!sinValor) faltan.push("menu:" + (p.pregunta || p.indice));
-        if (p.esperaMs) await dur(p.esperaMs);
+        // Al saltar no se espera: la espera existe para dar tiempo a que TikTok pinte lo
+        // que revela el menú, y aquí no se ha tocado nada. Sin esto, cada vuelta del bucle
+        // se llevaba 2,5 s por desplegable sin motivo.
+        if (p.esperaMs && !saltar) await dur(p.esperaMs);
       } else if (p.tipo === "fillLabel") {
         // Rellena el primer campo VISIBLE y vacío cuyo texto cercano contenga la etiqueta.
         // REINTENTA unos segundos: TikTok (y otros SPA React) pintan la sección un
@@ -866,6 +929,144 @@ async function APLICAR(pasos, opciones) {
           }
           if (done) ok++; else faltan.push("opcion:" + p.opcion);
         } else faltan.push("selectLabel:" + p.label);
+        if (p.esperaMs) await dur(p.esperaMs);
+      } else if (p.tipo === "elegirEnMenuPorRotulo") {
+        // ============================================================================
+        //  <select> NATIVO sin `name`, sin `id` y sin <label for>: el ÚNICO ancla que
+        //  tiene es el TEXTO DE SU PREGUNTA. Es lo que sirve X en help.x.com: al cargar,
+        //  la página no tiene NI UNA caja de texto, solo dos de estos menús, y hasta que
+        //  no se responden los dos no aparece ningún campo. Por eso «Acoso» y «Contenido
+        //  privado» no rellenaban nada: `fillName`/`select` exigen `name` (no lo tienen)
+        //  y el paso `dropdown` busca [aria-haspopup=listbox] (son <select> nativos).
+        //
+        //  POR QUÉ NO SE REUTILIZA `selectLabel`, que está justo aquí arriba: lo usan
+        //  YouTube, GitHub y Cloudflare y se queda EXACTAMENTE como está. Le faltan
+        //  cuatro cosas que aquí son imprescindibles:
+        //   1) lee el contexto con innerText, que recalcula el diseño en CADA lectura
+        //      (ver el aviso de rendimiento de fillLabel); aquí va con textContent + caché;
+        //   2) coge la PRIMERA opción que CONTENGA el texto, sin "&" ni prioridad: con
+        //      "otra persona" se llevaría cualquier opción que la contuviera;
+        //   3) no mira si el menú YA tiene puesta la opción buscada: la volvía a poner y
+        //      la contaba como trabajo hecho (y `hechos` es lo que decide si el bucle
+        //      guarda comprobante: contar de más = comprobante de un formulario vacío);
+        //   4) no respeta lo que el usuario haya elegido a mano.
+        // ============================================================================
+        const MENU_NUESTRO = "data-rs-menu-puesto-por-la-extension";
+        const kwsMenu = (p.label || "").split("|").map(norm).filter(Boolean);
+        const opsMenu = norm(p.opcion || "").split("|").map((s) => s.trim()).filter(Boolean);
+        if (!opsMenu.length) {
+          // Sin valor que elegir (p.ej. el país de la marca está vacío) NO se toca el
+          // menú: se avisa, en vez de dejarlo puesto en cualquier cosa.
+          faltan.push(p.desc || ("menu «" + (p.label || "").split("|")[0] + "» sin opcion que elegir"));
+        } else {
+          // MENÚ DE ESTA PREGUNTA. Igual que fillLabel: cada coincidencia guarda su
+          // DISTANCIA (0 = rótulo propio, 1 = hermanos del menú, 2 = hermanos del
+          // padre…) y gana la MÁS CERCANA. Sin distancia, subir por los ancestros hace
+          // que la 1.ª pregunta de X («¿Qué problema tienes?») adopte también el 2.º
+          // menú, porque su texto está más arriba y envuelve a los dos.
+          const buscarMenu = () => {
+            const visibles = Array.prototype.slice.call(document.querySelectorAll("select"))
+              .filter((x) => { const r = x.getBoundingClientRect(); return r.width >= 2 && r.height >= 2; });
+            // Regla clave: un texto solo rotula a ESTE menú si entre los dos no hay OTRO
+            // menú. Si lo hay, ese texto es el rótulo del otro.
+            const hayMenuEntre = (rot, menu) => visibles.some((f) => {
+              if (f === menu) return false;
+              const a = rot.compareDocumentPosition(f), b = f.compareDocumentPosition(menu);
+              return !!(a & Node.DOCUMENT_POSITION_FOLLOWING) && !!(b & Node.DOCUMENT_POSITION_FOLLOWING);
+            });
+            let mejor = null, mejorDist = Infinity;
+            for (const s of visibles) {
+              const niveles = [];
+              let propio = " " + (s.getAttribute("aria-label") || "") + " ";
+              try { if (s.id) { const lf = document.querySelector('label[for="' + (window.CSS ? CSS.escape(s.id) : s.id) + '"]'); if (lf) propio += " " + (lf.textContent || ""); } } catch (e) {}
+              const lblby = s.getAttribute("aria-labelledby");
+              if (lblby) lblby.split(/\s+/).forEach(function (idr) { const le = document.getElementById(idr); if (le) propio += " " + (le.textContent || ""); });
+              niveles.push({ t: norm(propio), n: 0, el: null });
+              // OJO RENDIMIENTO: textContent (con caché), NUNCA innerText.
+              let nodo = s, k = 0;
+              while (nodo && k < 8) {
+                let ps = nodo.previousElementSibling, j = 0;
+                while (ps && j < 3) { niveles.push({ t: null, n: k + 1, el: ps }); ps = ps.previousElementSibling; j++; }
+                nodo = nodo.parentElement; k++;
+              }
+              let dist = -1;
+              for (let n = 0; n < niveles.length && dist < 0; n++) {
+                const c = niveles[n].el ? textoNorm(niveles[n].el) : niveles[n].t;
+                if (!kwsMenu.some((kw) => c.indexOf(kw) >= 0)) continue;
+                if (niveles[n].el && hayMenuEntre(niveles[n].el, s)) continue;
+                dist = niveles[n].n;
+              }
+              if (dist >= 0 && dist < mejorDist) { mejor = s; mejorDist = dist; }
+            }
+            return mejor;
+          };
+          // La OPCIÓN, con las mismas reglas que el resto del motor: alternativas con "&"
+          // (todas las palabras presentes, en cualquier orden) y, si no, por PRIORIDAD
+          // exacto -> empieza por -> contiene, para no coger una opción que solo
+          // CONTENGA a la buscada.
+          const elegirOpcion = (menu) => {
+            const textos = [];
+            for (let i = 0; i < menu.options.length; i++) {
+              textos.push(norm(menu.options[i].text).replace(/\s+/g, " ").trim());
+            }
+            for (const kw of opsMenu) {
+              if (kw.indexOf("&") >= 0) {
+                const i = textos.findIndex((t) => kw.split("&").every((tok) => (tok = tok.trim()) && t.indexOf(tok) >= 0));
+                if (i >= 0) return i;
+                continue;
+              }
+              let i = textos.indexOf(kw);                                  // exacto
+              if (i < 0) i = textos.findIndex((t) => t.indexOf(kw) === 0); // empieza por
+              if (i < 0) i = textos.findIndex((t) => t.indexOf(kw) >= 0);  // contiene
+              if (i >= 0) return i;
+            }
+            return -1;
+          };
+          let menu = null;
+          for (let itM = 0; itM < (p.reintentos || 1) && !menu; itM++) {
+            menu = buscarMenu();
+            if (!menu) await dur(400);
+          }
+          if (!menu) faltan.push("menu por rotulo:" + (p.label || ""));
+          else {
+            const iOp = elegirOpcion(menu);
+            const puestoAhora = norm(((menu.options[menu.selectedIndex] || {}).text) || "").replace(/\s+/g, " ").trim();
+            if (iOp < 0) {
+              faltan.push("opcion «" + p.opcion + "» no esta en el menu «" + (p.label || "").split("|")[0] + "»");
+            } else if (menu.selectedIndex === iOp) {
+              // Ya está puesta la que queríamos: NI se toca NI se anota. `anotar` es lo
+              // que cuenta en `hechos`, y `hechos` es lo que decide si el bucle guarda
+              // comprobante: apuntar aquí sería decir que se rellenó algo que ya estaba.
+              // PERO SÍ SE DEJA CONSTANCIA (la misma marca que si lo hubiéramos puesto
+              // nosotros). Sin esto quedaba un agujero MEDIDO: con las URLs de X que ya
+              // traen el menú respondido no se marcaba nada, así que si el usuario lo
+              // cambiaba después, la pasada siguiente no tenía con qué distinguir "lo
+              // cambió él" de "es el valor por defecto" y se lo DESHACÍA.
+              try { menu.setAttribute(MENU_NUESTRO, puestoAhora); } catch (e) {}
+              ok++;
+            } else if (menu.hasAttribute(MENU_NUESTRO) && menu.getAttribute(MENU_NUESTRO) !== puestoAhora) {
+              // LO CAMBIÓ EL USUARIO. Misma regla que las casillas: solo cuenta si lo
+              // pusimos NOSOTROS antes y AHORA muestra otra cosa; así no se confunde
+              // "el usuario lo cambió" con "es el valor por defecto de la página".
+              // Importa porque el bucle del service worker repite hasta 30 minutos sin
+              // nadie mirando: sin esto le deshacía su elección cada pocos segundos.
+              // NO va a `faltan` (como un radio): el formulario con SU opción es válido.
+              // NO se llama a `anotar()` a propósito: esta rama no escribe nada, y `hechos`
+              // (que sale de `registro`) es lo que decide si se rellenó algo y lo que se le
+              // enseña al usuario. Contar aquí haría creer que se tocó un campo. Misma regla
+              // que la rama de "ya está puesta", unas líneas más arriba.
+              ok++;
+            } else {
+              menu.selectedIndex = iOp;
+              menu.dispatchEvent(new Event("input", { bubbles: true }));
+              menu.dispatchEvent(new Event("change", { bubbles: true }));
+              const elegido = norm(menu.options[iOp].text).replace(/\s+/g, " ").trim();
+              try { menu.setAttribute(MENU_NUESTRO, elegido); } catch (e) {}
+              anotar("eligio", menu, (menu.options[iOp].text || "").replace(/\s+/g, " ").trim().slice(0, 70));
+              ok++;
+            }
+          }
+        }
         if (p.esperaMs) await dur(p.esperaMs);
       } else if (p.tipo === "clickOpcion") {
         // Hace clic en la OPCIÓN VISIBLE cuyo texto coincide (como un humano). Útil
