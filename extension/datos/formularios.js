@@ -356,6 +356,14 @@
   function postalDe(pais) {
     try { return window.JUSTIF.POSTAL[window.JUSTIF.norm(pais)] || ""; } catch (e) { return ""; }
   }
+  // EL MISMO TEXTO EN UNA SOLA LÍNEA, para los campos de META que rechazan más de dos
+  // ("Please include no more than 2 lines of text", reportado con captura el 2026-09-10).
+  // No resume ni recorta: junta los párrafos. Ver JUSTIF.enUnaLinea. Si por lo que sea no
+  // estuviera disponible, se devuelve el texto tal cual: es mejor que Meta se queje a que
+  // el campo se quede vacío.
+  function enUnaLinea(texto) {
+    try { return window.JUSTIF.enUnaLinea(texto); } catch (e) { return texto; }
+  }
   // URL de la base de datos de marcas del país (campo TM_URL); OMPI como fallback.
   function baseMarcasDe(pais) { try { return window.JUSTIF.baseMarcasDe(pais); } catch (e) { return "https://branddb.wipo.int/"; } }
 
@@ -460,7 +468,8 @@
       { tipo: "fillUrlList", siHay: C, dominio: (red === "Instagram" ? "instagram.com" : "facebook.com"),
         checkLabel: "enlaces adicionales|additional links to report|enlaces adicionales que denunciar",
         urls: (ctx.urls || []) },
-      { tipo: "fillName", siHay: C, name: "why_reporting_other", valor: ctx.justif },
+      // Meta cuenta las líneas de este campo y admite 2: va en UNA (ver enUnaLinea).
+      { tipo: "fillName", siHay: C, name: "why_reporting_other", valor: enUnaLinea(ctx.justif) },
       // Dirección postal: en derechos de autor va oculta salvo en algunos países.
       { tipo: "fillName", siHay: C, name: "Address", valor: postalDe(d.pais), opcional: true },
       { tipo: "fillName", siHay: C, name: "Electronic_sig", valor: marca },
@@ -502,7 +511,7 @@
         valor: descObra, opcional: true, reintentos: 3 },
       { tipo: "checkLabel", siNoHay: C, texto: "foto, video o publicacion|photo, video or post", opcional: true },
       { tipo: "fillLabel", siNoHay: C, label: "derechos de propiedad intelectual|intellectual property rights|de que manera crees|describe como crees|how you believe this content",
-        valor: ctx.justif, reintentos: 6 },
+        valor: enUnaLinea(ctx.justif), reintentos: 6 },
       { tipo: "fillLabel", siNoHay: C, label: "tu nombre completo|nombre y apellidos|your full name", valor: marca, reintentos: 6 },
       { tipo: "fillLabel", siNoHay: C, label: "correo electronico|email address", valor: d.correo, reintentos: 6 },
       // OJO: el rótulo real es "Confirmar DIRECCIÓN de correo electrónico", así que
@@ -548,7 +557,10 @@
       { tipo: "fillLabel", label: "clase de bienes y servicios de marca comercial|clase de bienes y servicios|clase de los bienes y servicios|bienes y servicios de la marca|clase de la marca|goods and services|class of goods|bienes y/o servicios", valor: (d.clase_bienes || CLASE_BIENES_DEFECTO), opcional: true, tardio: true },
       { tipo: "select", name: "rights_owner_country_routing", texto: d.pais },
       { tipo: "check", name: "content_type[]", texto: "uses the rights owner" },
-      { tipo: "fillName", name: "why_reporting_other", valor: ctx.justif },
+      // MISMO campo de Meta que en Derechos de autor (mismo `name`) y mismo límite de
+      // 2 líneas; aquí el texto es la plantilla larga de perfil malicioso, así que sin
+      // esto son 7 párrafos y el rechazo es seguro.
+      { tipo: "fillName", name: "why_reporting_other", valor: enUnaLinea(ctx.justif) },
       { tipo: "fillName", name: "signature", valor: marca },
       { tipo: "radio", name: "continuereport", texto: "trademark" },          // re-marcar al final
       { tipo: "radio", name: "relationship_rightsowner", texto: "rights owner" },

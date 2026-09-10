@@ -619,6 +619,51 @@
     return justificacionPerfilMaliciosoDetallada(marcaNombre, datos, red, lang).texto;
   }
 
+  // ==========================================================================
+  //  EL MISMO TEXTO, EN UNA SOLA LÍNEA
+  //  --------------------------------------------------------------------
+  //  Meta LIMITA el campo «Describe de qué manera consideras que este contenido
+  //  infringe tus derechos de propiedad intelectual» y rechaza la denuncia con
+  //  «Please include no more than 2 lines of text» (reportado con captura por el
+  //  usuario el 2026-09-10). Nuestra descripción va en párrafos separados por
+  //  saltos de línea —el texto, «Política infringida: …» y «Perfil oficial de …»—,
+  //  así que Meta la cuenta como 5 líneas, la pinta en ROJO y no deja enviar.
+  //
+  //  Esto NO resume ni recorta: junta los párrafos en uno solo. La política
+  //  infringida CON SU ENLACE y el perfil oficial siguen ahí enteros, que es
+  //  regla del proyecto (skill citar-politica-violada). Lo único que se añade es
+  //  el punto que cierra un párrafo cuando no lo trae, para que al pegarlo con el
+  //  siguiente no queden dos frases fundidas en una.
+  //
+  //  SOLO para los campos de Meta que tienen ese límite. En TikTok, X, LinkedIn,
+  //  YouTube y en los correos el texto se sigue mandando en párrafos, que es como
+  //  se lee bien y como lo espera quien revisa.
+  //
+  //  OJO con la puntuación que YA venía en el texto: no se toca. Nada de colapsar
+  //  puntos repetidos ni de reescribir signos —los puntos suspensivos y los puntos
+  //  de las URL («https://www.facebook.com/…») son parte del contenido—. Aquí solo
+  //  se colapsan los ESPACIOS y se quita el espacio que quede delante de un signo.
+  // ==========================================================================
+  function enUnaLinea(texto) {
+    const partes = String(texto == null ? "" : texto)
+      .split(/\r?\n+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (!partes.length) return "";
+    let salida = "";
+    for (let i = 0; i < partes.length; i++) {
+      const s = partes[i];
+      if (!salida) { salida = s; continue; }
+      // UN PÁRRAFO QUE ACABA EN URL no se cierra con punto: quedaría pegado al enlace
+      // («…/535503073130320.») y quien revise en Meta se llevaría el punto dentro del
+      // enlace al copiarlo. Se une con la raya que ya usan estos textos como separador.
+      if (/https?:\/\/\S+$/.test(salida)) salida += " — " + s;
+      else if (/[.!?:;,]$/.test(salida)) salida += " " + s;
+      else salida += ". " + s;
+    }
+    return salida.replace(/\s+/g, " ").replace(/\s+([.,;:!?])/g, "$1").trim();
+  }
+
   window.JUSTIF = {
     norm: norm, POSTAL: POSTAL, CODIGO: CODIGO, POLITICAS: POLITICAS,
     // BASE_MARCAS: URL de la base de datos pública de marcas por país; baseMarcasDe: getter
@@ -637,6 +682,9 @@
     justificacionPerfilMaliciosoDetallada: justificacionPerfilMaliciosoDetallada,
     // descripcionDeDenuncia: el UNICO sitio que decide que texto lleva cada denuncia.
     descripcionDeDenuncia: descripcionDeDenuncia,
+    // enUnaLinea: el MISMO texto sin saltos de linea, para los campos de Meta que
+    // rechazan mas de 2 lineas ("Please include no more than 2 lines of text").
+    enUnaLinea: enUnaLinea,
     esCategoriaDePerfilMalicioso: esCategoriaDePerfilMalicioso,
     CATS_PERFIL_MALICIOSO: CATS_PERFIL_MALICIOSO,
     POLITICAS_DE_PERFIL: POLITICAS_DE_PERFIL,
