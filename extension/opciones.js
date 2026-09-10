@@ -113,6 +113,7 @@ const SECCIONES_DE_MARCA = [
   { titulo: "⚖️ Legal", campos: [
     { clave: "registro",  etiqueta: "⚖️ N.º de registro", placeholder: "N.º de marca registrada" },
     { clave: "tmurl",     etiqueta: "🔗 Enlace al registro (TM_URL)", placeholder: "https://branddb.wipo.int/…" },
+    { clave: "clase_bienes", etiqueta: "🏷️ Clase de bienes y servicios", placeholder: "Ej. Negocios financieros, bancarios, de crédito. Negocios Monetarios." },
   ]},
 ];
 

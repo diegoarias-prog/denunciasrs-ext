@@ -101,13 +101,18 @@
     if (!boton) return;
     if (!activado) { boton.style.display = "none"; return; }
     try {
-      chrome.storage.local.get("ultima_denuncia_registro", function (x) {
+      // MODO PRUEBA: el botón NO se enseña. En modo prueba no hay denuncia en curso y
+      // `ultima_denuncia_registro` sigue apuntando a la ÚLTIMA DENUNCIA DE VERDAD: un
+      // botón visible aquí es una invitación a pisarle el comprobante. (El daño ya lo
+      // impide capturarCompleta en el service worker; esto evita el chasco.)
+      chrome.storage.local.get(["ultima_denuncia_registro", CLAVE_MODO_PRUEBA], function (x) {
         if (!boton) return;
         // No re-mostrar mientras se está capturando (el botón está oculto para
         // no salir en la foto).
         if (capturando) return;
         var tiene = !!(x && x.ultima_denuncia_registro);
-        boton.style.display = (tiene && activado) ? "block" : "none";
+        var enPrueba = !!(x && x[CLAVE_MODO_PRUEBA]);
+        boton.style.display = (tiene && activado && !enPrueba) ? "block" : "none";
       });
     } catch (e) { /* contexto de extensión no disponible */ }
   }
@@ -119,6 +124,9 @@
   // mientras la página seguía abierta: chrome.runtime.id pasa a undefined y todo
   // acceso a chrome.* lanza "Extension context invalidated". Lo detectamos para
   // avisar claro (recargar la página) en vez de mostrar el error técnico.
+  // Clave del interruptor 🧪 Modo prueba (la misma que usan popup.js y background.js).
+  var CLAVE_MODO_PRUEBA = "modo_prueba_denuncias";
+
   function contexto_valido() {
     try { return !!(chrome && chrome.runtime && chrome.runtime.id); } catch (e) { return false; }
   }
@@ -131,8 +139,16 @@
     try {
       // 1) ¿Hay una denuncia en curso a la que adjuntar?
       var store = await new Promise(function (res) {
-        chrome.storage.local.get(["ultima_denuncia_registro"], function (x) { res(x || {}); });
+        chrome.storage.local.get(["ultima_denuncia_registro", CLAVE_MODO_PRUEBA], function (x) { res(x || {}); });
       });
+      // MODO PRUEBA: se sale ANTES de mirar el destino. Hace falta aunque el botón esté
+      // escondido, porque el atajo Alt+Shift+S llega igual (disparaCaptura enciende
+      // `activado` por su cuenta) y aquí el destino sería la ÚLTIMA denuncia DE VERDAD.
+      if (store[CLAVE_MODO_PRUEBA]) {
+        toast("🧪 Modo prueba: no se guardan comprobantes. Apágalo en el popup para capturar.", "#b45309");
+        capturando = false;
+        return;
+      }
       var idDest = store.ultima_denuncia_registro;
       if (!idDest) {
         toast("Primero pulsa Rellenar para iniciar una denuncia.", "#b45309");
@@ -229,7 +245,10 @@
   // desaparece si se limpia).
   try {
     chrome.storage.onChanged.addListener(function (cambios, area) {
-      if (area === "local" && cambios && cambios.ultima_denuncia_registro) actualizar();
+      // También al encender/apagar el modo prueba: el botón tiene que aparecer o
+      // desaparecer en el acto, sin recargar la página.
+      if (area === "local" && cambios &&
+          (cambios.ultima_denuncia_registro || cambios[CLAVE_MODO_PRUEBA])) actualizar();
     });
   } catch (e) { /* sin acceso a storage */ }
 

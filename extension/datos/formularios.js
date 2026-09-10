@@ -50,6 +50,29 @@
     return { nom: partes[0], ape: partes.slice(1).join(" "), completo: partes.join(" ") };
   }
 
+  // ==========================================================================
+  //  NOMBRE DE USUARIO DE INSTAGRAM A PARTIR DE SU URL
+  //  Los formularios de suplantación de Meta piden el @usuario, no el enlace: si se
+  //  pega la URL entera el formulario la rechaza. Se acepta la URL tal y como la copia
+  //  el usuario (con o sin @, con o sin barra final, con ?igshid=... detrás) y se
+  //  devuelve "" cuando no hay un usuario que sacar —no es de instagram.com, o es el
+  //  enlace de una publicación (/p/, /reel/)— para que quien llama OMITA el paso en
+  //  vez de escribir un dato falso.
+  // ==========================================================================
+  function usuarioDeInstagram(url) {
+    var u = String(url || "").trim();
+    if (!u) return "";
+    // El punto/barra/inicio delante evita que "fakeinstagram.com" pase por instagram.com.
+    if (!/(^|\/\/|\.)instagram\.com/i.test(u)) return "";
+    u = u.split("#")[0].split("?")[0];
+    var m = u.match(/instagram\.com\/+@?([^\/]+)/i);
+    if (!m) return "";
+    var usuario = m[1].trim();
+    // Rutas de la propia red que no son un perfil.
+    if (/^(p|reel|reels|stories|explore|tv|accounts|direct|s)$/i.test(usuario)) return "";
+    return usuario;
+  }
+
   // Navegador y sistema, para los formularios que preguntan el "User agent" (Cloudflare
   // lo pide para saber dónde se vio el abuso). Se lee del navegador REAL, no se inventa.
   function navegadorYSistema() {
@@ -84,6 +107,16 @@
       if (c >= 97 && c <= 122) return String.fromCodePoint(0x1D41A + (c - 97));  // a-z
       return String.fromCodePoint(0x1D7CE + (c - 48));                            // 0-9
     });
+  }
+
+  // Los AVISOS del plan se pintan como HTML en el popup (llevan <b> a propósito), así que
+  // todo dato que venga del usuario —el nombre de la marca, su correo, su país— hay que
+  // escaparlo AQUÍ, en el punto donde se mete. Escapar el aviso entero al pintarlo no
+  // vale: se verían los <b> literales.
+  function textoSeguro(v) {
+    return String(v == null ? "" : v)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   }
 
   // Párrafo con el perfil OFICIAL de la marca en la red que se está denunciando
@@ -154,25 +187,27 @@
     var marca = ctx.marca, d = ctx.datos;
     var repres = /seguridadmaxima\.net/i.test(d.correo || "");
     var pols = (window.POLITICAS_GENERALES && window.POLITICAS_GENERALES[redNombre]) || [];
+    // CUERPO DE LA DENUNCIA: la plantilla de PERFIL MALICIOSO. La puso
+    // JUSTIF.descripcionDeDenuncia en ctx.justif (inglés) y ctx.justif_es (español)
+    // antes de llamar aquí. Trae los datos registrales de la marca, las TRES políticas
+    // de esta red con su enlace, el perfil oficial y la declaración bajo pena de perjurio.
+    var cuerpoDenuncia = String((lang === "es" ? ctx.justif_es : ctx.justif) || "").trim();
+    // De la lista GENERAL de políticas solo se citan las que NO están ya dentro de la
+    // plantilla (se comparan por enlace): así ningún enlace se repite dos veces.
+    var polsExtra = pols.filter(function (x) { return x && x.u && cuerpoDenuncia.indexOf(x.u) < 0; });
     if (lang === "es") {
       var quienesE = repres
         ? "Somos Seguridad Máxima en Redes Informáticas, en representación de " + marca + "."
         : "Somos " + marca + ".";
       var firmaE = repres ? "Seguridad Máxima en Redes Informáticas" : marca;
-      var polTxtE = pols.length
-        ? "\n\nEste contenido infringe las políticas y normas comunitarias de " + redNombre + ", incluyendo:\n" +
-          pols.map(function (p) { return "- " + p.t + ": " + p.u; }).join("\n")
+      var polTxtE = polsExtra.length
+        ? "\n\nOtras políticas y normas de " + redNombre + " de referencia:\n" +
+          polsExtra.map(function (p) { return "- " + p.t + ": " + p.u; }).join("\n")
         : "";
-      var lineaPerfilE = lineaPerfilOficial(d, redNombre, marca, "es");
       var cuerpoE =
         "Hola,\n\n" + quienesE + "\n\n" +
         "Reportamos contenido en " + redNombre + " que infringe la propiedad intelectual y los derechos de marca de " + marca + ".\n\n" +
-        "Motivos por los que debe eliminarse:\n" +
-        "- Usa el nombre, el logotipo y la identidad de marca de " + marca + " sin autorización, suplantándola.\n" +
-        "- Engaña y confunde a los clientes de " + marca + " y puede usarse para solicitar información confidencial o defraudarlos.\n" +
-        "- No tiene ninguna relación comercial ni legal con " + marca + " e infringe sus derechos de marca y propiedad intelectual." +
-        polTxtE + "\n\n" +
-        lineaPerfilE +
+        cuerpoDenuncia + polTxtE + "\n\n" +
         "Solicitamos respetuosa y URGENTEMENTE la eliminación inmediata del siguiente contenido:\n\n" +
         negrita("Contenido a denunciar (URL del perfil / página / publicación):") + "\n" +
         urlsODefault(ctx, "[ Pega aquí el/los enlace(s) de " + redNombre + " a denunciar ]") + "\n\n" +
@@ -183,20 +218,14 @@
       ? "We are Security Maximum in Computer Networks, writing on behalf of " + marca + "."
       : "We are " + marca + ".";
     var firma = repres ? "Security Maximum in Computer Networks" : marca;
-    var polTxt = pols.length
-      ? "\n\nThis content violates " + redNombre + "'s policies and community standards, including:\n" +
-        pols.map(function (p) { return "- " + p.t + ": " + p.u; }).join("\n")
+    var polTxt = polsExtra.length
+      ? "\n\nOther " + redNombre + " policies and rules for reference:\n" +
+        polsExtra.map(function (p) { return "- " + p.t + ": " + p.u; }).join("\n")
       : "";
-    var lineaPerfil = lineaPerfilOficial(d, redNombre, marca, "en");
     var cuerpo =
       "Hello,\n\n" + quienes + "\n\n" +
       "We are reporting content on " + redNombre + " that infringes the intellectual property and brand rights of " + marca + ".\n\n" +
-      "Reasons this content must be removed:\n" +
-      "- It uses the name, logo and brand identity of " + marca + " without authorization, impersonating it.\n" +
-      "- It misleads and confuses " + marca + "'s customers and may be used to request confidential information or to defraud them.\n" +
-      "- It has no business or legal relationship with " + marca + " and infringes its trademark and intellectual property rights." +
-      polTxt + "\n\n" +
-      lineaPerfil +
+      cuerpoDenuncia + polTxt + "\n\n" +
       "We respectfully and URGENTLY request the immediate removal of the following content:\n\n" +
       negrita("Reported content (profile / page / post URL):") + "\n" +
       urlsODefault(ctx, "[ Paste here the " + redNombre + " link(s) you are reporting ]") + "\n\n" +
@@ -391,7 +420,7 @@
       ", obra protegida por derechos de autor cuya titularidad corresponde en exclusiva a " + marca + "." +
       (perfil ? " Puede verse en su " + obra.que + ": " + perfil + "." : "");
     var avisos = [];
-    if (!perfil) avisos.push("La marca «" + marca + "» no tiene <b>perfil de " + red + "</b>, <b>sitio web</b>, " +
+    if (!perfil) avisos.push("La marca «" + textoSeguro(marca) + "» no tiene <b>perfil de " + textoSeguro(red) + "</b>, <b>sitio web</b>, " +
       "<b>dominio</b> ni <b>app</b> guardados, y Meta exige un enlace de ejemplo a la obra. " +
       "Añade uno en <b>⚙ Marcas</b> o pégalo a mano antes de enviar.");
     // MARCA DE AGUA del formulario CLÁSICO. Antes se miraba un ÚNICO campo
@@ -528,6 +557,61 @@
       // denunciar"); se dejan varias redacciones + el value en inglés como respaldo.
       { tipo: "fillUrlList", dominio: (this.red === "Instagram" ? "instagram.com" : "facebook.com"), checkLabel: "enlaces adicionales|additional links to report|enlaces adicionales que denunciar", urls: (ctx.urls || []) }
     ] };
+  }
+  // ==========================================================================
+  //  SUPLANTACIÓN DE IDENTIDAD (Facebook / Instagram)
+  //  Meta usa UN SOLO formulario (ayuda 636276399721841) para las dos redes: solo
+  //  cambia el dominio por el que se entra. Es el formulario CLÁSICO, con `name` en
+  //  cada campo, así que se rellena por name y no por rótulo.
+  //  Se denuncia como REPRESENTANTE de la marca: quien firma es la PERSONA del correo
+  //  remitente y la parte suplantada es la marca.
+  // ==========================================================================
+  var SUPL_MANUAL = "SUBE una foto de tu documento de identificación: Meta la exige y la extensión no " +
+    "puede adjuntarla. Si el «Nombre de usuario de Instagram de la cuenta denunciada» quedó vacío, " +
+    "pégalo a mano (no se pudo deducir de los enlaces). Meta también pregunta el nombre completo que " +
+    "figura en la cuenta denunciada y los usuarios de Threads: esos datos la extensión no los tiene y " +
+    "no los inventa, escríbelos tú si los conoces. Revisa todo antes de enviar.";
+  function planSuplantacion(ctx) {
+    var d = ctx.datos, marca = ctx.marca;
+    var urls = (ctx.urls || []).filter(Boolean);
+
+    // Quien denuncia es la PERSONA del correo, nunca la marca (misma regla que cf_dmca):
+    // si del correo no sale un nombre de persona se OMITE el campo, porque firmar la
+    // denuncia con quien no es la invalida. Mejor en blanco para que lo escriba el usuario.
+    var firmante = personaDeCorreo(d.correo).completo;
+
+    // @usuario de la marca y de la cuenta denunciada. Se recorre la lista de URLs y se
+    // toma el primer enlace del que salga un usuario aprovechable: la primera URL puede
+    // ser la de una publicación (/p/...), que no lleva el nombre de la cuenta.
+    var usuarioMarca = usuarioDeInstagram(d.instagram);
+    var usuarioDenunciado = "";
+    for (var i = 0; i < urls.length && !usuarioDenunciado; i++) usuarioDenunciado = usuarioDeInstagram(urls[i]);
+
+    // "Información adicional": la justificación, el perfil OFICIAL de la marca en esa red
+    // (para que Meta sepa cuál es la cuenta auténtica) y los enlaces denunciados.
+    // ctx.justif YA termina con ese párrafo de perfil oficial (popup.js y background.js le
+    // aplican JUSTIF.conPerfilOficial antes de llamar aquí), así que solo se añade cuando
+    // no está: si no, Meta leería el mismo párrafo dos veces seguidas.
+    var info = ctx.justif || "";
+    var perfil = (lineaPerfilOficial(d, this.red, marca, "es") || "").trim();
+    if (perfil && info.indexOf(perfil) === -1) info += "\n\n" + perfil;
+    if (urls.length) info += "\n\nEnlaces denunciados:\n" + urls.join("\n");
+
+    var pasos = [
+      { tipo: "radioVal", name: "radioDescribeSituation", value: "represent_impersonation", esperaMs: 1200 },
+      // Esta pregunta pertenece a la rama "me suplantan a mí": al elegir "represento a
+      // alguien" Meta la esconde. Va opcional+tardía para que el motor no la cuente como
+      // fallo cuando no aparece.
+      { tipo: "radioVal", name: "radioPersonImpersonationMoreInfo", value: "friend_impersonation", opcional: true, tardio: true }
+    ];
+    if (firmante) pasos.push({ tipo: "fillName", name: "inputFullName", valor: firmante });
+    pasos.push({ tipo: "fillName", name: "inputEmail", valor: d.correo || "" });
+    pasos.push({ tipo: "fillName", name: "Field280160739058799", valor: "Representante autorizado de " + marca });
+    pasos.push({ tipo: "fillName", name: "Field1600094910240113", valor: marca });
+    if (usuarioMarca) pasos.push({ tipo: "fillName", name: "Field1446762042284494", valor: usuarioMarca });
+    if (usuarioDenunciado) pasos.push({ tipo: "fillName", name: "inputReportedUsername", valor: usuarioDenunciado });
+    pasos.push({ tipo: "fillName", name: "Field600631177074776", valor: info });
+    return { url: this.url, manual: this.manual, pasos: pasos };
   }
   function planDifam(ctx) {
     var d = ctx.datos, marca = ctx.marca;
@@ -666,6 +750,10 @@
     ig_copyright: { red: "Instagram", nombre: "Derechos de autor", cat: "autor", url: "https://help.meta.com/requests/1523801815366035?claim_type=IP_COPYRIGHT&platform_copyright=INSTAGRAM_CORE", manual: META_COPY_MANUAL, construirPlan: planCopyright },
     fb_marca:     { red: "Facebook",  nombre: "Marca registrada",  cat: "marca", url: "https://www.facebook.com/help/contact/1057530390957243", manual: "Pega las URL del contenido infractor y el N.º de registro si lo tienes. Revisa antes de enviar.", construirPlan: planMarca },
     ig_marca:     { red: "Instagram", nombre: "Marca registrada",  cat: "marca", url: "https://help.instagram.com/contact/230197320740525",        manual: "Pega las URL del contenido infractor. Revisa antes de enviar.", construirPlan: planMarca },
+    // Suplantación de identidad: MISMO formulario de Meta para las dos redes (solo
+    // cambia el dominio de entrada); se denuncia como representante de la marca.
+    fb_supl:      { red: "Facebook",  nombre: "Suplantación de identidad", cat: "supl", url: "https://www.facebook.com/help/contact/636276399721841", manual: SUPL_MANUAL, construirPlan: planSuplantacion },
+    ig_supl:      { red: "Instagram", nombre: "Suplantación de identidad", cat: "supl", url: "https://help.instagram.com/contact/636276399721841",   manual: SUPL_MANUAL, construirPlan: planSuplantacion },
     fb_difam:     { red: "Facebook",  nombre: "Difamación",        cat: "difam", url: "https://www.facebook.com/help/contact/430253071144967", manual: "Selecciona cuántas URL y pega cada enlace con su motivo. Revisa antes de enviar.", construirPlan: planDifam },
     ig_difam:     { red: "Instagram", nombre: "Difamación",        cat: "difam", url: "https://help.instagram.com/contact/653100351788502",        manual: "Selecciona cuántas URL y pega cada enlace con su motivo. Revisa antes de enviar.", construirPlan: planDifam },
     // ================= WhatsApp (formulario único) =================
@@ -678,10 +766,33 @@
     x_acoso: {
       red: "X", nombre: "Acoso", cat: "x_acoso",
       url: "https://help.x.com/es/forms/safety-and-sensitive-content/violent-threats",
-      manual: "Primero, en el menu de X, elige el problema y 'El contenido va dirigido a: Otra persona' para que aparezcan los campos; luego pulsa Rellenar. Completa la @cuenta/URL a denunciar y resuelve el captcha.",
+      manual: "Con UN clic basta: la extensión elige sola «Una cuenta me acosa a mí o a otra persona» y «El contenido que estoy denunciando está dirigido a: Otra persona» —que es lo que hace aparecer el resto del formulario— y después rellena tu correo y la descripción. Completa TÚ la @cuenta y los enlaces a denunciar (X no los deduce de la marca) y resuelve el captcha antes de Enviar.",
       construirPlan: function (ctx) {
         var d = ctx.datos;
         return { url: this.url, manual: this.manual, pasos: [
+          // ------------------------------------------------------------------------
+          //  LOS DOS MENÚS VAN PRIMERO Y SON LO QUE ANTES FALTABA. Al cargar, esta
+          //  página NO tiene ni una caja de texto: solo dos <select> NATIVOS, sin
+          //  `name`, sin `id` y sin <label for>. Hasta que no se responden los DOS no
+          //  aparece NINGÚN campo, así que los pasos de abajo no encontraban nada y el
+          //  formulario se quedaba en blanco. Se eligen por el TEXTO DE SU PREGUNTA
+          //  (ver `elegirEnMenuPorRotulo` en motor.js); `fillName` y `select` no valen
+          //  aquí porque exigen `name`, y `dropdown` busca menús de TikTok, no <select>.
+          //  Palabras clave en ESPAÑOL (la página se abre en /es/), con respaldo.
+          // ------------------------------------------------------------------------
+          { tipo: "elegirEnMenuPorRotulo", label: "que problema tienes|problema tienes|que problema",
+            opcion: "cuenta&acosa|acosa|acoso", esperaMs: 1500, reintentos: 6 },
+          // El 2.º menú CAMBIA DE REDACCIÓN según la rama que elija el primero (medido en
+          // vivo el 2026-09-09): en ACOSO es «El contenido que estoy denunciando está
+          // dirigido a» (A mí / Otra persona) y en INFORMACIÓN PRIVADA es «La información
+          // que se compartió en X pertenece a» (A mí / A alguien a quien estoy autorizado
+          // a representar / Otra persona). Se aceptan LAS DOS redacciones para que el paso
+          // aguante si X las mezcla; aquí la respuesta es "Otra persona" en las dos.
+          { tipo: "elegirEnMenuPorRotulo", label: "el contenido que estoy denunciando esta dirigido a|contenido que estoy denunciando|esta dirigido a|la informacion que se compartio en x pertenece a|informacion que se compartio|pertenece a|dirigido a",
+            opcion: "otra persona", esperaMs: 1800, reintentos: 6 },
+          // Estos tres solo existen DESPUÉS de responder los dos menús. Si en la primera
+          // pasada aún no están, el propio motor reintenta los pasos pendientes durante
+          // unos segundos (ver "VARIAS PASADAS automáticas" en motor.js).
           { tipo: "fillName", name: "Form_Email__c", valor: d.correo },
           { tipo: "fillName", name: "DescriptionText", valor: ctx.justif },
           { tipo: "check", name: "Communicate_Reported_Content__c" }
@@ -691,57 +802,214 @@
     x_privado: {
       red: "X", nombre: "Contenido privado", cat: "x_privado",
       url: "https://help.x.com/es/forms/safety-and-sensitive-content/violent-threats",
-      manual: "Primero, en el menu de X, elige el problema y 'dirigido a: Otra persona' para que aparezcan los campos; luego pulsa Rellenar. Completa la @cuenta/URL y resuelve el captcha.",
+      manual: "Con UN clic basta: la extensión elige sola «Se publica información privada» y «El contenido que estoy denunciando está dirigido a: Otra persona» —que es lo que hace aparecer el resto del formulario— y después rellena tu correo, la descripción, la firma y las casillas. Completa TÚ la @cuenta y los enlaces a denunciar (X no los deduce de la marca) y resuelve el captcha antes de Enviar.",
       construirPlan: function (ctx) {
         var d = ctx.datos, marca = ctx.marca;
         return { url: this.url, manual: this.manual, pasos: [
+          // Mismos DOS menús que en x_acoso (es el MISMO formulario: lo que cambia es la
+          // opción del primero). Sin responderlos, la página no tiene ni un campo: ver
+          // el aviso largo en x_acoso y `elegirEnMenuPorRotulo` en motor.js.
+          { tipo: "elegirEnMenuPorRotulo", label: "que problema tienes|problema tienes|que problema",
+            opcion: "publica&informacion privada|informacion privada|informacion&privada", esperaMs: 1500, reintentos: 6 },
+          // OJO: en ESTA rama el 2.º menú NO es el mismo que en Acoso. Al elegir «Se
+          // publica información privada», X cambia la pregunta a «La información que se
+          // compartió en X pertenece a», con CUATRO opciones: "" (vacía), «A mí», «A
+          // alguien a quien estoy autorizado a representar» y «Otra persona». Medido en
+          // vivo el 2026-09-09: con el rótulo de la rama de Acoso el paso no encontraba
+          // el menú, se quedaba en `faltan` y el formulario no llegaba a aparecer
+          // (hechos=1: solo el primer menú).
+          // Se elige «A alguien a quien estoy autorizado a representar» porque es lo que
+          // somos y lo que el resto del plan ya declara: marca la casilla `i-am-authorized`
+          // («…concerniente a mí o a alguien a quien estoy autorizado a representar») y
+          // firma con la marca. Las alternativas van EN ORDEN: la de representante primero
+          // y «otra persona» como respaldo (existe en las dos redacciones), de modo que
+          // aunque X mezcle las preguntas el paso siempre tenga una respuesta válida.
+          // Ni «A mí» ni la opción VACÍA del principio pueden llevarse la coincidencia:
+          // ninguna de las tres alternativas está contenida en ellas.
+          { tipo: "elegirEnMenuPorRotulo", label: "la informacion que se compartio en x pertenece a|informacion que se compartio|pertenece a|el contenido que estoy denunciando esta dirigido a|contenido que estoy denunciando|esta dirigido a|dirigido a",
+            opcion: "alguien&autorizado&representar|autorizado a representar|otra persona", esperaMs: 1800, reintentos: 6 },
+          // Al elegir «A alguien a quien estoy autorizado a representar» esta rama despliega
+          // EXACTAMENTE los mismos campos que la dirección de representante autorizado
+          // (volcado: Comprobantes/diag_x_privado_desplegado.json), así que se rellenan los
+          // dos que faltaban: la relación con la marca y el primer enlace a denunciar.
+          { tipo: "fillName", name: "relation-to-victim",
+            valor: "Actuamos como representantes autorizados de " + marca + " para la protección de su marca e identidad digital. La información privada difundida en la cuenta denunciada pertenece a " + marca + " y se ha publicado sin su autorización." },
           { tipo: "fillName", name: "Form_Email__c", valor: d.correo },
           { tipo: "fillName", name: "DescriptionText", valor: ctx.justif },
           { tipo: "fillName", name: "signature", valor: marca },
+          { tipo: "fillName", name: "reported-content[0].value", valor: ((ctx.urls || [])[0] || "") },
           { tipo: "check", name: "Communicate_Reported_Content__c" },
           { tipo: "check", name: "i-am-authorized" },
           { tipo: "check", name: "information-is-accurate" },
-          { tipo: "check", name: "Private_info_posted_what__c", texto: "cuenta bancaria o financiera" }
+          // LAS 7 CASILLAS DE «qué información privada» COMPARTEN `name` y se distinguen
+          // por su `value`, que está EN INGLÉS: ContactInformation, Address, Financial,
+          // Id, HackedMaterials, Image, Other. Y NO tienen label, ni texto en el padre,
+          // ni en el hermano siguiente (medido en vivo el 2026-09-09; en
+          // Comprobantes/diag_x_privado_desplegado.json los siete rótulos salen vacíos).
+          // Por eso buscarlas por el texto «cuenta bancaria o financiera» NO casaba nunca
+          // y esta casilla se quedaba sin marcar. Ahora se busca por el `value` real, con
+          // el rótulo en español detrás por si X algún día se los pone.
+          // `financial` no puede llevarse otra: ninguno de los otros seis `value` lo
+          // contiene (ContactInformation, Address, Id, HackedMaterials, Image, Other).
+          // Y NO se pone un respaldo por TEXTO en español, aunque sería lo natural: estas
+          // siete casillas comparten contenedor, y `check` mira el texto del PADRE sin
+          // tope de tamaño. Si los rótulos cuelgan del mismo contenedor (que es como se
+          // ven en pantalla), «cuenta bancaria o financiera» aparece en el texto del padre
+          // de LAS SIETE y se marca la PRIMERA, o sea «Información de contacto». Medido en
+          // el banco de pruebas, no supuesto: declararía en una denuncia jurada que se
+          // publicó otra cosa distinta de la que se publicó. El `value` es exacto y basta.
+          { tipo: "check", name: "Private_info_posted_what__c", texto: "financial" }
         ] };
       }
     },
     x_privado_rep: {
       red: "X", nombre: "Contenido privado (representante)", cat: "x_privado",
       url: "https://help.x.com/es/forms/safety-and-sensitive-content/private-information/auth-to-rep",
-      manual: "Completa la @cuenta/URL a denunciar y resuelve el captcha.",
+      manual: "Esta dirección de X ya viene con «Se publica información privada» y «La información pertenece a: A alguien a quien estoy autorizado a representar» puestos, y la extensión los respeta. Rellena tu relación con la marca, el correo, la firma, la descripción, el primer enlace a denunciar y las casillas. Completa TÚ la @cuenta a denunciar (X pide el @, no el enlace) y resuelve el captcha antes de enviar.",
       construirPlan: function (ctx) {
         var d = ctx.datos, marca = ctx.marca;
+        // Volcado real: Comprobantes/diag_x_privado_rep.json (2026-09-09). AQUÍ los `name`
+        // NO llevan el prefijo dinámico que sí llevan Suplantación y Falsificación, así que
+        // van por `name` tal cual (comprobado en el volcado, no supuesto).
         return { url: this.url, manual: this.manual, pasos: [
+          // Los dos menús ya vienen puestos por la URL; el paso lo comprueba y NO los toca
+          // (no dispara `change`, que en X repinta la sección y borraría lo escrito). Va
+          // igualmente por si algún día X deja de preseleccionarlos.
+          { tipo: "elegirEnMenuPorRotulo", label: "que problema tienes|problema tienes",
+            opcion: "publica&informacion privada|informacion privada|informacion&privada", esperaMs: 600, reintentos: 4 },
+          { tipo: "elegirEnMenuPorRotulo", label: "la informacion que se compartio en x pertenece a|informacion que se compartio|pertenece a",
+            opcion: "alguien&autorizado&representar|autorizado a representar", esperaMs: 800, reintentos: 4 },
+          // «Proporciona más detalles sobre tu relación con esta persona…»: se dice la
+          // verdad —somos representantes autorizados de la marca—, que es además lo que
+          // declara la casilla `i-am-authorized` de más abajo.
+          { tipo: "fillName", name: "relation-to-victim",
+            valor: "Actuamos como representantes autorizados de " + marca + " para la protección de su marca e identidad digital. La información privada difundida en la cuenta denunciada pertenece a " + marca + " y se ha publicado sin su autorización." },
           { tipo: "fillName", name: "Form_Email__c", valor: d.correo },
           { tipo: "fillName", name: "DescriptionText", valor: ctx.justif },
           { tipo: "fillName", name: "signature", valor: marca },
+          // «Ejemplo 1»: la primera URL a denunciar (X añade las demás con «Añade otro
+          // enlace», que aquí no se pulsa). Si no hay URLs cargadas, el paso se omite solo.
+          { tipo: "fillName", name: "reported-content[0].value", valor: ((ctx.urls || [])[0] || "") },
           { tipo: "check", name: "Communicate_Reported_Content__c" },
           { tipo: "check", name: "i-am-authorized" },
           { tipo: "check", name: "information-is-accurate" },
-          { tipo: "check", name: "Private_info_posted_what__c", texto: "cuenta bancaria o financiera" }
+          // LAS 7 CASILLAS DE «qué información privada» COMPARTEN `name` y se distinguen
+          // por su `value`, que está EN INGLÉS: ContactInformation, Address, Financial,
+          // Id, HackedMaterials, Image, Other. Y NO tienen label, ni texto en el padre,
+          // ni en el hermano siguiente (medido en vivo el 2026-09-09; en
+          // Comprobantes/diag_x_privado_desplegado.json los siete rótulos salen vacíos).
+          // Por eso buscarlas por el texto «cuenta bancaria o financiera» NO casaba nunca
+          // y esta casilla se quedaba sin marcar. Ahora se busca por el `value` real, con
+          // el rótulo en español detrás por si X algún día se los pone.
+          // `financial` no puede llevarse otra: ninguno de los otros seis `value` lo
+          // contiene (ContactInformation, Address, Id, HackedMaterials, Image, Other).
+          // Y NO se pone un respaldo por TEXTO en español, aunque sería lo natural: estas
+          // siete casillas comparten contenedor, y `check` mira el texto del PADRE sin
+          // tope de tamaño. Si los rótulos cuelgan del mismo contenedor (que es como se
+          // ven en pantalla), «cuenta bancaria o financiera» aparece en el texto del padre
+          // de LAS SIETE y se marca la PRIMERA, o sea «Información de contacto». Medido en
+          // el banco de pruebas, no supuesto: declararía en una denuncia jurada que se
+          // publicó otra cosa distinta de la que se publicó. El `value` es exacto y basta.
+          { tipo: "check", name: "Private_info_posted_what__c", texto: "financial" }
         ] };
       }
     },
     x_suplantacion: {
       red: "X", nombre: "Suplantación", cat: "x_supl",
       url: "https://help.x.com/es/forms/authenticity/impersonation/me-or-someone-i-represent/i-am-being-impersonated",
-      manual: "Completa la VERIFICACIÓN DE IDENTIDAD gubernamental (obligatoria), tu @usuario y el @ de la cuenta impostora. Resuelve el captcha.",
+      manual: "Se denuncia como MARCA: la extensión elige «Mi empresa, marca u organización» en «¿La identidad de quién está siendo suplantada?», y con eso X cambia el formulario entero (desaparece «Relación con la víctima» y aparecen los datos de empresa). Rellena el nombre de la PERSONA que firma, el correo, la empresa, el cargo, la dirección, el código postal, el país, el sitio web y la descripción, y marca «Una cuenta». DOS COSAS LAS HACES TÚ: (1) la VERIFICACIÓN DE IDENTIDAD GUBERNAMENTAL es obligatoria y la tienes que pasar tú con tu documento y una selfie —la extensión no la toca—; y (2) la pregunta «¿Trabajas directamente para la empresa…?» la dejamos SIN marcar a propósito: nosotros somos representantes autorizados, no empleados, y marcar lo contrario sería declarar algo falso en una denuncia. Elige tú la opción que corresponda. Completa también el @ de la cuenta impostora y los enlaces. Resuelve el captcha antes de enviar.",
       construirPlan: function (ctx) {
-        var d = ctx.datos;
-        return { url: this.url, manual: this.manual, pasos: [
-          { tipo: "fillName", suf: true, name: "Form_Email__c", valor: d.correo },
-          { tipo: "fillName", suf: true, name: "userDesc", valor: ctx.justif },
-          { tipo: "check", name: "govIdv_consent" }
-        ] };
+        var d = ctx.datos, marca = ctx.marca;
+        // Quien FIRMA es la persona del correo, no la marca (mismo criterio que Cloudflare
+        // y que la suplantación de Meta): X pide "Tu nombre completo" y debajo "Tu empresa".
+        var persona = personaDeCorreo(d.correo).completo;
+        var postal = postalDe(d.pais);
+        var avisos = [];
+        if (!persona) avisos.push("No sé con qué <b>nombre de persona</b> rellenar «Tu nombre completo»: " +
+          "el correo «" + textoSeguro(d.correo || "") + "» no está en la lista de personas. Escríbelo a mano o añádelo en <b>⚙ Marcas</b>.");
+        if (!postal) avisos.push("No tengo <b>código postal</b> para «" + textoSeguro(d.pais || "") + "»: escríbelo a mano.");
+        avisos.push("«¿Trabajas directamente para la empresa…?» se deja SIN marcar a propósito " +
+          "(somos representantes autorizados, no empleados). <b>Elígela tú</b> antes de enviar.");
+        // Los `name` de X llevan un PREFIJO DINÁMICO que cambia en cada carga
+        // (p. ej. "_-1825670735@full-name"), así que TODO lo que va por `name` usa `suf`
+        // (coincidencia por sufijo, [name$="..."]). Sin eso, `fillName` no encuentra nada:
+        // era la causa de que este formulario apenas rellenara dos campos.
+        // Volcado real: Comprobantes/diag_x_suplantacion_marca.json (2026-09-09).
+        var pasos = [
+          // Los DOS primeros menús NO tienen `name`: se anclan por el texto de su pregunta.
+          // El 1.º ya viene puesto por la URL, así que el paso lo detecta y no lo toca.
+          { tipo: "elegirEnMenuPorRotulo", label: "que problema tienes|problema tienes",
+            opcion: "suplantacion de identidad en x|suplantacion de identidad", esperaMs: 800, reintentos: 4 },
+          // Éste es el que CAMBIA el formulario entero: al elegir «Mi empresa, marca u
+          // organización» desaparece «Relación con la víctima» y salen los datos de empresa.
+          { tipo: "elegirEnMenuPorRotulo", label: "la identidad de quien esta siendo suplantada|identidad de quien|quien esta siendo suplantada",
+            opcion: "mi empresa&marca|empresa, marca u organizacion|mi empresa", esperaMs: 2000, reintentos: 6 },
+          // Estos dos SÍ tienen `name` (con prefijo): por `name`+sufijo, que es más firme
+          // que el rótulo. «¿Su empresa tiene una cuenta X?» se responde con la verdad:
+          // Sí solo si la marca tiene perfil de X guardado.
+          { tipo: "select", suf: true, name: "@hasXAccount", texto: (d.x ? "si" : "no"), esperaMs: 1200, reintentos: 6 },
+          { tipo: "select", suf: true, name: "@country", texto: d.pais, esperaMs: 800 },
+          { tipo: "fillName", suf: true, name: "@full-name", valor: persona },
+          { tipo: "fillName", suf: true, name: "@Form_Email__c", valor: d.correo },
+          { tipo: "fillName", suf: true, name: "@your-company", valor: marca },
+          // Cargo: lo que somos de verdad. No se pone un cargo dentro de la marca.
+          { tipo: "fillName", suf: true, name: "@job-title", valor: "Representante de protección de marca" },
+          // Dirección: el país de la marca, igual que en TikTok y en los demás formularios
+          // (no guardamos la dirección postal completa de cada marca).
+          { tipo: "fillName", suf: true, name: "@address", valor: d.pais },
+          { tipo: "fillName", suf: true, name: "@postal-code", valor: postal },
+          { tipo: "fillName", suf: true, name: "@website", valor: d.sitio || "" },
+          { tipo: "fillName", suf: true, name: "@userDesc", valor: ctx.justif },
+          // «¿Cómo te están suplantando?» -> «Una cuenta». Es cierto y es lo mismo que ya
+          // se marca en Falsificación de marca.
+          { tipo: "radio", suf: true, name: "@Impersonation_How__c", texto: "una cuenta", esperaMs: 600 },
+          // OJO, A PROPÓSITO: NO se toca el radio `Type_of_Issue__c` («Trabajo directamente
+          // para la empresa cuya identidad está siendo suplantada»). Marcarlo sería declarar
+          // algo FALSO —somos representantes autorizados, no empleados— y del volcado solo
+          // se capturó el rótulo de una de sus dos opciones, así que ni siquiera se sabe
+          // cómo se llama la correcta. Lo elige el usuario (ver `manual` y `avisos`).
+          { tipo: "check", name: "govIdv_consent" },
+          { tipo: "check", suf: true, name: "@confirm-sharing" },
+          { tipo: "check", suf: true, name: "@confirm-accurate" }
+        ];
+        return { url: this.url, manual: this.manual, avisos: avisos, pasos: pasos };
       }
     },
     x_falsif: {
       red: "X", nombre: "Falsificación de marca", cat: "x_falsif",
       url: "https://help.x.com/es/forms/ipi/counterfeit/trademark-holder",
-      manual: "Completa la @cuenta/URL a denunciar y, si los tienes, el número y la clase de registro de la marca. Resuelve el captcha.",
+      manual: "Se denuncia como titular de la marca. La extensión rellena tu nombre y correo, los datos del propietario (nombre, dirección, sitio web, su @ de X), la palabra de marca, el país, la ubicación de la marca, el N.º de registro si lo tienes guardado y la descripción, y marca las 4 declaraciones. Completa TÚ la @cuenta a denunciar y el enlace del contenido. «Clase de bienes o servicios» y «Oficina de registro» solo se rellenan si tienes esos datos guardados en ⚙ Marcas: si no, te avisa y los pones tú. Resuelve el captcha antes de enviar.",
       construirPlan: function (ctx) {
         var d = ctx.datos, marca = ctx.marca;
-        return { url: this.url, manual: this.manual, pasos: [
+        var avisos = [];
+        // @USUARIO DE X DE LA MARCA. X pide el nombre de usuario, no el enlace: se admite
+        // lo que haya guardado (URL o @) y se devuelve "" cuando no hay nada que sacar,
+        // para OMITIR el campo en vez de escribir una URL donde va un @.
+        var usuarioX = "";
+        try {
+          var bruto = String(d.x || "").trim();
+          var m = bruto.match(/(?:x|twitter)\.com\/(?:#!\/)?@?([A-Za-z0-9_]{1,15})/i);
+          usuarioX = m ? m[1] : (/^@?[A-Za-z0-9_]{1,15}$/.test(bruto) ? bruto.replace(/^@/, "") : "");
+        } catch (e) { usuarioX = ""; }
+        // CLASE DE NIZA. El menú de X son 46 opciones "Clase 1".."Clase 46" (volcado real
+        // Comprobantes/diag_x_falsif.json), o sea un NÚMERO, mientras que lo que guardamos
+        // por marca (`clase_bienes`) es el texto del encabezado. Solo se elige si el dato
+        // trae el número; si no, NO se inventa una clase -poner una equivocada en una
+        // denuncia jurada es peor que dejarla vacía- y se avisa.
+        var claseTexto = String(d.clase_bienes || "");
+        var mClase = claseTexto.match(/clase\s*(\d{1,2})/i) || claseTexto.match(/(?:^|\D)(\d{1,2})(?:\D|$)/);
+        var claseNiza = mClase ? ("Clase " + mClase[1]) : "";
+        if (!claseNiza) avisos.push("«<b>Clase de bienes o servicios de marca registrada</b>» es un menú de 46 clases " +
+          "y los datos de «" + textoSeguro(marca) + "» no traen el <b>número de clase</b> (solo el texto). Elígela tú, o guarda " +
+          "el número en <b>⚙ Marcas</b> (p. ej. «Clase 36 — Negocios financieros…»).");
+        // OFICINA DE REGISTRO (la agencia: USPTO, IMPI, RPI…). El proyecto guarda el ENLACE
+        // a la base de marcas del país, no el NOMBRE de la oficina, así que no hay dato
+        // veraz que poner: se avisa en vez de inventarlo.
+        avisos.push("«<b>Oficina de registro</b>» (la agencia donde se registró la marca) no la tenemos guardada: " +
+          "escríbela tú si la sabes. Referencia del país: " + textoSeguro(baseMarcasDe(d.pais)));
+        if (!d.registro) avisos.push("«<b>Número de registro de marca</b>» está vacío: no hay ninguno guardado para «" +
+          textoSeguro(marca) + "». Ponlo a mano o guárdalo en <b>⚙ Marcas</b>.");
+        return { url: this.url, manual: this.manual, avisos: avisos, pasos: [
           { tipo: "radio", name: "Type_of_Issue__c", texto: "falsificacion", esperaMs: 1200 },
           { tipo: "radio", suf: true, name: "Where_Displayed__c", texto: "una cuenta de x", esperaMs: 600 },
           { tipo: "fillName", suf: true, name: "Form_Name__c", valor: marca },
@@ -749,11 +1017,25 @@
           { tipo: "fillName", suf: true, name: "DescriptionText", valor: ctx.justif },
           { tipo: "fillName", suf: true, name: "Content_Owner_Name__c", valor: marca },
           { tipo: "fillName", suf: true, name: "trademark-holder-address", valor: d.pais },
-          // Web del titular: perfil OFICIAL de la marca en X con fallback a d.sitio.
-          { tipo: "fillName", suf: true, name: "trademark-holder-website", valor: d.x || d.sitio || "" },
+          // «Sitio web del propietario de la marca»: el SITIO de la marca, no su perfil de X.
+          // Antes iba `d.x || d.sitio`, o sea que con perfil de X guardado se escribía
+          // «https://x.com/…» en la casilla del sitio web. Ahora el @ de X tiene su propio
+          // campo (`trademark-holder-username`), así que aquí va el sitio y el perfil de X
+          // queda solo como respaldo si la marca no tiene sitio guardado.
+          { tipo: "fillName", suf: true, name: "trademark-holder-website", valor: d.sitio || d.x || "" },
           { tipo: "fillName", suf: true, name: "trademark-word", valor: marca },
+          // @usuario de X del propietario de la marca (va el @, no el enlace).
+          { tipo: "fillName", suf: true, name: "trademark-holder-username", valor: usuarioX },
           { tipo: "select", suf: true, name: "trademark-holder-country", texto: d.pais },
-          { tipo: "fillLabel", label: "clase de bienes y servicios de marca comercial|clase de bienes y servicios|clase de los bienes y servicios|bienes y servicios de la marca|clase de la marca|goods and services|class of goods|bienes y/o servicios", valor: (d.clase_bienes || CLASE_BIENES_DEFECTO), opcional: true, tardio: true },
+          // N.º de registro y UBICACIÓN de la marca («El país o jurisdicción donde está
+          // registrada»), que es el mismo dato que la jurisdicción de TikTok: el país.
+          { tipo: "fillName", suf: true, name: "Registration_Number__c", valor: (d.registro || "") },
+          { tipo: "fillName", suf: true, name: "trademark-location", valor: d.pais },
+          // CLASE DE BIENES: es un <select> de 46 clases CON `name`, no una caja. Antes
+          // aquí había un `fillLabel`, que solo mira input/textarea: no hacía NADA y, por
+          // ir `opcional`, tampoco salía en `faltan`. Fallo silencioso, encontrado al
+          // revisar el volcado real. Solo se elige si conocemos el número (ver arriba).
+          { tipo: "select", suf: true, name: "trademark-class", texto: claseNiza, opcional: true, tardio: true },
           { tipo: "check", name: "confirm-1" },
           { tipo: "check", name: "confirm-2" },
           { tipo: "check", name: "confirm-3" },
@@ -775,13 +1057,17 @@
         var perfilTikTok = (d.tiktok || d.sitio || "").trim();
         return { url: this.url, manual: this.manual, autorepetir: true, pasos: [
           // Palabras clave en ESPAÑOL (el form siempre sale en español) + respaldo por posición.
-          { tipo: "dropdown", opcion: "autor&contenido|copyright&contenido|derechos de autor|infraccion de copyright", opcionIndice: 0, esperaMs: 2500 },
+          // `pregunta` ANCLA el menú al suyo: la repetición automática vuelve cada pocos
+          // segundos y sin ancla podría abrir cualquier otro desplegable del formulario.
+          { tipo: "dropdown", pregunta: "que problema tienes|problema tienes|que tipo de problema",
+            opcion: "autor&contenido|copyright&contenido|derechos de autor|infraccion de copyright", opcionIndice: 0, esperaMs: 2500 },
           // "¿Puedes verificar a quién afecta esta infracción?" -> "TENGO AUTORIZACIÓN del
           // propietario del copyright para actuar en su nombre" (es lo que somos: agente
           // autorizado de la marca, no el titular). Las alternativas van EN ORDEN: antes
           // ganaba "propietari&autor", que casaba de rebote porque "autorización" contiene
           // "autor"; ahora la opción correcta se elige a propósito y no por casualidad.
-          { tipo: "dropdown", opcion: "autorizacion&nombre|tengo autorizacion|autorizacion del propietario|actuar en su nombre|represento|agente|propietari&autor|propietari&copyright", opcionIndice: 0, esperaMs: 2000 },
+          { tipo: "dropdown", pregunta: "verificar a quien afecta|a quien afecta|quien afecta esta infraccion",
+            opcion: "autorizacion&nombre|tengo autorizacion|autorizacion del propietario|actuar en su nombre|represento|agente|propietari&autor|propietari&copyright", opcionIndice: 0, esperaMs: 2000 },
           { tipo: "fillLabel", label: "enter your email|verify your email|email address|verifica tu correo|correo electronico|introduce tu correo", valor: d.correo },
           { tipo: "fillLabel", label: "tu nombre completo|nombre completo|full name", valor: marca },
           { tipo: "fillLabel", label: "nombre del titular de los derechos de autor|titular de los derechos de autor|name of the copyright owner|copyright owner", valor: marca },
@@ -796,20 +1082,20 @@
           // y ajena a TikTok). Al marcar ese Origen, TikTok revela UNA caja de URL opcional:
           // "Si está disponible, proporciona la URL al material original con copyright", que se
           // rellena con el PERFIL OFICIAL de la marca (su TikTok; si no lo tiene, su sitio).
-          { tipo: "clickOpcion", texto: "logotipo|logo", esperaMs: 600, vigilar: true },
-          { tipo: "clickOpcion", texto: "fuera de tiktok|no esta en tiktok|outside of tiktok|off tiktok|outside tiktok", esperaMs: 600, vigilar: true },
+          { tipo: "clickOpcion", texto: "logotipo|logo", esperaMs: 600 },
+          { tipo: "clickOpcion", texto: "fuera de tiktok|no esta en tiktok|outside of tiktok|off tiktok|outside tiktok", esperaMs: 600 },
           // URL del material original. Debe ir ANTES de fillUrlsUnaCaja: al quedar NO vacía,
           // fillUrlsUnaCaja la salta (comprueba e.value) y no le mete por error las URLs a
           // denunciar, aunque compartan el placeholder "e.g.https://www.tiktok.com/@...".
           { tipo: "fillLabel", label: "url al material original con copyright|proporciona la url al material original|material original con copyright|url to the original copyrighted material|original copyrighted material",
-            valor: perfilTikTok, reintentos: 8, opcional: true, tardio: true, vigilar: true },
+            valor: perfilTikTok, reintentos: 8, opcional: true, tardio: true },
           // Campo TARDÍO: "Descripción de la obra con copyright" aparece SOLO al marcar el
           // 'Tipo de obra'. Lo llena el VIGILANTE (ver popup.js) en cuanto surge. Se busca
           // también por su texto de ayuda ("Incluye una descripción clara y completa…"), que
           // está pegado a la caja, para no depender de una sola redacción. La justificación ya
           // trae la política infringida y el perfil oficial (skill citar-politica-violada).
           { tipo: "fillLabel", label: "descripcion de la obra con copyright|incluye una descripcion clara y completa|descripcion clara y completa de tu obra|describe la obra con copyright|descripcion de la obra|descripcion de tu obra|description of the copyrighted work|describe your copyrighted work|clear and complete description",
-            valor: ctx.justif, reintentos: 8, opcional: true, tardio: true, vigilar: true },
+            valor: ctx.justif, reintentos: 8, opcional: true, tardio: true },
           { tipo: "fillLabel", label: "firma de forma electronica|firma|signature|electronic signature", valor: marca },
           // Las 3 casillas de "Declaración" (TikTok exige LAS TRES para poder enviar).
           { tipo: "checkVarios", etiquetas: "buena fe|good faith|correcta|exacta|accurate|perjurio|penalty of perjury|reconozco|acknowledge|acepto que toda la informacion|se reenvie|reenvie a la persona|se comparta con la persona|i acknowledge|i agree", max: 3, reintentos: 4 },
@@ -829,40 +1115,89 @@
     tk_marca: {
       red: "TikTok", nombre: "Marca comercial", cat: "marca",
       url: "https://www.tiktok.com/legal/report/Trademark",
-      manual: "Con UN solo clic en Rellenar basta, no vuelvas a pulsarlo. MARCA TÚ las opciones que dependan del contenido (tipo/origen de la marca); si al marcarlas aparece un campo de 'Descripción', la extensión lo RELLENA SOLO. Si TikTok te pide verificar tu correo, hazlo con calma: la extensión sigue marcando y rellenando sola los campos que aparezcan después durante varios minutos, sin volver a pulsar Rellenar (deja abierta la pestaña). Revisa la URL antes de Enviar.",
+      manual: "Con UN solo clic en Rellenar basta: no vuelvas a pulsarlo. La extensión elige «Quiero denunciar una posible infracción de derechos de marca comercial en el contenido generado por un usuario», marca «¿Productos falsificados?»=Sí, tu relación = «Soy el representante, agente o administrador (de carácter no jurídico) del propietario de la marca comercial» y «¿El contenido era de tu cuenta personal de TikTok?»=No, y rellena el resto (nombre, propietario de la marca, dirección, teléfono, correo, jurisdicción, N.º de registro si la marca lo tiene guardado, clase de bienes y servicios, descripción de la infracción, firma, las 3 casillas de la Declaración y las URLs). IMPORTANTE: TikTok pide VERIFICAR TU CORREO antes de enseñar el formulario. Mientras no lo verifiques, en la página solo hay la caja del correo: NINGÚN otro campo existe todavía. Hazlo con calma: la extensión se queda VIGILANDO esta pestaña hasta 30 minutos, sin escribir nada mientras tanto, y en cuanto el formulario aparece lo rellena y lo marca sola, sin que vuelvas a pulsar Rellenar. Deja ESTA pestaña abierta mientras verificas el correo. Si algo falla (se agota la espera, la pestaña sale del formulario o no consigue rellenar nada), la extensión te lo dice en pantalla: no se queda muda, y no guarda comprobante de un formulario vacío. La marca no lleva N.º de registro guardado si esa casilla no aparece rellena: escríbelo tú o guárdalo en «Marcas». Revisa las URLs antes de Enviar.",
       construirPlan: function (ctx) {
         var d = ctx.datos, marca = ctx.marca;
         return { url: this.url, manual: this.manual, autorepetir: true, pasos: [
-          // 0) "¿Qué problema tienes?" SIGUE siendo un MENÚ desplegable (Select): hay que
-          // elegirlo PRIMERO para que aparezcan las preguntas de radio de abajo. NO quitar este
-          // paso: sin él el formulario no avanza ("de aquí no pasa"). Casa por palabras clave
-          // (marca + contenido/infracción) con respaldo por posición (opcionIndice:0).
-          { tipo: "dropdown", opcion: "marca&contenido|marca&infracc|marca&incumplimiento", opcionIndice: 0, esperaMs: 2500 },
-          // Tras elegir el desplegable, TikTok muestra estas preguntas como BOTONES DE OPCIÓN
-          // (radios), NO desplegables. Se marcan con 'radioPregunta' (ver motor.js), anclando
-          // cada radio a SU pregunta: varias preguntas repiten "Sí/No", así que sin anclar se
-          // marcaría el grupo equivocado. Respuestas confirmadas con el usuario (2026-07-24).
+          // 0) "¿Qué problema tienes?" es un MENÚ desplegable (botón que pone "Select"): hay
+          // que elegirlo PRIMERO porque, hasta que no se elige, la página NO tiene ningún otro
+          // campo. NO quitar este paso ni sacarlo de la repetición automática: si el menú se
+          // pierde (recarga, sesión reiniciada) y nadie lo vuelve a elegir, el formulario se
+          // queda EN BLANCO para siempre (ver `soloSiVacio` en motor.js y popup.js).
+          // Las 7 opciones reales (medidas en vivo el 2026-09-09) empiezan TODAS por "Quiero
+          // denunciar una posible infracción de…", así que la nuestra —la 1.ª— se ancla por
+          // "contenido generado" para no llevarse la de "…marca comercial en TikTok Shop" ni
+          // la de "…propiedad intelectual en la publicidad". Respaldo por posición (índice 0).
+          // `pregunta` ANCLA el menú al suyo (mismo motivo que en tk_copy).
+          { tipo: "dropdown", pregunta: "que problema tienes|problema tienes|que tipo de problema",
+            opcion: "marca comercial&contenido generado|marca&contenido generado|marca comercial&usuario|marca&contenido", opcionIndice: 0, esperaMs: 2500 },
+          // ------------------------------------------------------------------------------
+          //  PUERTA DEL CORREO: al elegir la opción, TikTok enseña UNA SOLA caja ("Escribe tu
+          //  dirección de correo electrónico") y NADA más —ni un rótulo, ni un radio, ni una
+          //  casilla— hasta que verificas el correo. Todo lo que va debajo aparece DESPUÉS.
+          // ------------------------------------------------------------------------------
+          { tipo: "fillLabel", label: "verifica tu correo electronico|verifica tu correo|escribe tu direccion de correo electronico|introduce tu correo|enter your email|verify your email", valor: d.correo },
+          // Las tres preguntas son BOTONES DE OPCIÓN (radios), no desplegables. Se marcan por
+          // NAME+VALUE exactos (radioVal), que es lo que de verdad tiene el formulario
+          // (Comprobantes/diag_tk_tk_marca.json), y justo detrás va el MISMO radio buscado por
+          // su pregunta y su texto en español (radioPregunta, `opcional`) como RESPALDO por si
+          // TikTok cambia los `value`. El respaldo es opcional a propósito: cuando el de
+          // arriba ya acertó no debe ensuciar `faltan`, y mientras el formulario no exista un
+          // paso opcional cuenta como "no aparece todavía".
+          // Respuestas confirmadas con el usuario: falsificados = Sí, relación = representante
+          // /agente/administrador, cuenta personal = No.
           // 1) "¿Se trata de un problema relacionado con productos falsificados?" -> Sí
-          { tipo: "radioPregunta", pregunta: "productos falsificados|falsificados|tipo de problema", opcion: "si", esperaMs: 1500 },
-          // 2) "Tu relación con el propietario de la marca comercial" -> representante/agente/administrador
-          { tipo: "radioPregunta", pregunta: "relacion con el propietario|tu relacion con el propietario|derechos de marca comercial", opcion: "representante&agente&administrador|representante, agente o administrador", esperaMs: 1500 },
+          { tipo: "radioVal", name: "extra.cfGoods", value: "1", esperaMs: 1200 },
+          { tipo: "radioPregunta", pregunta: "productos falsificados|falsificados", opcion: "si", opcional: true },
+          // 2) "Tu relación con el propietario de la marca comercial" -> "Soy el representante,
+          //    agente o administrador (de carácter no jurídico) del propietario de la marca".
+          //    AQUÍ EL ORDEN VA AL REVÉS QUE EN LAS OTRAS DOS, a propósito: esta respuesta es
+          //    la DECLARACIÓN DE LEGITIMACIÓN de una denuncia que se firma bajo pena de
+          //    perjurio (con qué derecho denunciamos), y `Comprobantes/diag_tk_tk_marca.json`
+          //    trae el rótulo de los valores 1, 2 y 3, pero el del 6 salió VACÍO: que 6 sea
+          //    "representante, agente o administrador" es una lectura del volcado, no algo
+          //    que el volcado demuestre. Por eso manda el TEXTO en español —que dice lo que
+          //    se está declarando— y el número queda de respaldo por si TikTok cambia la
+          //    redacción. Si algún día se captura ese rótulo, anótalo en el volcado.
+          { tipo: "radioPregunta", pregunta: "relacion con el propietario|tu relacion con el propietario", opcion: "representante&agente&administrador|representante&administrador|representante, agente o administrador", esperaMs: 1200 },
+          { tipo: "radioVal", name: "relationship", value: "6", opcional: true },
           // 3) "¿El contenido denunciado era de tu cuenta personal de TikTok?" -> No
-          { tipo: "radioPregunta", pregunta: "cuenta personal de tiktok|contenido denunciado era de tu cuenta|cuenta personal", opcion: "no", esperaMs: 1500 },
-          { tipo: "fillLabel", label: "enter your email|verify your email|email address|verifica tu correo|correo electronico|introduce tu correo", valor: d.correo },
-          { tipo: "fillLabel", label: "full name|nombre completo|tu nombre completo", valor: marca },
-          { tipo: "fillLabel", label: "trademark owner|owner of the trademark|propietario de marca|propietario de la marca|nombre del titular de la marca", valor: marca },
+          { tipo: "radioVal", name: "personalAccount", value: "0", esperaMs: 1200 },
+          { tipo: "radioPregunta", pregunta: "cuenta personal de tiktok|contenido denunciado era de tu cuenta|cuenta personal", opcion: "no", opcional: true },
+          // Rótulos REALES del formulario (Comprobantes/datos_tk_marca.js), en ESPAÑOL primero
+          // y el inglés al final como alternativa: el formulario siempre sale en español.
+          { tipo: "fillLabel", label: "tu nombre completo|nombre completo|full name", valor: marca },
+          { tipo: "fillLabel", label: "nombre del propietario de marca comercial|nombre del propietario de la marca comercial|propietario de marca comercial|nombre del titular de la marca|trademark owner|owner of the trademark", valor: marca },
           // El teléfono va ANTES que la dirección (mismo motivo que en tk_copy): evita que el
           // país se derrame sobre el campo del teléfono al repetirse el autorrelleno.
           { tipo: "fillLabel", label: "tu numero de telefono|numero de telefono|phone number|telephone number|tu telefono", valor: d.telefono },
-          { tipo: "fillLabel", label: "physical address|direccion fisica|tu direccion fisica", valor: d.pais },
-          { tipo: "fillLabel", label: "your email address|email address|direccion de correo|correo electronico", valor: d.correo },
-          { tipo: "fillLabel", label: "jurisdiction|jurisdiccion|jurisdiccion del registro", valor: d.pais },
-          { tipo: "fillLabel", label: "clase de bienes y servicios de marca comercial|clase de bienes y servicios|clase de los bienes y servicios|bienes y servicios de la marca|clase de la marca|goods and services|class of goods|bienes y/o servicios", valor: (d.clase_bienes || CLASE_BIENES_DEFECTO), opcional: true, tardio: true },
-          { tipo: "fillLabel", label: "describe|description|how you believe|descripcion de la marca|descripcion|como crees", valor: ctx.justif, opcional: true, tardio: true },
-          { tipo: "fillLabel", label: "electronic signature|sign electronically|firma electronica|firma de forma electronica|firma", valor: marca },
-          { tipo: "checkVarios", etiquetas: "buena fe|good faith|correcta|exacta|accurate|perjurio|penalty of perjury|reconozco|acknowledge|acepto que toda la informacion|se reenvie|reenvie a la persona|se comparta con la persona|i acknowledge|i agree", max: 3 },
+          { tipo: "fillLabel", label: "tu direccion fisica|direccion fisica|physical address", valor: d.pais },
+          { tipo: "fillLabel", label: "tu direccion de correo electronico|direccion de correo electronico|direccion de correo|your email address|email address", valor: d.correo },
+          // "Jurisdicción del registro" y "Número de registro" son DOS campos distintos que
+          // comparten la palabra "registro": cada uno se ancla con su rótulo COMPLETO, nunca
+          // con "registro" a secas, o se roban el relleno entre ellos.
+          { tipo: "fillLabel", label: "jurisdiccion del registro|jurisdiccion de registro|jurisdiccion|jurisdiction of registration|jurisdiction", valor: d.pais, reintentos: 8, opcional: true, tardio: true },
+          // N.º DE REGISTRO de la marca comercial: el formulario lo pide y hasta ahora el plan
+          // NO lo rellenaba (quedaba vacío sin avisar). Sale de `registro` de la marca (panel
+          // "Marcas"); hoy está vacío en todas, y con el dato vacío fillLabel no escribe nada
+          // ni lo apunta en `faltan` -no se inventa un número de registro-.
+          { tipo: "fillLabel", label: "numero de registro de la marca comercial|numero de registro|registration number|trademark registration number", valor: (d.registro || ""), reintentos: 8, opcional: true, tardio: true },
+          { tipo: "fillLabel", label: "clase de bienes y servicios de marca comercial|clase de bienes y servicios|clase de los bienes y servicios|bienes y servicios de la marca|clase de la marca|goods and services|class of goods|bienes y/o servicios", valor: (d.clase_bienes || CLASE_BIENES_DEFECTO), reintentos: 8, opcional: true, tardio: true },
+          // DESCRIPCIÓN: el rótulo real es larguísimo ("Descripción de cómo crees que se ha
+          // infringido el contenido de la marca comercial"). NO vale "descripcion" a secas:
+          // casaría con cualquier otro texto de ayuda del formulario y le robaría el relleno
+          // al campo que toca. La justificación ya trae la política infringida y el perfil
+          // oficial (skill citar-politica-violada).
+          { tipo: "fillLabel", label: "descripcion de como crees que se ha infringido el contenido de la marca comercial|descripcion de como crees que se ha infringido|como crees que se ha infringido|se ha infringido el contenido de la marca comercial|description of how you believe|how you believe the trademark", valor: ctx.justif, reintentos: 8, opcional: true, tardio: true },
+          { tipo: "fillLabel", label: "firma de forma electronica|firma electronica|firma|electronic signature|sign electronically", valor: marca },
+          // Las 3 casillas de "Declaración" (TikTok exige LAS TRES para poder enviar). No
+          // tienen `name` ni `id` (diag_tk_tk_marca.json), así que van por su texto. Con
+          // `reintentos` porque la sección se pinta con retraso, igual que en tk_copy.
+          // OJO: en este formulario NO hay casilla de reincidencia ("evita que en el futuro…"),
+          // así que aquí no se pone ese paso (en el volcado real solo hay 3 casillas).
+          { tipo: "checkVarios", etiquetas: "buena fe|good faith|correcta|exacta|accurate|perjurio|penalty of perjury|reconozco|acknowledge|acepto que toda la informacion|se reenvie|reenvie a la persona|se comparta con la persona|i acknowledge|i agree", max: 3, reintentos: 4 },
           { tipo: "clickBoton", texto: "siguiente|next|continuar|continue", esperaMs: 1500, opcional: true },
-          { tipo: "fillUrlsUnaCaja", urls: (ctx.urls || []), label: "introduce la url del contenido que quieres denunciar|introduce la url del contenido|url del contenido que quieres denunciar|url of the content you want to report|enter the url of the content", placeholder: "tiktok.com/@|e.g.https|e.g. https" }
+          { tipo: "fillUrlsUnaCaja", urls: (ctx.urls || []), label: "introduce la url del contenido que quieres denunciar|introduce la url del contenido|url del contenido que quieres denunciar|url of the content you want to report|enter the url of the content", placeholder: "tiktok.com/@|e.g.https|e.g. https", reintentos: 8 }
         ] };
       }
     },

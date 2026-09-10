@@ -207,6 +207,22 @@ function leer_registro() {
     }));
 }
 
+// ----------------------------------------------------------------------------
+//  DENUNCIAS PROVISIONALES: existen en la clave, pero NO son denuncias todavía.
+//  El popup da de alta la fila ANTES de rellenar (el comprobante necesita a qué
+//  pegarse) y la marca `provisional: true`; deja de serlo cuando el usuario
+//  confirma en el popup que el formulario se rellenó bien. Mientras tanto no
+//  puede salir aquí: ensuciaría la tabla, los contadores, las estadísticas y las
+//  exportaciones con filas vacías —que es justo lo que se quería evitar—.
+//
+//  OJO: se filtra SOLO lo que va a `DENUNCIAS` (la copia para PINTAR). Los
+//  guardados siguen trabajando sobre la lista CRUDA que devuelve leer_registro(),
+//  así que una provisional nunca se pierde por escribir desde esta página.
+// ----------------------------------------------------------------------------
+function sin_provisionales(lista) {
+  return (Array.isArray(lista) ? lista : []).filter((d) => !(d && d.provisional === true));
+}
+
 // Escritura de la clave completa. SIEMPRE revisa chrome.runtime.lastError: si la
 // escritura falla (cuota llena, o el contexto de la extensión quedó inválido
 // tras una recarga) la promesa se RECHAZA, para no confirmar algo que no se
@@ -292,7 +308,9 @@ async function aplicar_cambio_en_registro(operacion) {
   }
 
   await escribir_registro_en_storage(lista);
-  DENUNCIAS = lista;   // la memoria queda EXACTAMENTE igual que lo guardado
+  // La memoria queda igual que lo guardado SALVO las provisionales, que no se
+  // pintan. Se puede: todo guardado vuelve a leer la lista cruda del storage.
+  DENUNCIAS = sin_provisionales(lista);
   return resultado;
 }
 
@@ -1402,7 +1420,7 @@ async function inicializar_registro() {
 
   // Las denuncias se leen ANTES que los selects de plataforma: la lista de
   // plataformas incluye las que ya aparecen en los registros guardados.
-  DENUNCIAS = await leer_registro();
+  DENUNCIAS = sin_provisionales(await leer_registro());
   poblar_selects_de_plataforma(await obtener_plataformas_registro());
   refrescar_vista();
 
@@ -1499,7 +1517,7 @@ async function inicializar_registro() {
       // termine para no borrarle lo que teclea.
       if (cambios[CLAVE_REGISTRO]) {
         const nueva = cambios[CLAVE_REGISTRO].newValue;
-        DENUNCIAS = Array.isArray(nueva) ? nueva : [];
+        DENUNCIAS = sin_provisionales(nueva);
         refrescar_contadores();
         renderizar_menu_de_fechas();   // pueden aparecer días nuevos
         if (hay_edicion_en_curso()) repintado_pendiente = true;
