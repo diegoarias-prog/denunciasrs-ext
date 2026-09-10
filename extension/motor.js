@@ -69,8 +69,27 @@ async function APLICAR(pasos, opciones) {
     if (!t.trim()) t = (el.placeholder || el.name || el.id || el.tagName || "?");
     return (t + "").replace(/\s+/g, " ").trim().slice(0, 90);
   }
+  // ACCIONES QUE NO SON "RELLENAR". Salen en el informe (son útiles para diagnosticar)
+  // pero NO cuentan en `hechos`, que significa "campos que de VERDAD se tocaron".
+  // PULSAR UN BOTÓN NO ES ESCRIBIR, y `hechos` existe justo para excluirlo: es la única
+  // guarda de "NUNCA UN COMPROBANTE EN BLANCO" del service worker, y el buscador de
+  // `clickBoton` acepta cualquier enlace o botón visible cuyo texto contenga "continuar",
+  // así que un banner con un «Continuar» bastaría para dar por rellenada una página vacía
+  // y guardar en el Registro la foto de un formulario en blanco. También cortaría antes de
+  // tiempo el bucle `insistirRelleno` de Meta, cuya condición de salida es `hechos > 0`.
+  // "respetada la eleccion del usuario" es el segundo caso, y por definicion: esa rama
+  // existe JUSTAMENTE para no tocar la pagina -el usuario ya eligio otra cosa-. La llaman
+  // tres caminos (marcarRadioEl, el clic real y clickOpcion), asi que podia inflar `hechos`
+  // en radios, casillas y opciones. Ojo: cuando lo respetado es una CASILLA, el paso SIGUE
+  // yendo a `faltan` ("respetada:...") para que el formulario no se de por completo; eso
+  // no se toca aqui, aqui solo se deja de contar como campo rellenado.
+  const ACCIONES_QUE_NO_RELLENAN = ["pulso", "respetada la eleccion del usuario"];
+  let tocados = 0;   // lo que cuenta en `hechos` (ver el aviso de arriba)
   function anotar(accion, el, extra) {
-    try { registro.push({ accion: accion, rotulo: rotuloDe(el), detalle: extra || "" }); } catch (e) {}
+    try {
+      registro.push({ accion: accion, rotulo: rotuloDe(el), detalle: extra || "" });
+      if (ACCIONES_QUE_NO_RELLENAN.indexOf(accion) < 0) tocados++;
+    } catch (e) {}
   }
   function setNative(el, v) {
     const proto = el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
@@ -118,7 +137,18 @@ async function APLICAR(pasos, opciones) {
     if (!alts.length) return false;
     const textos = [];
     for (let i = 0; i < s.options.length; i++) textos.push(norm(s.options[i].text).replace(/\s+/g, " ").trim());
-    const elegir = (i) => { s.selectedIndex = i; s.dispatchEvent(new Event("change", { bubbles: true })); return true; };
+    // Si YA está puesta la opción que queremos, no se vuelve a elegir: disparar `change`
+    // otra vez hace que React repinte la sección (y en X eso borra lo ya escrito), y
+    // además contaría como trabajo hecho algo que no se ha tocado.
+    const elegir = (i) => {
+      if (s.selectedIndex === i) return true;
+      s.selectedIndex = i;
+      s.dispatchEvent(new Event("change", { bubbles: true }));
+      // `anotar` es lo que cuenta en `hechos`, y `hechos` decide si el bucle guarda
+      // comprobante y si la espera del paso se paga. Un menú elegido ES trabajo hecho.
+      anotar("eligio", s, (s.options[i].text || "").replace(/\s+/g, " ").trim().slice(0, 70));
+      return true;
+    };
     for (const t of alts) {
       let i = textos.indexOf(t);                                // exacto
       if (i < 0) i = textos.findIndex((x) => x.indexOf(t) === 0); // empieza por
@@ -313,6 +343,9 @@ async function APLICAR(pasos, opciones) {
   // "Siguiente", que ya no existe en el formulario de una sola página) NO bloquean ni
   // se reportan si no aparecen.
   let pendientes = pasos.slice();
+  // Cuántas veces ha vuelto a la cola cada paso TARDÍO (ver el tope, más abajo).
+  const reencoladosTardios = new Map();
+  const TOPE_REENCOLADO_TARDIO = 2;   // se intenta en las pasadas 1.ª, 2.ª y 3.ª
   // Informe por PASO (el último intento de cada uno; se sobrescribe en cada pasada).
   const informePasos = new Map();
   const describirPaso = (p) => {
@@ -332,6 +365,7 @@ async function APLICAR(pasos, opciones) {
     for (const p of pendientes) {
     const antesFaltan = faltan.length;
     const antesOk = ok, antesReg = registro.length;
+    let yaEspero = false;   // el paso ya se espero a si mismo (ver clickBoton con `avanza`)
     // -----------------------------------------------------------------------
     //  GUARDA DE VARIANTE DE FORMULARIO (siHay / siNoHay)
     //  Una misma denuncia puede tener DOS formularios distintos según lo que
@@ -358,7 +392,6 @@ async function APLICAR(pasos, opciones) {
       if (p.tipo === "select" || p.tipo === "selectPais") {
         const texto = p.tipo === "selectPais" ? p.valor : p.texto;
         if (texto != null && texto !== "") { if (setSelect(p.name, texto, p.suf)) ok++; else faltan.push(p.name); }
-        if (p.esperaMs) await dur(p.esperaMs);
       } else if (p.tipo === "radio") {
         const sel = 'input[type=radio][name' + (p.suf ? "$" : "") + '="' + (p.name + "").replace(/"/g, '\\"') + '"]';
         const partes = p.texto ? norm(p.texto).split("|").filter(Boolean) : null;
@@ -375,27 +408,46 @@ async function APLICAR(pasos, opciones) {
           }) || null;
         };
         let marcado = false, destinoFinal = null;
-        for (let it = 0; it < 4 && !marcado; it++) {
+        // Misma guarda: 4 intentos de 300 ms contra una pagina sin radios son 1,2 s tirados.
+        const vueltasR = document.querySelector('input[type=radio]') ? 4 : 1;
+        for (let it = 0; it < vueltasR && !marcado; it++) {
           const destino = buscar(); // re-buscar fresco cada intento (React reemplaza el nodo)
           if (destino) { destinoFinal = destino; marcado = marcarRadioEl(destino); }
-          if (!marcado) await dur(300);
+          if (!marcado && it + 1 < vueltasR) await dur(300);
         }
+        // NO SE OMITE EL CLIC REAL AUNQUE EL RADIO YA APAREZCA MARCADO. Se intentó
+        // (ahorraba ~1 s por vuelta) y es un error: `checked` en el DOM NO prueba que la
+        // aplicación lo haya aceptado. `marcarRadioEl` lo pone con el setter nativo y
+        // devuelve true aunque React no se entere -que es la razón misma de que exista el
+        // clic real por depurador-. Y el service worker cuenta con que cada pasada le
+        // vuelva a pedir estos clics: si la pestaña se fue, PAUSA y los repite al volver
+        // (ver background.js). Omitirlos deja un radio marcado solo sintéticamente para
+        // siempre, con el formulario PARECIENDO relleno y enviándose sin esa respuesta,
+        // en una denuncia que se firma bajo pena de perjurio.
         if (destinoFinal) { marcarParaClicReal(destinoFinal); ok++; } else faltan.push(p.name);
-        if (p.esperaMs) await dur(p.esperaMs);
       } else if (p.tipo === "radioVal") {
         // Marca radio por NAME+VALUE exactos, como autorrelleno.py (clic en label,
         // dispatch change, reintentos porque React lo revierte).
         let okR = false, targetFinal = null;
-        for (let intento = 0; intento < 4 && !okR; intento++) {
+        const vueltasRV = document.querySelector('input[type=radio]') ? 4 : 1;
+        for (let intento = 0; intento < vueltasRV && !okR; intento++) {
           const els = document.querySelectorAll('input[name="' + (p.name + "").replace(/"/g, '\\"') + '"]');
           let target = null;
           for (let i = 0; i < els.length; i++) { if (els[i].value === p.value) { target = els[i]; break; } }
           if (target) targetFinal = target;
           okR = marcarRadioEl(target);
-          if (!okR) await dur(300);
+          if (!okR && intento + 1 < vueltasRV) await dur(300);
         }
+        // NO SE OMITE EL CLIC REAL AUNQUE EL RADIO YA APAREZCA MARCADO. Se intentó
+        // (ahorraba ~1 s por vuelta) y es un error: `checked` en el DOM NO prueba que la
+        // aplicación lo haya aceptado. `marcarRadioEl` lo pone con el setter nativo y
+        // devuelve true aunque React no se entere -que es la razón misma de que exista el
+        // clic real por depurador-. Y el service worker cuenta con que cada pasada le
+        // vuelva a pedir estos clics: si la pestaña se fue, PAUSA y los repite al volver
+        // (ver background.js). Omitirlos deja un radio marcado solo sintéticamente para
+        // siempre, con el formulario PARECIENDO relleno y enviándose sin esa respuesta,
+        // en una denuncia que se firma bajo pena de perjurio.
         if (targetFinal) { marcarParaClicReal(targetFinal); ok++; } else faltan.push("radioVal:" + p.name);
-        if (p.esperaMs) await dur(p.esperaMs);
       } else if (p.tipo === "radioPregunta") {
         // Marca un RADIO identificándolo por (a) la PREGUNTA a la que pertenece y (b) el
         // TEXTO de la opción. Necesario para TikTok, que ya NO usa <select>/menús sino radios
@@ -457,7 +509,8 @@ async function APLICAR(pasos, opciones) {
         };
         const visible = (r) => { const rr = r.getBoundingClientRect(); return !(rr.width < 1 && rr.height < 1); };
         let okRP = false, destinoRP = null;
-        for (let it = 0; it < 4 && !okRP; it++) {
+        const vueltasRP = document.querySelector('input[type=radio],[role=radio]') ? 4 : 1;
+        for (let it = 0; it < vueltasRP && !okRP; it++) {
           const radios = Array.prototype.slice.call(document.querySelectorAll('input[type=radio],[role=radio]'));
           let cand = radios.find((r) => {
             if (!visible(r)) return false; // oculto de verdad
@@ -473,10 +526,18 @@ async function APLICAR(pasos, opciones) {
             if (conBloque.length) cand = conBloque[0].r;
           }
           if (cand) { destinoRP = cand; okRP = marcarRadioEl(cand); }
-          if (!okRP) await dur(300);
+          if (!okRP && it + 1 < vueltasRP) await dur(300);
         }
+        // NO SE OMITE EL CLIC REAL AUNQUE EL RADIO YA APAREZCA MARCADO. Se intentó
+        // (ahorraba ~1 s por vuelta) y es un error: `checked` en el DOM NO prueba que la
+        // aplicación lo haya aceptado. `marcarRadioEl` lo pone con el setter nativo y
+        // devuelve true aunque React no se entere -que es la razón misma de que exista el
+        // clic real por depurador-. Y el service worker cuenta con que cada pasada le
+        // vuelva a pedir estos clics: si la pestaña se fue, PAUSA y los repite al volver
+        // (ver background.js). Omitirlos deja un radio marcado solo sintéticamente para
+        // siempre, con el formulario PARECIENDO relleno y enviándose sin esa respuesta,
+        // en una denuncia que se firma bajo pena de perjurio.
         if (destinoRP) { marcarParaClicReal(destinoRP); ok++; } else faltan.push("radioPregunta:" + (p.pregunta || p.opcion));
-        if (p.esperaMs) await dur(p.esperaMs);
       } else if (p.tipo === "check") {
         const cbs = Array.prototype.slice.call(
           document.querySelectorAll('input[type=checkbox][name' + (p.suf ? "$" : "") + '="' + (p.name + "").replace(/"/g, '\\"') + '"]'));
@@ -492,7 +553,15 @@ async function APLICAR(pasos, opciones) {
             return partes.some((t) => (v && v.indexOf(t) >= 0) || (l && l.indexOf(t) >= 0));
           });
         }
-        if (el) { marcarRadioEl(el); marcarParaClicReal(el); ok++; } else faltan.push(p.name);
+        // UNA CASILLA YA MARCADA NO SE VUELVE A CLICAR. Al revés que un radio, una casilla
+        // ALTERNA: un segundo clic real la DESMARCA. `insistirRelleno` hace dos pasadas
+        // seguidas y solo la segunda dispara los clics, así que la primera la dejaba
+        // `checked` sintético y la segunda pedía el clic que la apagaba. Es la misma guarda
+        // que ya tienen `checkVarios` y `checkLabel`, y este proyecto ya se llevó ese susto
+        // con las casillas de la Declaración de TikTok.
+        if (el && el.checked) ok++;
+        else if (el) { marcarRadioEl(el); marcarParaClicReal(el); ok++; }
+        else faltan.push(p.name);
       } else if (p.tipo === "fillName") {
         if (p.valor != null && p.valor !== "") {
           const el = document.querySelector('[name' + (p.suf ? "$" : "") + '="' + (p.name + "").replace(/"/g, '\\"') + '"]');
@@ -640,7 +709,14 @@ async function APLICAR(pasos, opciones) {
             // Mensaje entendible: dice QUÉ se buscó y que no está en la lista.
             faltan.push(p.desc ? (p.desc + " «" + p.opcion + "» no está en la lista")
                                : ("opcion:" + (p.opcion || p.opcionIndice)));
+            // Se CIERRA el menú que abrimos, y eso SÍ toca la página: hay que darle tiempo
+            // a cerrarse antes de que el paso siguiente empiece a buscar, o se pone a mirar
+            // una pantalla con el desplegable a medio recoger. No se `anotar()`: abrir y
+            // cerrar un menú no es rellenar nada, y `hechos` no puede contarlo; por eso la
+            // espera se hace aquí en vez de dejarla a la espera central.
             try { document.body.click(); } catch (e) {}
+            yaEspero = true;
+            await dur(p.esperaMs || 400);
           }
         } else if (saltar) {
           // Nada que hacer: su menú ya trae la opción buscada, o todavía no está en
@@ -653,7 +729,6 @@ async function APLICAR(pasos, opciones) {
         // Al saltar no se espera: la espera existe para dar tiempo a que TikTok pinte lo
         // que revela el menú, y aquí no se ha tocado nada. Sin esto, cada vuelta del bucle
         // se llevaba 2,5 s por desplegable sin motivo.
-        if (p.esperaMs && !saltar) await dur(p.esperaMs);
       } else if (p.tipo === "fillLabel") {
         // Rellena el primer campo VISIBLE y vacío cuyo texto cercano contenga la etiqueta.
         // REINTENTA unos segundos: TikTok (y otros SPA React) pintan la sección un
@@ -835,10 +910,39 @@ async function APLICAR(pasos, opciones) {
           // revés se corría el riesgo de dar por hecho un campo que no se había tocado y
           // dejar el formulario entero en blanco.
           let hit = null;
-          for (let intentoFL = 0; intentoFL < (p.reintentos || 1) && !hit && !yaLleno; intentoFL++) {
+          // NO AGOTAR LOS REINTENTOS CONTRA UNA PÁGINA QUE NO TIENE NI UNO. Los reintentos
+          // existen porque la web pinta la sección con retraso, no porque la sección no
+          // exista: si en toda la página no hay ni un campo de texto, insistir solo gasta
+          // segundos. Y no se pierde nada, porque el paso vuelve a la cola de reintentos.
+          const hayAlgunCampo = Array.prototype.slice.call(document.querySelectorAll(CAMPOS_SEL))
+            .some((e) => { const r = e.getBoundingClientRect(); return r.width >= 2 && r.height >= 2; });
+          // Y un paso TARDÍO tampoco los agota mientras NO QUEDE NI UNA CAJA VACÍA en la
+          // página. Ésta es la señal de verdad, y sustituye a una que no lo era: antes esto
+          // miraba `pasada === 0`, que para un `tardio` valía SIEMPRE 0 -no se re-encolaba
+          // nunca-, así que la rama de "a partir de la 2.ª pasada" era código muerto y el
+          // paso hacía UN intento y se rendía. En TikTok lo tapaba el bucle; en YouTube
+          // Marca, que no tiene bucle, la descripción de la infracción se quedaba vacía.
+          // POR QUÉ "no queda ni una caja vacía" es la señal buena: si la sección de este
+          // campo aún no se ha pintado, el formulario que la traerá tiene por fuerza otras
+          // cajas sin rellenar. Si TODO lo demás está lleno, aquí no va a aparecer nada en
+          // los próximos 3 segundos. Es justo lo que pasa en la pantalla de verificar el
+          // correo de TikTok: la única caja es la del correo y, en cuanto se rellena, no
+          // queda ninguna vacía -de ahí los 3,2 s por campo peleándose con una sección que
+          // todavía no existe-.
+          const hayCajaVacia = Array.prototype.slice.call(document.querySelectorAll(CAMPOS_SEL))
+            .some((e) => {
+              if (e.value || e.disabled || e.readOnly) return false;
+              const r = e.getBoundingClientRect();
+              return r.width >= 2 && r.height >= 2;
+            });
+          const vueltasFL = !hayAlgunCampo ? 1
+            : (p.tardio && !hayCajaVacia) ? 1
+            : (p.reintentos || 1);
+          for (let intentoFL = 0; intentoFL < vueltasFL && !hit && !yaLleno; intentoFL++) {
             hit = buscarCampo();
             if (!hit && !yaLleno) hit = buscarPorRotulo();
-            if (!hit && !yaLleno) await dur(400);
+            // La espera va ENTRE intentos: tras el ultimo no hay nada que esperar.
+            if (!hit && !yaLleno && intentoFL + 1 < vueltasFL) await dur(400);
           }
           if (hit) { setNative(hit, p.valor); ok++; }
           else if (yaLleno) { ok++; } // ya estaba relleno (correo verificado, etc.)
@@ -890,9 +994,14 @@ async function APLICAR(pasos, opciones) {
             return candidatoPh || null;
           };
           let hit = null;
-          for (let itUC = 0; itUC < (p.reintentos || 1) && !hit; itUC++) {
+          // Misma guarda que en fillLabel: sin ni una caja en pantalla, no hay que insistir.
+          const hayCajaUC = Array.prototype.slice.call(
+            document.querySelectorAll("textarea, input[type=text], input:not([type])"))
+            .some((e) => { const r = e.getBoundingClientRect(); return r.width > 2 && r.height > 2; });
+          const vueltasUC = hayCajaUC ? (p.reintentos || 1) : 1;
+          for (let itUC = 0; itUC < vueltasUC && !hit; itUC++) {
             hit = buscarCaja();
-            if (!hit) await dur(400);
+            if (!hit && itUC + 1 < vueltasUC) await dur(400);
           }
           if (hit) { if (hit.value !== texto) setNative(hit, texto); ok++; } else faltan.push("urls_caja_unica");
         }
@@ -921,15 +1030,18 @@ async function APLICAR(pasos, opciones) {
           let done = false;
           if (t) for (let i = 0; i < hit.options.length; i++) {
             if (norm(hit.options[i].text).indexOf(t) >= 0) {
-              hit.selectedIndex = i;
-              hit.dispatchEvent(new Event("input", { bubbles: true }));
-              hit.dispatchEvent(new Event("change", { bubbles: true }));
+              // Ya puesta: ni se toca ni se anota (ver setSelect).
+              if (hit.selectedIndex !== i) {
+                hit.selectedIndex = i;
+                hit.dispatchEvent(new Event("input", { bubbles: true }));
+                hit.dispatchEvent(new Event("change", { bubbles: true }));
+                anotar("eligio", hit, (hit.options[i].text || "").replace(/\s+/g, " ").trim().slice(0, 70));
+              }
               done = true; break;
             }
           }
           if (done) ok++; else faltan.push("opcion:" + p.opcion);
         } else faltan.push("selectLabel:" + p.label);
-        if (p.esperaMs) await dur(p.esperaMs);
       } else if (p.tipo === "elegirEnMenuPorRotulo") {
         // ============================================================================
         //  <select> NATIVO sin `name`, sin `id` y sin <label for>: el ÚNICO ancla que
@@ -1067,7 +1179,6 @@ async function APLICAR(pasos, opciones) {
             }
           }
         }
-        if (p.esperaMs) await dur(p.esperaMs);
       } else if (p.tipo === "clickOpcion") {
         // Hace clic en la OPCIÓN VISIBLE cuyo texto coincide (como un humano). Útil
         // para casillas/radios con widget no estándar (TikTok). Reintenta por React.
@@ -1103,7 +1214,6 @@ async function APLICAR(pasos, opciones) {
           if (!okC) await dur(300);
         }
         if (okC) ok++; else faltan.push("opcion:" + p.texto);
-        if (p.esperaMs) await dur(p.esperaMs);
       } else if (p.tipo === "checkVarios") {
         // Marca TODAS las casillas cuyo texto coincida con alguna etiqueta (p.ej. las
         // 3 de "Declaración" de TikTok), hasta 'max'. Las deja para clic real.
@@ -1129,9 +1239,11 @@ async function APLICAR(pasos, opciones) {
           return n;
         };
         let n = 0;
-        for (let intentoCV = 0; intentoCV < (p.reintentos || 1) && n === 0; intentoCV++) {
+        // Misma guarda: si no hay ni una casilla en la pagina, reintentar no la crea.
+        const vueltasCV = document.querySelector('input[type=checkbox]') ? (p.reintentos || 1) : 1;
+        for (let intentoCV = 0; intentoCV < vueltasCV && n === 0; intentoCV++) {
           n = marcarCasillas();
-          if (n === 0) await dur(400);
+          if (n === 0 && intentoCV + 1 < vueltasCV) await dur(400);
         }
         if (n === 0) faltan.push("checkVarios:" + p.etiquetas);
       } else if (p.tipo === "checkLabel") {
@@ -1172,12 +1284,17 @@ async function APLICAR(pasos, opciones) {
           if (!btn) { ok++; }                       // ya no hay "Siguiente" => ya avanzamos
           else {
             btn.click();
+            anotar("pulso", btn, (btn.innerText || btn.value || "").replace(/\s+/g, " ").trim().slice(0, 40));
+            yaEspero = true;   // esta rama espera aqui; que la espera central no la repita
             await dur(p.esperaMs || 2000);
             const sigue = btns.some((b) => { const r = b.getBoundingClientRect(); return b.isConnected && r.width > 1 && r.height > 1 && kws.some((kw) => norm(b.innerText || "").indexOf(kw) >= 0); });
             if (sigue) faltan.push("boton:" + p.texto); else ok++;
           }
-        } else if (btn) { btn.click(); ok++; } else faltan.push("boton:" + p.texto);
-        if (p.esperaMs && !p.avanza) await dur(p.esperaMs);
+        } else if (btn) {
+          btn.click();
+          anotar("pulso", btn, (btn.innerText || btn.value || "").replace(/\s+/g, " ").trim().slice(0, 40));
+          ok++;
+        } else faltan.push("boton:" + p.texto);
       } else if (p.tipo === "fillUrlList") {
         // Autollena las cajas "Enlace 1..30" de Meta (FB/IG) con la lista de URLs del
         // Excel. Si hay más URLs que cajas y existe el checkbox "Tengo enlaces
@@ -1317,11 +1434,41 @@ async function APLICAR(pasos, opciones) {
         if (urls.length > urlInputs.length) faltan.push("difam_urls:" + puestasU + "/" + urls.length);
       }
     } catch (e) { faltan.push((p.name || p.css || "?") + ": " + e.message); }
+      // ==========================================================================
+      //  LA ESPERA SOLO SE PAGA SI EL PASO TOCO LA PAGINA
+      //  `esperaMs` esta para dar tiempo a que la web pinte lo que revela la accion
+      //  (elegir un menu, marcar un radio, pulsar Siguiente). Si no hubo accion, no
+      //  hay nada que esperar. Antes se pagaba SIEMPRE: en TikTok Marca comercial eran
+      //  7,6 s por vuelta del bucle sin hacer nada -medido- y 35 s en la pantalla de
+      //  verificar el correo, donde no existe ni un campo.
+      //  Se mide con `registro` (lo que cuenta `anotar`), NO con `ok`: hay pasos que
+      //  suman `ok` sin tocar nada -un menu que ya estaba puesto, un boton "Siguiente"
+      //  que no existe, un campo que ya venia relleno-, y esos no deben costar tiempo.
+      // ==========================================================================
+      if (p.esperaMs && !yaEspero && registro.length > antesReg) await dur(p.esperaMs);
       let fallo = faltan.length > antesFaltan;
       if (fallo) {
         // Pasos opcionales (p.ej. botón "Siguiente" inexistente en el form de una
         // página, o campos "tardíos" que llena el vigilante): ni bloquean ni se reportan.
         if (p.opcional || p.tardio) faltan.length = antesFaltan;
+        // UN PASO `tardio` SÍ VUELVE A LA COLA. No ensucia `faltan` (por eso está arriba),
+        // pero tiene que reintentarse: `tardio` significa "esto aparece más adelante", y si
+        // no se re-encola no hay ningún "más adelante" -se probaba UNA vez y se abandonaba-.
+        // En los formularios con bucle (TikTok) lo tapaba el service worker, que vuelve cada
+        // pocos segundos; en los que NO tienen bucle (YouTube Marca) la única pasada era la
+        // única oportunidad, y la descripción de la infracción se quedaba vacía.
+        if (p.opcional && !p.tardio) { /* un botón que no existe no se reintenta */ }
+        else if (p.tardio) {
+          // PERO CON TOPE. Insistir mientras tenga sentido, rendirse cuando no lo tenga:
+          // hay tardíos que NO SIEMPRE EXISTEN (la «clase de bienes y servicios» de Meta,
+          // los 8 de YouTube Marca), y perseguirlos hasta el tope de 16 s del bucle de
+          // pasadas convertía el clic de «Rellenar» en una espera de 16 s. MEDIDO: un plan
+          // con un tardío que no aparece pasaba de 2.400 ms a 16.100. Con el tope se
+          // intenta en tres pasadas -sobra para lo que tarda una web en pintar su sección-
+          // y después se deja estar, que para eso el paso no bloquea ni sale en `faltan`.
+          const veces = (reencoladosTardios.get(p) || 0) + 1;
+          if (veces <= TOPE_REENCOLADO_TARDIO) { reencoladosTardios.set(p, veces); reintentar.push(p); }
+        }
         else reintentar.push(p); // no se completó: reintentar en la próxima pasada
       }
       // Anotación del paso para el INFORME (se queda el último intento de cada paso).
@@ -1486,13 +1633,15 @@ async function APLICAR(pasos, opciones) {
   }
   return {
     ok: ok, faltan: faltan, clicsReales: clicsReales,
-    // `hechos` = campos que de VERDAD se tocaron (el registro solo crece cuando se
-    // escribió, marcó o eligió algo; un paso que no toca la página no anota nada).
-    // Hace falta aparte de `ok` porque `ok` también cuenta pasos que no escriben: p. ej.
-    // el `clickBoton` con `avanza:true` suma aunque el botón "Siguiente" no exista (caso
-    // "formulario de una sola página"), así que una página SIN formulario devuelve ok=1.
-    // Quien quiera saber si no se reconoció NADA debe mirar `hechos`, no `ok`.
-    hechos: registro.length,
+    // `hechos` = campos que de VERDAD se rellenaron: lo que se escribió, marcó o eligió.
+    // NO cuenta pulsar botones (ver ACCIONES_QUE_NO_RELLENAN), y por eso NO es
+    // `registro.length`: el registro sí guarda las pulsaciones, porque en el informe
+    // sirven y porque son lo que revela la pantalla siguiente (de ahí que sí paguen su
+    // `esperaMs`). Hace falta aparte de `ok` porque `ok` también cuenta pasos que no
+    // escriben: p. ej. el `clickBoton` con `avanza:true` suma aunque el botón "Siguiente"
+    // no exista (caso "formulario de una sola página"), así que una página SIN formulario
+    // devuelve ok=1. Quien quiera saber si no se rellenó NADA debe mirar `hechos`.
+    hechos: tocados,
     informe: { pasos: Array.from(informePasos.values()), inventario: inventario }
   };
 }

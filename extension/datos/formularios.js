@@ -1209,7 +1209,10 @@
           // así que aquí no se pone ese paso (en el volcado real solo hay 3 casillas).
           { tipo: "checkVarios", etiquetas: "buena fe|good faith|correcta|exacta|accurate|perjurio|penalty of perjury|reconozco|acknowledge|acepto que toda la informacion|se reenvie|reenvie a la persona|se comparta con la persona|i acknowledge|i agree", max: 3, reintentos: 4 },
           { tipo: "clickBoton", texto: "siguiente|next|continuar|continue", esperaMs: 1500, opcional: true },
-          { tipo: "fillUrlsUnaCaja", urls: (ctx.urls || []), label: "introduce la url del contenido que quieres denunciar|introduce la url del contenido|url del contenido que quieres denunciar|url of the content you want to report|enter the url of the content", placeholder: "tiktok.com/@|e.g.https|e.g. https", reintentos: 8 }
+          { tipo: "fillUrlsUnaCaja", urls: (ctx.urls || []), label: "introduce la url del contenido que quieres denunciar|introduce la url del contenido|url del contenido que quieres denunciar|url of the content you want to report|enter the url of the content", placeholder: "tiktok.com/@|e.g.https|e.g. https", reintentos: 4 }   // 4 y no 8: la caja
+            // aparece con el resto del formulario, y si aun no esta vuelven el motor (varias
+            // pasadas) y el bucle del service worker (cada pocos segundos, 30 min). Ocho
+            // reintentos eran 2,8 s tirados en cada pasada contra la puerta del correo.
         ] };
       }
     },
