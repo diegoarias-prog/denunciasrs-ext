@@ -308,6 +308,8 @@ async function inicializar() {
   // Denuncias que se empezaron y quedaron sin contestar: si no se preguntara aqui, se
   // acumularian invisibles (no salen en el Registro y nadie volveria a mirarlas).
   await preguntar_por_denuncias_provisionales();
+  // Recordatorio de respaldo: lo ultimo, para que no retrase nada de lo de arriba.
+  await pintar_cintillo_de_respaldo();
 }
 
 // Repuebla las redes con las del tipo elegido. Si la red que estaba puesta también
@@ -1039,6 +1041,174 @@ if ($("casilla_modo_prueba")) {
         ? "🧪 <b>Modo prueba ENCENDIDO.</b> Se rellenaran los formularios para que los revises, pero " +
           "<b>no se registra la denuncia, no se guarda comprobante y no se envia nada</b>."
         : "✅ <b>Modo prueba APAGADO.</b> Las denuncias vuelven a registrarse, capturarse y enviarse con normalidad.");
+    });
+  });
+}
+
+// ============================================================================
+//  💾 RECORDATORIO DE RESPALDO
+//
+//  Por que existe: TODO lo del usuario (el Registro con sus comprobantes, las
+//  marcas, las plataformas propias, la memoria de correos y las plantillas) vive
+//  en chrome.storage.local y NO sale nunca de esta computadora. El usuario abrio
+//  la extension en una PC nueva y no tenia nada. Ya se puede copiar a un archivo
+//  desde la pagina de opciones, pero eso depende de acordarse: este cintillo es
+//  el que se acuerda por el.
+//
+//  Cuando sale (cualquiera de las dos):
+//    - han pasado 7 dias o mas desde la ultima copia, o
+//    - hay 10 o mas denuncias creadas DESPUES de esa copia.
+//  Si nunca se ha exportado y ya hay denuncias en el Registro, sale igual.
+//
+//  Cuando NO sale: en modo prueba (🧪), mientras dure el "Ahora no" (2 dias) y,
+//  por supuesto, cuando la copia esta al dia. No hay ningun "no volver a
+//  mostrar": si el usuario lo pospone y sigue acumulando, vuelve a salir.
+//
+//  Es una linea arriba del todo: no tapa los botones de denunciar, no roba el
+//  foco y no abre ninguna ventana (nada de alert()).
+// ============================================================================
+const CLAVE_ULTIMA_EXPORTACION = "ultima_exportacion";
+const CLAVE_RESPALDO_POSPUESTO = "respaldo_pospuesto_hasta";
+// Lo escribe la pagina de opciones al importar: si hay apuntes, estos datos
+// llegaron de otra computadora (ver el texto "recien_importado").
+const CLAVE_TRASPASOS_IMPORTADOS = "traspasos_importados";
+const DIAS_SIN_COPIA_PARA_AVISAR = 7;
+const DENUNCIAS_SIN_COPIA_PARA_AVISAR = 10;
+const DIAS_QUE_CALLA_EL_AHORA_NO = 2;
+const MS_DE_UN_DIA = 24 * 60 * 60 * 1000;
+
+// Denuncias creadas DESPUES de la ultima copia. Sin copia, todas.
+//  Una denuncia con fecha ilegible NO se cuenta como nueva a proposito: contarla
+//  dejaria el cintillo encendido para siempre (ni exportando se apagaria), y de
+//  esas ya se encarga la regla de los 7 dias.
+function denuncias_sin_respaldar(denuncias, ultima_exportacion) {
+  const lista = Array.isArray(denuncias) ? denuncias : [];
+  // Admite la fecha en texto (ISO) o ya en milisegundos.
+  const corte = (typeof ultima_exportacion === "number")
+    ? ultima_exportacion : Date.parse(ultima_exportacion || "");
+  if (!isFinite(corte) || !corte) return lista.length;
+  return lista.filter((d) => {
+    const cuando = Date.parse((d && d.fecha) || "");
+    return isFinite(cuando) && cuando > corte;
+  }).length;
+}
+
+// Decide si toca avisar. Funcion PURA (no toca storage ni el DOM) para poder
+// probarla con cualquier fecha: devuelve { mostrar, motivo, nuevas, dias }.
+// Tolerancia de reloj: una fecha unos minutos por delante puede ser normal
+// (relojes que se ajustan solos); una MUY por delante es un reloj que estuvo mal
+// puesto, y no puede callar el aviso durante meses.
+const MINUTOS_DE_TOLERANCIA_DE_RELOJ = 5;
+
+function calcular_aviso_de_respaldo(estado, ahora) {
+  const e = estado || {};
+  const t = Number(ahora) || Date.now();
+
+  // Fecha de la ultima copia, SOLO si es creible. Si quedo en el futuro (reloj
+  // adelantado y luego corregido), se trata como si no hubiera respaldo: mejor
+  // avisar de mas que callarse meses creyendo que hay copia.
+  let ultima = Date.parse(e.ultima_exportacion || "");
+  if (!isFinite(ultima) || ultima > t + MINUTOS_DE_TOLERANCIA_DE_RELOJ * 60000) ultima = 0;
+
+  const nuevas = denuncias_sin_respaldar(e.denuncias_registro, ultima);
+  const total = Array.isArray(e.denuncias_registro) ? e.denuncias_registro.length : 0;
+
+  // En modo prueba no se registra ni se captura nada: avisar ahi solo estorba.
+  if (e.modo_prueba) return { mostrar: false, motivo: "modo_prueba", nuevas: nuevas, dias: 0 };
+
+  // El "Ahora no" tampoco puede pasarse de 2 dias: si esta mas alla, es un reloj
+  // que estuvo mal puesto y se descarta.
+  let pospuesto = Number(e.respaldo_pospuesto_hasta) || 0;
+  if (pospuesto > t + DIAS_QUE_CALLA_EL_AHORA_NO * MS_DE_UN_DIA) pospuesto = 0;
+  if (pospuesto > t) return { mostrar: false, motivo: "pospuesto", nuevas: nuevas, dias: 0 };
+
+  if (!ultima) {
+    // Nunca se ha hecho copia AQUI: solo molesta si hay algo que perder.
+    //  Caso aparte: los datos acaban de llegar de otra computadora (por eso hay
+    //  traspasos apuntados y ninguna copia hecha aqui). Es verdad que no tienen
+    //  respaldo en esta maquina, pero decirle "nunca has copiado tus datos" a
+    //  quien acaba de hacer el traspaso desconcierta: se le dice lo que pasa.
+    if (total > 0 && e.hubo_importacion) {
+      return { mostrar: true, motivo: "recien_importado", nuevas: nuevas, dias: 0 };
+    }
+    return { mostrar: total > 0, motivo: "nunca", nuevas: nuevas, dias: 0 };
+  }
+  const dias = Math.floor((t - ultima) / MS_DE_UN_DIA);
+  if (nuevas >= DENUNCIAS_SIN_COPIA_PARA_AVISAR) return { mostrar: true, motivo: "cantidad", nuevas: nuevas, dias: dias };
+  if (dias >= DIAS_SIN_COPIA_PARA_AVISAR) return { mostrar: true, motivo: "dias", nuevas: nuevas, dias: dias };
+  return { mostrar: false, motivo: "al_dia", nuevas: nuevas, dias: dias };
+}
+
+// Que se pierde, en concreto y con el numero de verdad.
+function texto_del_aviso_de_respaldo(aviso) {
+  const cuantas = aviso.nuevas + (aviso.nuevas === 1 ? " denuncia" : " denuncias");
+  if (aviso.motivo === "recien_importado") {
+    return "Estos datos llegaron de otra computadora y aqui todavia no tienen copia (" + cuantas +
+           "). Haz tu primera copia para protegerlos tambien desde esta.";
+  }
+  if (aviso.motivo === "nunca") {
+    return "Nunca has copiado tus datos a un archivo. Llevas " + cuantas +
+           " sin respaldar: si esta computadora falla, se pierden.";
+  }
+  if (aviso.nuevas > 0) {
+    return "Llevas " + cuantas + " sin respaldar. Si esta computadora falla, se pierden.";
+  }
+  return "Hace " + aviso.dias + (aviso.dias === 1 ? " dia" : " dias") +
+         " que no copias tus datos. Si esta computadora falla, se pierden.";
+}
+
+async function pintar_cintillo_de_respaldo() {
+  const cintillo = $("cintillo_de_respaldo");
+  if (!cintillo) return;
+  // chrome.storage no lanza excepciones: si la lectura falla, el callback corre
+  // igual y solo lo dice chrome.runtime.lastError DENTRO del callback.
+  const leido = await new Promise((res) => chrome.storage.local.get(
+    [CLAVE_REGISTRO_POPUP, CLAVE_ULTIMA_EXPORTACION, CLAVE_RESPALDO_POSPUESTO, CLAVE_MODO_PRUEBA,
+     CLAVE_TRASPASOS_IMPORTADOS],
+    (x) => res({ datos: x || {}, error: (chrome.runtime.lastError || {}).message || "" })));
+
+  if (leido.error) {
+    // No se puede saber si hay copia ni cuantas denuncias hay: no se inventa un
+    // numero, pero TAMPOCO se calla. Que se vea que no se pudo comprobar.
+    $("texto_del_cintillo_de_respaldo").textContent =
+      "No se pudo comprobar si tienes copia de tus datos (" + leido.error + ").";
+    cintillo.style.display = "";
+    return;
+  }
+  const d = leido.datos;
+  const aviso = calcular_aviso_de_respaldo({
+    denuncias_registro: d[CLAVE_REGISTRO_POPUP],
+    ultima_exportacion: d[CLAVE_ULTIMA_EXPORTACION],
+    respaldo_pospuesto_hasta: d[CLAVE_RESPALDO_POSPUESTO],
+    modo_prueba: !!d[CLAVE_MODO_PRUEBA],
+    // Hay traspasos apuntados = estos datos llegaron de otra computadora.
+    hubo_importacion: Array.isArray(d[CLAVE_TRASPASOS_IMPORTADOS]) && d[CLAVE_TRASPASOS_IMPORTADOS].length > 0
+  }, Date.now());
+
+  if (!aviso.mostrar) { cintillo.style.display = "none"; return; }
+  // Por textContent, nunca innerHTML.
+  $("texto_del_cintillo_de_respaldo").textContent = texto_del_aviso_de_respaldo(aviso);
+  cintillo.style.display = "";
+}
+
+if ($("boton_hacer_copia_ahora")) {
+  // Se abre la pagina de opciones con el ancla del respaldo para que la seccion
+  // quede a la vista: openOptionsPage() no admite ancla, asi que va por getURL.
+  $("boton_hacer_copia_ahora").addEventListener("click", () => {
+    chrome.tabs.create({ url: chrome.runtime.getURL("opciones.html#respaldo") });
+  });
+}
+
+if ($("boton_posponer_respaldo")) {
+  $("boton_posponer_respaldo").addEventListener("click", () => {
+    const hasta = Date.now() + DIAS_QUE_CALLA_EL_AHORA_NO * MS_DE_UN_DIA;
+    chrome.storage.local.set({ [CLAVE_RESPALDO_POSPUESTO]: hasta }, () => {
+      const error = (chrome.runtime.lastError || {}).message || "";
+      $("cintillo_de_respaldo").style.display = "none";
+      // Si no se pudo guardar, el aviso volvera a salir la proxima vez. Se dice,
+      // para que no parezca que la extension no hace caso.
+      if (error) mostrar_estado("aviso", "No se pudo recordar el «Ahora no» (" +
+        escapar_html(error) + "): puede que el aviso vuelva a salir.");
     });
   });
 }
