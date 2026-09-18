@@ -39,6 +39,20 @@
   .ficha_correo_memoria .veces_memoria { color: #6b7280; font-size: 11px; }
   .caja_memoria_correos .pie_memoria { margin-top: 7px; font-size: 11px; color: #475569; }
   .caja_memoria_correos a { color: #1d4ed8; }
+  /* --- Documentos adjuntos (solo viajan con "Enviar ahora") --- */
+  #caja_adjuntos_correo { margin-top: 12px; border: 1px solid #cbd5e1; background: #f8fafc; border-radius: 9px; padding: 10px 12px; }
+  #caja_adjuntos_correo .titulo_adjuntos { font-size: 12px; font-weight: 700; color: #1e40af; text-transform: uppercase; letter-spacing: .3px; margin-bottom: 8px; }
+  #caja_adjuntos_correo .barra { margin-top: 0; }
+  #lista_documentos_adjuntos { margin-top: 10px; }
+  .ficha_documento_adjunto { display: flex; align-items: center; gap: 8px; background: #fff; border: 1px solid #cbd5e1; border-radius: 7px; padding: 6px 10px; margin-bottom: 6px; font-size: 13px; }
+  .ficha_documento_adjunto .nombre_documento_adjunto { flex: 1; overflow-wrap: anywhere; }
+  .ficha_documento_adjunto .peso_documento_adjunto { color: #6b7280; font-size: 12px; white-space: nowrap; }
+  .boton_quitar_documento { border: 0; background: #fee2e2; color: #991b1b; border-radius: 6px; padding: 4px 9px; font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit; white-space: nowrap; }
+  .boton_quitar_documento:hover { background: #fecaca; }
+  #total_documentos_adjuntos { font-size: 12px; font-weight: 700; color: #374151; margin-top: 4px; }
+  .nota_adjuntos_correo { font-size: 11px; color: #475569; margin: 8px 0 0; }
+  #aviso_adjuntos_sin_envio, #aviso_tope_adjuntos { font-size: 12px; margin: 8px 0 0; padding: 8px 10px; border-radius: 6px; background: #fffbeb; border-left: 4px solid #f59e0b; color: #92400e; }
+  #aviso_tope_adjuntos { background: #fef2f2; border-left-color: #dc2626; color: #991b1b; font-weight: 600; }
 </style>
 </head>
 <body>
@@ -70,6 +84,27 @@
     <div class="titulo_memoria" id="titulo_memoria">📒 Correos que ya usaste para este sitio</div>
     <div class="lista_memoria" id="lista_memoria"></div>
     <div class="pie_memoria">Haz clic en un correo para añadirlo al campo “Para”. Los correos que envíes se guardan solos aquí. <a href="#" id="abrir_memoria">🗂 Ver / editar la memoria de correos</a></div>
+  </div>
+
+  <!-- Documentos adjuntos: viajan DENTRO del correo solo con "✅ Enviar ahora"
+       (API de Gmail). Los botones de borrador (mailto / Gmail view=cm) no pueden
+       llevar adjuntos: es una limitación del navegador y de Gmail, no de aquí. -->
+  <div id="caja_adjuntos_correo">
+    <div class="titulo_adjuntos">📎 Documentos adjuntos</div>
+    <div class="barra">
+      <button type="button" class="boton sec" id="boton_anadir_documentos">📎 Añadir documentos</button>
+      <input type="file" id="selector_documentos_adjuntos" multiple style="display:none;">
+    </div>
+    <p class="nota_adjuntos_correo" id="nota_tope_adjuntos">Hasta 18 MB en total (el correo viaja codificado y ocupa más; por encima de eso muchos servidores lo rechazan).</p>
+    <!-- Aviso FIJO: se queda hasta que el usuario añada o quite algo. Lo pone correo.js
+         cuando rechaza una tanda entera por pasarse del tope. -->
+    <p id="aviso_tope_adjuntos" role="alert" style="display:none;"></p>
+    <div id="lista_documentos_adjuntos" style="display:none;">
+      <div id="fichas_documentos_adjuntos"></div>
+      <div id="total_documentos_adjuntos"></div>
+    </div>
+    <p class="nota_adjuntos_correo" id="nota_solo_enviar_ahora">Los documentos solo viajan con «✅ Enviar ahora». Si abres el borrador en Gmail o en tu correo tendrás que adjuntarlos a mano.</p>
+    <p id="aviso_adjuntos_sin_envio" style="display:none;"></p>
   </div>
 
   <h2>🇬🇧 Inglés — esto es lo que se envía</h2>
@@ -111,6 +146,9 @@
   <p class="nota">Recuerda pegar el/los enlace(s) a denunciar donde dice <b>[ ... ]</b> antes de enviar. Si "Abrir en mi correo" recorta el texto, usa "Copiar cuerpo (inglés)" y pégalo a mano.</p>
 
   <script src="datos/config_gmail.js"></script>
+  <!-- Solo por CORREO_PERSONA: es la cuenta propia con la que se envían los reportes
+       de las marcas cuyo correo de contacto es del cliente (ver cuenta_de_envio). -->
+  <script src="datos/marcas.js"></script>
   <script src="datos/correos_denuncia.js"></script>
   <script src="editor_rico.js"></script>
   <script src="correo.js"></script>
