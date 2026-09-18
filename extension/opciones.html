@@ -157,6 +157,90 @@
   .aviso_de_guardado { margin-left: auto; font-size: 13px; font-weight: 600; }
   .aviso_de_guardado.correcto { color: #065f46; }
   .aviso_de_guardado.error   { color: #b91c1c; }
+
+  /* ====== 💾 Copiar mis datos a otra computadora (exportar / importar) ======
+     Mismo lenguaje visual del panel de marcas: tarjeta blanca, borde gris,
+     títulos en versalitas y el azul #1d4ed8 como color de acción. */
+  .caja_traspaso_datos {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.06);
+    padding: 18px 20px 20px;
+    margin-top: 22px;
+  }
+  /* Al llegar desde el recordatorio del popup (opciones.html#respaldo) la sección
+     parpadea un momento para que se vea de una vez dónde hay que pulsar. */
+  .caja_traspaso_datos_resaltada { border-color: #1d4ed8; box-shadow: 0 0 0 4px rgba(29,78,216,.18); }
+  .caja_traspaso_datos h2 {
+    font-size: 16px; margin: 0 0 6px; color: #1f2937;
+  }
+  .explicacion_de_traspaso {
+    font-size: 13px; color: #6b7280; margin: 0 0 16px; line-height: 1.55;
+  }
+  .explicacion_de_traspaso strong { color: #374151; }
+  .columnas_de_traspaso {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 16px;
+  }
+  .columna_de_traspaso {
+    border: 1px solid #e5e7eb; border-radius: 10px; padding: 14px 16px 16px; background: #f8fafc;
+  }
+  .columna_de_traspaso h3 {
+    font-size: 12px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase;
+    color: #374151; margin: 0 0 8px; padding-bottom: 5px; border-bottom: 1px solid #e5e7eb;
+  }
+  .columna_de_traspaso p { font-size: 12.5px; color: #6b7280; margin: 0 0 12px; line-height: 1.5; }
+  /* Va en ámbar y con borde para que no se lea como una nota más: el archivo
+     sale de la extensión sin cifrar y con datos de los clientes del usuario. */
+  .aviso_de_confidencialidad {
+    font-size: 12px; color: #92400e; background: #fffbeb;
+    border: 1px solid #fcd34d; border-left: 3px solid #f59e0b; border-radius: 6px;
+    padding: 8px 10px; margin: 0 0 12px; line-height: 1.5;
+  }
+  .entrada_de_archivo {
+    display: block; width: 100%; font-family: inherit; font-size: 12.5px; color: #374151;
+    background: #fff; border: 1px solid #cbd5e1; border-radius: 6px; padding: 8px 10px; margin-bottom: 10px;
+  }
+  .entrada_de_archivo:focus { border-color: #1d4ed8; outline: none; box-shadow: 0 0 0 3px rgba(29,78,216,.12); }
+  .boton_de_traspaso {
+    padding: 9px 16px; border: 0; border-radius: 7px;
+    background: #1d4ed8; color: #fff; font-weight: 600; cursor: pointer; font-size: 13.5px;
+    font-family: inherit;
+  }
+  .boton_de_traspaso:hover:not(:disabled) { background: #1a43be; }
+  .boton_de_traspaso:disabled { opacity: .45; cursor: default; }
+  .boton_de_traspaso.secundario {
+    background: #fff; color: #374151; border: 1px solid #cbd5e1; font-weight: 600;
+  }
+  .boton_de_traspaso.secundario:hover:not(:disabled) { background: #f1f5f9; border-color: #94a3b8; }
+  .botones_de_importacion { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+
+  /* Vista previa y resultado */
+  .vista_previa_de_importacion, .resultado_de_traspaso { margin-top: 12px; }
+  .vista_previa_de_importacion {
+    border: 1px solid #bfdbfe; background: #eff6ff; border-radius: 8px; padding: 12px 14px;
+  }
+  .linea_de_traspaso { font-size: 13px; color: #374151; margin: 0 0 8px; line-height: 1.5; }
+  .linea_de_traspaso:last-child { margin-bottom: 0; }
+  .titulo_de_vista_previa { font-weight: 700; color: #1d4ed8; }
+  .exito_de_traspaso { font-weight: 700; color: #065f46; }
+  .error_de_traspaso {
+    font-weight: 600; color: #b91c1c; background: #fef2f2;
+    border: 1px solid #fecaca; border-radius: 8px; padding: 10px 12px;
+  }
+  .aviso_de_traspaso { color: #92400e; }
+  .nota_de_traspaso { font-size: 12.5px; color: #6b7280; }
+  .bloque_de_traspaso { margin: 0 0 10px; }
+  .titulo_de_bloque_de_traspaso {
+    font-size: 12px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase;
+    color: #374151; margin: 0 0 4px;
+  }
+  .lista_de_traspaso { margin: 0; padding-left: 20px; }
+  .lista_de_traspaso li { font-size: 12.5px; color: #374151; line-height: 1.6; }
+  .bloque_aviso .titulo_de_bloque_de_traspaso { color: #b45309; }
+  .bloque_aviso .lista_de_traspaso li { color: #92400e; }
 </style>
 </head>
 <body>
@@ -172,6 +256,53 @@
     </div>
 
     <div id="contenedor_del_panel"></div>
+
+    <!-- ===== 💾 Traspaso de datos entre computadoras (exportar / importar) =====
+         Nada de JavaScript en línea aquí: todo va en opciones.js (manifest v3). -->
+    <section class="caja_traspaso_datos" id="caja_traspaso_datos">
+      <h2>💾 Copiar mis datos a otra computadora</h2>
+      <p class="explicacion_de_traspaso">
+        Todo lo tuyo (Registro de denuncias <strong>con sus comprobantes</strong>, marcas, plataformas propias,
+        memoria de correos y plantillas) se guarda solo en <strong>esta</strong> computadora. Para llevarlo a otra:
+        <strong>1)</strong> aquí, en la computadora de siempre, pulsa «⬇ Exportar todo a un archivo»;
+        <strong>2)</strong> lleva ese archivo a la otra computadora (USB, correo, la nube que uses);
+        <strong>3)</strong> allí abre esta misma página y pulsa «⬆ Importar desde un archivo».
+        Puedes repetirlo cuantas veces quieras: al importar <strong>solo se añade lo que falta</strong>, nunca se borra
+        ni se pisa nada de lo que ya tengas, así que importar dos veces no duplica nada.
+      </p>
+
+      <div class="columnas_de_traspaso">
+        <div class="columna_de_traspaso">
+          <h3>⬇ Exportar</h3>
+          <p>
+            Crea un archivo <code>.json</code> con TODO lo guardado, comprobantes incluidos. Antes de descargarlo
+            verás aquí el conteo de lo que lleva y cuánto pesa, para comprobar de un vistazo que no salió vacío.
+          </p>
+          <p class="aviso_de_confidencialidad" id="aviso_de_confidencialidad">
+            🔒 El archivo lleva las capturas de tus denuncias y los correos de tus clientes, <strong>sin cifrar</strong>.
+            Trátalo como un documento confidencial.
+          </p>
+          <button class="boton_de_traspaso" id="boton_exportar_datos" type="button">⬇ Exportar todo a un archivo</button>
+        </div>
+
+        <div class="columna_de_traspaso">
+          <h3>⬆ Importar</h3>
+          <p>
+            Elige el archivo que exportaste en la otra computadora. Primero verás una <strong>vista previa</strong>
+            de lo que entraría, sin cambiar nada; solo se aplica si lo confirmas.
+          </p>
+          <input class="entrada_de_archivo" type="file" id="archivo_para_importar"
+                 accept="application/json,.json" aria-label="Archivo de respaldo para importar">
+          <div class="botones_de_importacion">
+            <button class="boton_de_traspaso" id="boton_confirmar_importacion" type="button" hidden>✓ Sí, añadir estos datos</button>
+            <button class="boton_de_traspaso secundario" id="boton_cancelar_importacion" type="button" hidden>Cancelar</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="vista_previa_de_importacion" id="vista_previa_de_importacion" hidden></div>
+      <div class="resultado_de_traspaso" id="resultado_traspaso_datos" role="status" aria-live="polite"></div>
+    </section>
   </div>
 
   <div class="barra_inferior_de_marcas">

@@ -86,6 +86,20 @@
     background: #fffbeb; border-left: 3px solid #f59e0b; color: #92400e; font-size: 11px; line-height: 1.4; }
   .fila_modo_prueba.encendido ~ .aviso_de_modo_prueba, .aviso_de_modo_prueba.encendido { display: block; }
 
+  /* ---- 💾 Recordatorio de respaldo: una línea arriba, discreta, que SOLO sale
+     cuando toca (7 días sin copia o 10 denuncias nuevas). No tapa nada, no roba
+     el foco y no se puede apagar para siempre: "Ahora no" solo la calla 2 días. */
+  .cintillo_de_respaldo { display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+    margin: 0 0 8px; padding: 6px 8px; border-radius: 6px;
+    background: #fffbeb; border-left: 3px solid #f59e0b; }
+  .texto_del_cintillo_de_respaldo { flex: 1 1 100%; font-size: 11px; line-height: 1.4; color: #92400e; }
+  .boton_del_cintillo_de_respaldo { flex: 0 0 auto; padding: 4px 8px; border-radius: 6px;
+    border: 1px solid #f59e0b; background: #f59e0b; color: #fff;
+    font-family: inherit; font-size: 11px; font-weight: 700; cursor: pointer; }
+  .boton_del_cintillo_de_respaldo:hover { background: #d97706; border-color: #d97706; }
+  .boton_del_cintillo_de_respaldo.gris { background: #fff; color: #92400e; border-color: #fcd34d; }
+  .boton_del_cintillo_de_respaldo.gris:hover { background: #fef3c7; }
+
   /* ---- Confirmar antes de guardar en el Registro (y provisionales pendientes) ----
      Una denuncia PROVISIONAL no está en el Registro todavía. Estos dos paneles son
      los únicos sitios donde se ve, así que no pueden pasar desapercibidos. */
@@ -114,6 +128,15 @@
 </head>
 <body>
   <h1>Denuncias RS · Autollenado</h1>
+
+  <!-- Recordatorio de respaldo. Todo lo del Registro (con sus comprobantes) vive
+       SOLO en esta computadora: si falla, se pierde. Lo pinta popup.js y solo
+       aparece cuando de verdad toca. -->
+  <div class="cintillo_de_respaldo" id="cintillo_de_respaldo" style="display:none;">
+    <span class="texto_del_cintillo_de_respaldo" id="texto_del_cintillo_de_respaldo"></span>
+    <button type="button" class="boton_del_cintillo_de_respaldo" id="boton_hacer_copia_ahora">💾 Hacer copia ahora</button>
+    <button type="button" class="boton_del_cintillo_de_respaldo gris" id="boton_posponer_respaldo">Ahora no</button>
+  </div>
 
   <!-- Denuncias que se empezaron y quedaron SIN CONFIRMAR (el popup se cerró antes de
        responder). NO están en el Registro: si no se preguntara por ellas al abrir, se
