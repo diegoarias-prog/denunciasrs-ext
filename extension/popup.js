@@ -598,10 +598,17 @@ $("boton_confirmar_quitar_plataforma").addEventListener("click", al_pulsar(confi
   $(id).addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); guardar_plataforma_nueva(); } });
 });
 $("sel_form").addEventListener("change", pintar_buzon_destino);
-$("sel_marca").addEventListener("change", () => {
+$("sel_marca").addEventListener("change", async () => {
   mostrar_caja_de_nuevo_correo(false);
   mostrar_pregunta_de_quitar(false);   // la pregunta era de la marca anterior
   refrescar_correos_de_marca();
+  // El Excel se cargó PARA la marca anterior: sus enlaces son publicaciones que
+  // copian ESA marca. Dejarlo puesto al cambiar de marca es justo el error que el
+  // usuario quiere evitar (denunciar los enlaces de una marca en nombre de otra).
+  if (await limpiar_excel_de_un_solo_uso("marca") === "limpiado") {
+    mostrar_estado("aviso", "Cambiaste de marca: <b>quité la lista del Excel</b> de la marca anterior " +
+      "para que no se cuele en esta denuncia. Carga el Excel de esta marca.");
+  }
 });
 // Cambiar de correo también cierra la pregunta: preguntaba por el de antes.
 $("sel_correo_marca").addEventListener("change", () => mostrar_pregunta_de_quitar(false));
@@ -702,6 +709,38 @@ $("copiar_informe").addEventListener("click", async (e) => {
 // ===========================================================================
 const CLAVE_URLS = "urls_denuncia";
 
+// EL EXCEL ES DE UN SOLO USO. La lista cargada vale para LA denuncia que se está
+// haciendo y para ninguna más —sea de prueba o de verdad—: si se quedara, la
+// siguiente (a menudo de OTRA marca) se llevaría los mismos enlaces sin que nadie
+// lo dijera. Aquí se guarda POR QUÉ desapareció, para poder explicarlo en la línea
+// de estado; vive en el storage porque el popup se cierra solo (al abrir el
+// formulario en otra pestaña) y la explicación tiene que seguir ahí cuando el
+// usuario lo vuelva a abrir.
+// Valores: "denuncia" (se completó una denuncia por formulario) · "correo" (se mandó
+// el correo, lo escribe correo.js) · "marca" (se cambió de marca).
+const CLAVE_AVISO_EXCEL = "aviso_del_excel";
+let AVISO_DEL_EXCEL = "";
+
+function texto_del_aviso_del_excel() {
+  switch (AVISO_DEL_EXCEL) {
+    case "denuncia": return "El Excel ya se usó en esa denuncia y se limpió: carga otro para la siguiente";
+    case "correo":   return "El Excel ya se usó en ese correo y se limpió: carga otro para la siguiente";
+    case "marca":    return "Cambiaste de marca: quité el Excel de la marca anterior; carga el de esta marca";
+    default: return "";
+  }
+}
+
+// Deja (o borra) la explicación y la repinta. Sin `motivo` se olvida: es lo que hay
+// que hacer en cuanto el usuario carga otro Excel o lo quita a mano, porque a partir
+// de ahí la frase mentiría.
+function poner_aviso_del_excel(motivo) {
+  AVISO_DEL_EXCEL = motivo || "";
+  pintar_estado_de_enlaces();
+  return new Promise((res) => motivo
+    ? chrome.storage.local.set({ [CLAVE_AVISO_EXCEL]: motivo }, res)
+    : chrome.storage.local.remove([CLAVE_AVISO_EXCEL], res));
+}
+
 // UNA sola línea de estado para los enlaces (antes había dos, una por cuadro, y
 // ocupaban el doble para decir lo mismo). Dice lo único que importa: qué se va a
 // usar en esta denuncia — manda lo escrito a mano y, si no hay nada escrito, la
@@ -712,6 +751,7 @@ let CUENTA_URLS_A_MANO = 0, CUENTA_URLS_EXCEL = 0;
 function pintar_estado_de_enlaces() {
   const e = $("estado_urls");
   if (!e) return;
+  const aviso = texto_del_aviso_del_excel();
   let t;
   if (CUENTA_URLS_A_MANO > 0) {
     t = CUENTA_URLS_A_MANO + " enlace" + (CUENTA_URLS_A_MANO === 1 ? "" : "s") +
@@ -720,9 +760,16 @@ function pintar_estado_de_enlaces() {
   } else if (CUENTA_URLS_EXCEL > 0) {
     t = CUENTA_URLS_EXCEL + " URL" + (CUENTA_URLS_EXCEL === 1 ? "" : "s") + " del Excel: se usa" +
         (CUENTA_URLS_EXCEL === 1 ? "" : "n") + " en esta denuncia";
+  } else if (aviso) {
+    // Sin enlaces PERO con explicación: se dice por qué ya no está el Excel, en vez
+    // de quedarse mudo y dejar creer que la lista se perdió sola.
+    t = aviso;
   } else {
     t = "Sin enlaces: escríbelos arriba o carga un Excel";
   }
+  // Si además hay algo que contar (enlaces escritos a mano), la explicación se añade
+  // en la misma línea: el conteo solo no diría qué pasó con el Excel.
+  if (aviso && t !== aviso) t += " · " + aviso;
   e.textContent = t;
   e.title = t;   // la línea se recorta con "…" si no cabe
 }
@@ -733,6 +780,42 @@ function pintar_estado_urls(n) { CUENTA_URLS_EXCEL = n || 0; pintar_estado_de_en
 function obtener_urls_guardadas() {
   return new Promise((res) =>
     chrome.storage.local.get([CLAVE_URLS], (x) => res(Array.isArray(x[CLAVE_URLS]) ? x[CLAVE_URLS] : [])));
+}
+
+// ---------------------------------------------------------------------------
+//  EL EXCEL, DE UN SOLO USO: aquí se quita
+// ---------------------------------------------------------------------------
+// ÚNICO sitio del popup que borra la lista del Excel. La regla no tiene matices: el
+// Excel se agota EN CUANTO SE USA, en cualquier denuncia, de prueba o de verdad. Se
+// llama desde cuatro puntos, y cada uno es el momento en que se usó de verdad:
+//   1) confirmar_denuncia_provisional(), cuando la denuncia por FORMULARIO deja de
+//      ser provisional —no cuando se pulsa Rellenar: hasta que el usuario contesta,
+//      la denuncia puede descartarse y el Excel todavía hace falta para repetirla—;
+//   2) el final de rellenar() en MODO PRUEBA, donde no hay nada que confirmar (no se
+//      da de alta ninguna denuncia, así que nadie va a preguntar): la denuncia de
+//      prueba queda completa ahí mismo;
+//   3) al GENERAR el correo, en cuanto sus URLs se vuelcan en `email_reporte` y se
+//      van a la pestaña del correo. Ahí ya se usaron: no se espera a que se envíe.
+//      Eso incluye el caso de generar el correo y no mandarlo nunca —el Excel se
+//      gasta igual, porque sus enlaces ya salieron de aquí—;
+//   4) el cambio de marca, que es el caso que preocupa al usuario (que el Excel de
+//      una marca se cuele en la denuncia de otra).
+// (La denuncia por el MENÚ DEL CLIC DERECHO no pasa por aquí: el service worker es
+// otro contexto y tiene su propia limpieza, ctxLimpiarExcelDeUnSoloUso en
+// background.js, con la misma clave y el mismo aviso.)
+// NO se llama al abrir el popup: el popup se cierra solo en cuanto el formulario se
+// abre en otra pestaña, así que borrar al abrir dejaría el Excel inservible.
+// Devuelve "limpiado" | "no_habia".
+async function limpiar_excel_de_un_solo_uso(motivo) {
+  const urls = await obtener_urls_guardadas();
+  if (!urls.length) return "no_habia";
+  await new Promise((res) => chrome.storage.local.remove([CLAVE_URLS], res));
+  // La caja del archivo se vacía a propósito: si se quedara con el archivo puesto,
+  // volver a elegir ESE MISMO Excel no dispararía el "change" y no se cargaría nada.
+  if ($("archivo_urls")) $("archivo_urls").value = "";
+  pintar_estado_urls(0);
+  await poner_aviso_del_excel(motivo);
+  return "limpiado";
 }
 
 // Lee un .xlsx con ExcelJS, detecta la columna "URL" (o la 1.ª), recoge las URLs
@@ -818,6 +901,9 @@ async function cargar_archivo_urls(file) {
     const filas_de_mas = Math.max(0, total - ultima);
 
     await new Promise((res) => chrome.storage.local.set({ [CLAVE_URLS]: urls }, res));
+    // Hay Excel nuevo: la explicación de por qué NO había (se usó, se cambió de
+    // marca) ya no vale y tiene que irse, o se quedaría contradiciendo al conteo.
+    await poner_aviso_del_excel("");
     pintar_estado_urls(urls.length);
     if (urls.length === 0) mostrar_estado("aviso", "No se encontraron URLs en el Excel. Revisa que la columna tenga los enlaces de las publicaciones (con o sin https).");
     else if (filas_de_mas > 0) mostrar_estado("aviso", "✓ " + urls.length + " URL(s) cargadas, pero OJO: solo se leyeron las primeras " +
@@ -841,13 +927,22 @@ if ($("quitar_urls")) {
   $("quitar_urls").addEventListener("click", () => {
     chrome.storage.local.remove([CLAVE_URLS], () => {
       if ($("archivo_urls")) $("archivo_urls").value = "";
+      // Lo quitó el usuario a mano: no hay nada que explicarle, y dejar el aviso de
+      // "ya se usó" sería contarle una historia que no es la suya.
+      poner_aviso_del_excel("");
       pintar_estado_urls(0);
       mostrar_estado("aviso", "Lista de URLs eliminada.");
     });
   });
 }
-// Al abrir el popup, muestra el conteo de URLs ya cargadas.
-obtener_urls_guardadas().then((u) => pintar_estado_urls(u.length));
+// Al abrir el popup, el conteo de URLs ya cargadas Y —si el Excel se limpió— la
+// explicación de por qué ya no está. AQUÍ NO SE LIMPIA NADA: durante una denuncia el
+// popup se cierra (el formulario se abre en otra pestaña) y se vuelve a abrir para
+// contestar si quedó bien; si abrirlo borrara el Excel, el Excel no serviría de nada.
+chrome.storage.local.get([CLAVE_URLS, CLAVE_AVISO_EXCEL], (x) => {
+  AVISO_DEL_EXCEL = typeof x[CLAVE_AVISO_EXCEL] === "string" ? x[CLAVE_AVISO_EXCEL] : "";
+  pintar_estado_urls(Array.isArray(x[CLAVE_URLS]) ? x[CLAVE_URLS].length : 0);
+});
 
 // ===========================================================================
 //  URLs escritas A MANO (1 o 2). Para denunciar un enlace suelto sin tener que
@@ -1291,8 +1386,13 @@ async function listar_denuncias_provisionales() {
 // panel sigue en pantalla mientras el usuario hace otras cosas, y para cuando
 // pulsa, la denuncia puede haber dejado de ser provisional por su cuenta (enviar
 // el correo la confirma desde correo.html) o haberse borrado desde el Registro.
-async function confirmar_denuncia_provisional(id) {
-  return await cambiar_el_registro((lista) => {
+// `alConfirmar` (opcional) es lo que la pantalla necesita hacer EN CUANTO la denuncia
+// queda confirmada —cerrar la pregunta—, sin esperar a que se agote el Excel. Sin
+// esto, el panel se quedaba puesto mientras se limpiaba: un rato más en pantalla sin
+// ninguna razón que el usuario pueda ver. La limpieza NO se lanza y se olvida: se
+// sigue esperando aquí dentro, solo que después de haber soltado la interfaz.
+async function confirmar_denuncia_provisional(id, alConfirmar) {
+  const r = await cambiar_el_registro((lista) => {
     const d = lista.find((x) => String(x.id) === String(id));
     if (!d) return { guardar: false, valor: "no_esta" };
     // YA CONFIRMADA: no se toca. Recalcularle el consecutivo aquí le CAMBIARÍA el
@@ -1305,6 +1405,16 @@ async function confirmar_denuncia_provisional(id) {
     delete d.rotulos_no_encontrados;
     return { valor: "ok" };
   });
+  // La denuncia ya está confirmada: la pantalla puede reaccionar YA (cerrar la
+  // pregunta), antes de lo que viene debajo. Se protege con try: un fallo pintando
+  // no puede dejar el Excel sin limpiar.
+  if (typeof alConfirmar === "function") { try { alConfirmar(r); } catch (e) {} }
+  // AQUÍ la denuncia por formulario QUEDA HECHA, y aquí —en un solo sitio, valga por
+  // el panel de la pregunta o por la lista de provisionales pendientes— muere el
+  // Excel que se usó en ella. Antes NO: mientras es provisional se puede descartar, y
+  // descartarla con el Excel ya borrado dejaría al usuario sin la lista para repetir.
+  if (r === "ok") await limpiar_excel_de_un_solo_uso("denuncia");
+  return r;
 }
 
 // NO: la denuncia se borra del Registro y con ella su comprobante. Que no quede
@@ -1397,8 +1507,9 @@ function preguntar_si_se_guarda(id, titulo, resumen, tabId) {
   panel.style.display = "";
   si.onclick = async () => {
     si.disabled = no.disabled = true;
-    const r = await confirmar_denuncia_provisional(id);
-    panel.style.display = "none";
+    // La pregunta se cierra EN CUANTO la denuncia queda confirmada; lo que viene
+    // después (agotar el Excel que se usó en ella) ya no la deja puesta en pantalla.
+    const r = await confirmar_denuncia_provisional(id, () => { panel.style.display = "none"; });
     si.disabled = no.disabled = false;
     mostrar_estado(r === "no_esta" ? "error" : "ok",
       r === "ok" ? "📓 <b>Guardada en el Registro</b> — agrega el N.º de caso cuando la plataforma te lo de."
@@ -1668,12 +1779,16 @@ async function rellenar() {
     // `modo_prueba` viaja con el reporte: correo.html NO debe tocar el Registro en una
     // prueba (si no, escribiria sobre la ULTIMA denuncia de verdad, que es a la que
     // apunta `ultima_denuncia_registro`).
-    chrome.storage.local.set({ email_reporte: Object.assign({}, em, {
+    await new Promise((res) => chrome.storage.local.set({ email_reporte: Object.assign({}, em, {
       from: datos.correo || "", red: form.red || "", cat: form.cat || "", urls: urls || [],
       modo_prueba: !!modo_prueba
-    }) }, () => {
-      chrome.tabs.create({ url: chrome.runtime.getURL("correo.html") });
-    });
+    }) }, res));
+    // EL EXCEL SE AGOTA AQUÍ, al GENERAR el correo, no al enviarlo: sus URLs ya están
+    // volcadas en `email_reporte` (arriba) y se van con el correo a la otra pestaña —ya
+    // se usaron—. Va ANTES de abrir la pestaña a propósito: al abrirla el popup se
+    // cierra, y lo que quedara después podría no llegar a ejecutarse.
+    await limpiar_excel_de_un_solo_uso("correo");
+    chrome.tabs.create({ url: chrome.runtime.getURL("correo.html") });
     if (modo_prueba) {
       mostrar_estado("aviso", "🧪 <b>PRUEBA.</b> Correo de " + escapar_html(form.red) + " generado en la pestaña de al lado " +
         "para que lo revises. <b>No se registró denuncia</b> y, si lo envías desde ahí, no quedará anotado en el Registro." +
@@ -1927,6 +2042,17 @@ async function rellenar() {
         (r.hechos != null ? r.hechos : r.ok), r.faltan || []);
       preguntar_si_se_guarda(id_de_la_denuncia_en_curso, form.red + " · " + form.nombre,
         resumen_del_relleno((r.hechos != null ? r.hechos : r.ok), r.faltan || [], sigue), objetivoTabId);
+    } else if (modo_prueba) {
+      // MODO PRUEBA: aquí se acaba el trayecto. No hay denuncia que confirmar (no se
+      // dio de alta ninguna), así que nadie va a preguntar después: la denuncia de
+      // prueba queda completa en este punto y el Excel se agota igual que en una de
+      // verdad —es de un solo uso, sin excepciones—.
+      // Se AÑADE al aviso que ya está pintado (no se reemplaza): lo de arriba dice
+      // todo lo que NO pasó por ser una prueba, y esto es justo lo que SÍ pasó.
+      if (await limpiar_excel_de_un_solo_uso("denuncia") === "limpiado" && $("estado")) {
+        $("estado").innerHTML += "<br><br>📄 <b>La lista del Excel se limpió</b> (se usó en esta denuncia, " +
+          "aunque fuera de prueba): carga otra para la siguiente.";
+      }
     }
   } catch (e) {
     // Igual que arriba: el error de chrome.scripting puede citar la URL de la pestaña.

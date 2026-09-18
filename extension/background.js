@@ -1392,6 +1392,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 // ============================================================================
 const CLAVE_URLS_CTX = "urls_denuncia";        // misma clave que el popup (CLAVE_URLS)
 const CLAVE_URLS_MANUALES_CTX = "urls_manuales"; // las 1-2 URLs escritas a mano en el popup
+const CLAVE_AVISO_EXCEL_CTX = "aviso_del_excel";  // por qué ya no está el Excel (lo pinta el popup)
 const RS_CONTEXTS = ["page", "frame", "selection", "link", "image", "editable"];
 const rsEnc = (s) => encodeURIComponent(String(s)); // marca -> id de menú (nunca lleva '|')
 const rsDec = (s) => { try { return decodeURIComponent(s); } catch (e) { return s; } };
@@ -1491,8 +1492,47 @@ function ctxDetectarForm(urlTab) {
   return mejor;
 }
 
-// Registra —o reutiliza— una entrada "pendiente" (anti doble-clic), igual que el popup.
+// ---------------------------------------------------------------------------
+//  EL EXCEL ES DE UN SOLO USO (la parte del clic derecho)
+// ---------------------------------------------------------------------------
+// La lista del Excel (`urls_denuncia`, la misma clave que el popup) vale para UNA
+// denuncia y para ninguna más: si se quedara, la siguiente —a menudo de OTRA marca—
+// se llevaría los mismos enlaces sin que nadie lo dijera. Por el clic derecho eso era
+// lo más fácil de que pasara: es la vía rápida, sin popup donde ver lo que hay puesto.
+// Se deja escrito el motivo en `aviso_del_excel` para que el popup lo explique cuando
+// se abra ("El Excel ya se usó en esa denuncia y se limpió"), en vez de quedarse mudo.
+async function ctxLimpiarExcelDeUnSoloUso() {
+  try {
+    const g = await chrome.storage.local.get([CLAVE_URLS_CTX]);
+    const urls = Array.isArray(g[CLAVE_URLS_CTX]) ? g[CLAVE_URLS_CTX] : [];
+    if (!urls.length) return false;
+    await chrome.storage.local.remove([CLAVE_URLS_CTX]);
+    await chrome.storage.local.set({ [CLAVE_AVISO_EXCEL_CTX]: "denuncia" });
+    return true;
+  } catch (e) { return false; }   // el Excel es ayuda: nunca debe romper la denuncia
+}
+
+// Da de alta la denuncia y, JUSTO DESPUÉS, agota el Excel que se usó en ella.
+// POR QUÉ AQUÍ: por el clic derecho no hay «¿se rellenó bien?» que contestar —la fila
+// entra en el Registro ya confirmada—, así que el alta ES el momento en que la denuncia
+// queda hecha. Es el único punto de esta ruta por el que pasan los tres caminos
+// (rellenar esta página, abrir el formulario en otra pestaña y generar el correo).
+// EL ORDEN IMPORTA, y por eso la limpieza va envolviendo al alta y no dentro de ella:
+// las URLs que usa esta denuncia ya se leyeron en ctxArmar() y viajan en `ctx.urls`
+// (memoria), así que borrarlas del storage AHORA no le quita nada a la denuncia en
+// curso; pero borrarlas ANTES del alta dejaría el Excel gastado por una denuncia que
+// todavía podría no registrarse.
+// En MODO PRUEBA el alta devuelve null (no entra nada en el Registro) y el Excel se
+// limpia IGUAL: es de un solo uso, sin excepciones, como en el popup y en el correo.
 async function ctxRegistrarDenuncia(marca, form, urlDen) {
+  const id = await ctxAltaEnElRegistro(marca, form, urlDen);
+  await ctxLimpiarExcelDeUnSoloUso();
+  return id;
+}
+
+// El alta de siempre: registra —o reutiliza— una entrada "pendiente" (anti doble-clic),
+// igual que el popup.
+async function ctxAltaEnElRegistro(marca, form, urlDen) {
   // MODO PRUEBA: por el clic derecho no puede entrar NADA en el Registro. Se corta
   // dentro de la funcion (no en cada una de sus llamadas) para que ninguna se quede
   // fuera. Devuelve null: quien llame tiene que aguantar quedarse sin id, y de hecho

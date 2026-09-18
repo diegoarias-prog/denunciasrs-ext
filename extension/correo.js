@@ -643,6 +643,12 @@ async function preparar_mensaje_con_adjuntos(para, asunto, html, documentos, res
   };
 }
 
+// EL EXCEL NO SE TOCA DESDE AQUÍ. La lista del Excel (`urls_denuncia`) ya se agotó
+// antes de que esta pantalla existiera: quien la generó —el popup o el menú del clic
+// derecho— volcó sus URLs en `email_reporte` y la limpió en ese mismo momento. Un
+// segundo borrado aquí no arreglaría nada y repartiría por dos archivos una regla que
+// tiene un solo sitio por camino.
+
 // Guarda en la denuncia del Registro (la ÚLTIMA iniciada, apuntada por
 // `ultima_denuncia_registro`) el correo REAL con el texto FINAL editado, para
 // poder verlo y copiarlo después. No debe bloquear el envío si algo falla.
