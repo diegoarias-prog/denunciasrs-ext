@@ -6,6 +6,43 @@
 //  (sin variables externas): su codigo fuente se serializa completo.
 // ===========================================================================
 async function APLICAR(pasos, opciones) {
+  // ===========================================================================
+  //  "HAY UNA PASADA EN CURSO EN ESTA PAGINA" (contador del mundo aislado).
+  //  POR QUE: el popup inyecta la 1.a pasada y esa pasada TARDA (~14 s medidos en la
+  //  pantalla de verificar el correo de TikTok). Ahora el popup arranca el bucle del
+  //  service worker ANTES de inyectarla (si lo hacia despues y el usuario cerraba el popup
+  //  a mitad, el bucle no arrancaba NUNCA y el formulario quedaba en blanco salvo los
+  //  menus). Con los dos vivos a la vez, el bucle tiene que SABER que la pasada del popup
+  //  sigue en marcha para no lanzar otra encima: dos pasadas simultaneas se pisan, y dos
+  //  clics reales sobre la misma casilla la DESMARCAN.
+  //  COMO: popup y service worker inyectan con `chrome.scripting` en el MISMO mundo
+  //  ISOLATED de la extension, asi que los dos ven este `window`. La sonda de solo lectura
+  //  del bucle (HUELLA_DEL_FORMULARIO, background.js) lo lee y devuelve `ocupado`.
+  //  Va con CONTADOR (no con un si/no) por si alguna vez se cruzan dos, y se libera en un
+  //  `finally`: una excepcion o una salida anticipada (el ancla de `urlForm`, mas abajo)
+  //  nunca lo dejan puesto. Si la pagina NAVEGA, el mundo aislado se destruye con ella y el
+  //  contador desaparece solo. La marca de tiempo es el seguro contra un contador colgado
+  //  (ver HUELLA_DEL_FORMULARIO): pasado un rato se deja de creer.
+  //  El cuerpo de siempre va en `cuerpoDeAplicar` (sin re-sangrar, para no tocar 1.600
+  //  lineas): las declaraciones de funcion se elevan, asi que se puede llamar desde aqui.
+  // ===========================================================================
+  //  LECTURA CON TIPO: `window.__x` puede no ser nuestro número. Un elemento de la página
+  //  con `id="__denunciasRS_pasadas_en_curso"` aparece como `window.__denunciasRS_...`
+  //  (DOM clobbering) y `elemento + 1` daría un texto o NaN. Lo que no sea un número
+  //  finito cuenta como 0, así el `finally` nunca deja NaN.
+  const contadorDePasadas = function () {
+    const n = window.__denunciasRS_pasadas_en_curso;
+    return (typeof n === "number" && isFinite(n)) ? n : 0;
+  };
+  window.__denunciasRS_pasadas_en_curso = contadorDePasadas() + 1;
+  window.__denunciasRS_pasada_desde = Date.now();
+  try {
+    return await cuerpoDeAplicar(pasos, opciones);
+  } finally {
+    window.__denunciasRS_pasadas_en_curso = Math.max(0, contadorDePasadas() - 1);
+  }
+
+  async function cuerpoDeAplicar(pasos, opciones) {
   opciones = opciones || {}; // { unaPasada: true } => una sola pasada (para el bucle del service worker)
   const dur = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -1644,6 +1681,7 @@ async function APLICAR(pasos, opciones) {
     hechos: tocados,
     informe: { pasos: Array.from(informePasos.values()), inventario: inventario }
   };
+  } // fin de cuerpoDeAplicar
 }
 
 // Exponer APLICAR como global para importScripts() del service worker y para el popup.

@@ -1885,6 +1885,54 @@ async function rellenar() {
   // encima de la denuncia nueva, mezclando las dos.
   try { await chrome.runtime.sendMessage({ accion: "detenerAutorelleno", tabId: objetivoTabId }); }
   catch (e) { /* si el service worker no responde, no hay bucle vivo que parar */ }
+  // `red_con_autoenvio` = lo que la RED permite (para explicarlo bien en el estado).
+  // `autoEnviable` = lo que va a pasar HOY: en modo prueba, jamas se envia.
+  const red_con_autoenvio = REDES_AUTOENVIO_POPUP.indexOf(form.red) >= 0;
+  const autoEnviable = red_con_autoenvio && !modo_prueba;
+  // ===========================================================================
+  //  AUTORRELLENO PERSISTENTE de la 2.ª etapa (TikTok): SE ARRANCA ANTES DE LA 1.ª PASADA.
+  //  Campos como "Tipo de obra", "Origen", "Descripción", firma, casillas y URL solo
+  //  aparecen DESPUÉS de verificar el correo. El service worker VIGILA la pestaña con una
+  //  sonda de solo lectura y, en cuanto el formulario aparece, repite APLICAR + clics reales
+  //  cada pocos segundos hasta 30 min (o hasta completar), así el usuario NO tiene que
+  //  volver a pulsar Rellenar. Vive en el service worker, así sobrevive a cerrar el popup y
+  //  a irse a verificar el correo. Ver autorelleno() en background.js.
+  //  POR QUÉ ANTES Y NO DESPUÉS (fallo real, captura del usuario): antes este mensaje se
+  //  mandaba DESPUÉS de `await executeScript(APLICAR)`, y esa 1.ª pasada tarda ~14 s en la
+  //  pantalla de verificar el correo. Si el usuario hacía clic fuera del popup en esos
+  //  segundos —lo normal: se va a la pestaña del formulario o a su correo—, el popup se
+  //  cerraba, el código de después del `await` NO SE EJECUTABA, el bucle no arrancaba nunca
+  //  y el formulario quedaba EN BLANCO salvo los dos desplegables (que la pasada inyectada
+  //  sí llegó a elegir). Ahora el bucle ya está vivo antes de empezar a esperar.
+  //  NUNCA DOS PASADAS A LA VEZ: el bucle y la pasada del popup conviven, así que APLICAR
+  //  marca la página como "pasada en curso" y la sonda del bucle no lanza la suya mientras
+  //  tanto (`ocupado`, ver HUELLA_DEL_FORMULARIO). `retrasoInicialMs` hace que el bucle
+  //  espere 4 s antes de mirar por primera vez: para entonces la pasada de abajo ya ha
+  //  puesto su marca.
+  // ===========================================================================
+  if (plan.autorepetir) {
+    // La 1.ª etapa (los desplegables) la hace la pasada de abajo, así que en la repetición
+    // van marcados `soloSiVacio`: si siguen respondidos, el paso se salta sin reabrirlos
+    // cada pocos segundos; si alguno volvió a "Select" (la página se recargó, la sesión se
+    // reinició, el usuario llegó por otro camino), se vuelve a elegir.
+    // ANTES se QUITABAN de la repetición, y ahí estaba el fallo: sin el desplegable
+    // "¿Qué problema tienes?" TikTok no muestra NI UN campo, así que el bucle se pasaba
+    // 30 minutos rellenando una página que nunca iba a enseñar el formulario y el usuario
+    // veía Marca comercial TODO EN BLANCO. Se copia el paso (Object.assign) para no tocar
+    // el plan original, que se sigue usando para la pasada y el informe de este mismo clic.
+    const pasos2 = plan.pasos.map(function (p) {
+      return p.tipo === "dropdown" ? Object.assign({}, p, { soloSiVacio: true }) : p;
+    });
+    // `urlForm` ANCLA el bucle a ESTA página (igual que en insistirRelleno): si la pestaña
+    // se va del formulario, el service worker para en vez de escribir los datos de la marca
+    // en otra pantalla y guardarla como comprobante.
+    // `modoPrueba` e `idDenuncia` viajan SIEMPRE: el bucle dura hasta 30 min y para
+    // entonces el popup ya no existe. Sin `idDenuncia` el bucle resolveria el destino
+    // del comprobante por `ultima_denuncia_registro`, que en una prueba apunta a la
+    // ULTIMA denuncia de verdad.
+    try { await chrome.runtime.sendMessage({ accion: "iniciarAutorelleno", tabId: objetivoTabId, pasos: pasos2, autoenviar: autoEnviable, marca: marca, enviarLabel: plan.enviarLabel, urlForm: plan.url, idDenuncia: id_de_la_denuncia_en_curso, modoPrueba: modo_prueba, retrasoInicialMs: 4000 }); }
+    catch (e) { /* si el service worker no responde, el usuario puede pulsar Rellenar otra vez */ }
+  }
   mostrar_estado("aviso", "Rellenando…");
   try {
     const res = await chrome.scripting.executeScript({
@@ -1918,7 +1966,11 @@ async function rellenar() {
       } });
     } catch (e) { /* el informe es solo ayuda: nunca debe romper el relleno */ }
     // Clics REALES de los radios/casillas (los sintéticos no "pegan" en React).
-    if (r.clicsReales && r.clicsReales.length) {
+    // En planes AUTOREPETIR NO se dan desde aquí: el bucle del service worker ya está vivo
+    // (se arrancó arriba) y en su siguiente pasada vuelve a pedir estos mismos clics. Si
+    // los diera también el popup, un clic real suyo y otro del bucle podrían caer sobre la
+    // MISMA casilla y DESMARCARLA (ya pasó: ver "clic real con identificador único").
+    if (!plan.autorepetir && r.clicsReales && r.clicsReales.length) {
       mostrar_estado("aviso", "Marcando opciones…");
       // `urlForm` ANCLA los clics REALES a la página del formulario: entre la pasada de
       // arriba y este mensaje la pestaña puede haberse ido, y estos clics son de confianza
@@ -1926,40 +1978,11 @@ async function rellenar() {
       try { await chrome.runtime.sendMessage({ accion: "clicsReales", tabId: objetivoTabId, selectores: r.clicsReales, urlForm: plan.url }); }
       catch (e) { /* si falla el modo avanzado, los radios quedan manuales */ }
     }
-    // AUTORRELLENO PERSISTENTE de la 2.ª etapa (TikTok): campos como "Tipo de obra",
-    // "Origen", "Descripción", firma, casillas y URL solo aparecen DESPUÉS de verificar el
-    // correo. El service worker VIGILA la pestaña con una sonda de solo lectura y, en cuanto el
-    // formulario aparece, repite APLICAR + clics reales cada pocos segundos hasta 30 min (o hasta
-    // completar), así el usuario NO tiene que volver a pulsar Rellenar. Vive en el
-    // service worker (no en el popup ni en un timer de la página), así sobrevive a cerrar el
-    // popup y a irse a verificar el correo. Ver autorelleno() en background.js.
-    // `red_con_autoenvio` = lo que la RED permite (para explicarlo bien en el estado).
-    // `autoEnviable` = lo que va a pasar HOY: en modo prueba, jamas se envia.
-    const red_con_autoenvio = REDES_AUTOENVIO_POPUP.indexOf(form.red) >= 0;
-    const autoEnviable = red_con_autoenvio && !modo_prueba;
     let insistiendo = false; // true = el service worker se quedó reintentando en segundo plano
     if (plan.autorepetir) {
-      // La 1.ª etapa (los desplegables) ya quedó hecha en este primer clic, así que en la
-      // repetición van marcados `soloSiVacio`: si siguen respondidos, el paso se salta sin
-      // reabrirlos cada pocos segundos; si alguno volvió a "Select" (la página se recargó, la
-      // sesión se reinició, el usuario llegó por otro camino), se vuelve a elegir.
-      // ANTES se QUITABAN de la repetición, y ahí estaba el fallo: sin el desplegable
-      // "¿Qué problema tienes?" TikTok no muestra NI UN campo, así que el bucle se pasaba
-      // 30 minutos rellenando una página que nunca iba a enseñar el formulario y el usuario
-      // veía Marca comercial TODO EN BLANCO. Se copia el paso (Object.assign) para no tocar
-      // el plan original, que se sigue usando para el informe de este mismo clic.
-      const pasos2 = plan.pasos.map(function (p) {
-        return p.tipo === "dropdown" ? Object.assign({}, p, { soloSiVacio: true }) : p;
-      });
-      // `urlForm` ANCLA el bucle a ESTA página (igual que en insistirRelleno): si la pestaña
-      // se va del formulario, el service worker para en vez de escribir los datos de la marca
-      // en otra pantalla y guardarla como comprobante.
-      // `modoPrueba` e `idDenuncia` viajan SIEMPRE: el bucle dura hasta 30 min y para
-      // entonces el popup ya no existe. Sin `idDenuncia` el bucle resolveria el destino
-      // del comprobante por `ultima_denuncia_registro`, que en una prueba apunta a la
-      // ULTIMA denuncia de verdad.
-      try { await chrome.runtime.sendMessage({ accion: "iniciarAutorelleno", tabId: objetivoTabId, pasos: pasos2, autoenviar: autoEnviable, marca: marca, enviarLabel: plan.enviarLabel, urlForm: plan.url, idDenuncia: id_de_la_denuncia_en_curso, modoPrueba: modo_prueba }); }
-      catch (e) { /* si el service worker no responde, el usuario puede pulsar Rellenar otra vez */ }
+      // El bucle del service worker YA se arrancó ANTES de esta pasada (ver arriba, junto a
+      // `detenerAutorelleno`): aquí no se manda nada más. Si el popup se cerró mientras la
+      // pasada corría, esta línea ni se llega a ejecutar, y da igual: el bucle ya está vivo.
     } else if (plan.insistir && nada) {
       // No se reconoció NI UN campo y el plan pide INSISTIR (Meta · Derechos de autor):
       // la página aún no ha pintado el formulario (pantalla intermedia del portal nuevo,
