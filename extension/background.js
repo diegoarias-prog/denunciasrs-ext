@@ -178,9 +178,27 @@ function HUELLA_DEL_FORMULARIO() {
       if (!tm || tm.indexOf("select") >= 0 || tm.indexOf("seleccion") >= 0 ||
           tm.indexOf("elegir") >= 0 || tm.indexOf("elige") >= 0 || tm.indexOf("choose") >= 0) menusSinResponder++;
     }
-    return { cajas: cajas, opciones: opciones, rotulos: rotulos, menusSinResponder: menusSinResponder };
+    // ¿HAY UNA PASADA DE APLICAR EN CURSO en esta pagina? (la 1.a del popup, normalmente).
+    // APLICAR (motor.js) sube `__denunciasRS_pasadas_en_curso` al entrar y lo baja en un
+    // `finally` al salir; popup y service worker inyectan en el MISMO mundo aislado de la
+    // extension, asi que esta sonda lo ve. Con `ocupado` el bucle NO lanza su pasada encima
+    // (ver autorelleno). SEGURO contra un contador colgado: si la ultima pasada empezo hace
+    // mas de 2 minutos se deja de creer (ninguna pasada real dura tanto: la mas lenta
+    // medida, 13,7 s), para que un contador que no bajara no deje al bucle esperando los
+    // 30 minutos enteros sin rellenar nada.
+    // Leidos CON TIPO: un elemento con ese `id` en la pagina aparece como `window.__...`
+    // (DOM clobbering). Lo que no sea un numero finito cuenta como 0 -> ocupado=false.
+    var enCurso = 0, desde = 0;
+    try {
+      enCurso = window.__denunciasRS_pasadas_en_curso;
+      enCurso = (typeof enCurso === "number" && isFinite(enCurso)) ? enCurso : 0;
+      desde = window.__denunciasRS_pasada_desde;
+      desde = (typeof desde === "number" && isFinite(desde)) ? desde : 0;
+    } catch (x) { enCurso = 0; desde = 0; }
+    var ocupado = enCurso > 0 && (Date.now() - desde) < 120000;
+    return { cajas: cajas, opciones: opciones, rotulos: rotulos, menusSinResponder: menusSinResponder, ocupado: ocupado };
   } catch (x) {
-    return { cajas: 0, opciones: 0, rotulos: 0, menusSinResponder: 0 };
+    return { cajas: 0, opciones: 0, rotulos: 0, menusSinResponder: 0, ocupado: false };
   }
 }
 
@@ -277,6 +295,22 @@ async function autorelleno(tabId, pasos, opts) {
   // mire una persona antes de mandar la denuncia. Se rellena y se captura igual.
   const PAUSA_QUE_QUITA_EL_AUTOENVIO = 60000;
 
+  // RETRASO INICIAL (opcional). El popup arranca este bucle ANTES de inyectar su 1.a pasada
+  // (si lo arrancaba DESPUES y el usuario cerraba el popup mientras esa pasada corria —~14 s
+  // medidos en la pantalla de verificar el correo de TikTok—, el bucle no arrancaba nunca y
+  // el formulario quedaba en blanco salvo los menus). Esperar un poco antes de la 1.a vuelta
+  // da tiempo a que esa pasada del popup ya haya puesto su marca de "pasada en curso", y
+  // la sonda la vea (ver `ocupado` mas abajo). Se espera EN TROZOS para que cancelar el
+  // bucle (otra denuncia, pestana cerrada) surta efecto sin aguantar la espera entera.
+  // Acotado a 10 s: un valor raro no puede dejar el bucle dormido.
+  let retrasoInicial = Number(opts.retrasoInicialMs) || 0;
+  retrasoInicial = Math.max(0, Math.min(10000, retrasoInicial));
+  while (retrasoInicial > 0 && !estado.cancelar) {
+    const trozo = Math.min(500, retrasoInicial);
+    await dormir(trozo);
+    retrasoInicial -= trozo;
+  }
+
   while (!estado.cancelar && Date.now() < fin) {
     // 1) ¿DÓNDE está la pestaña?
     const donde = await dondeEsta();
@@ -337,6 +371,17 @@ async function autorelleno(tabId, pasos, opts) {
       // correo. Antes esto hacía `break` y el autorrelleno moría para siempre, en silencio.
       if (++fallos >= 8) { porFallos = true; break; } // ~20 s seguidos sin poder inyectar
       await dormir(2500);
+      continue;
+    }
+
+    // 2-bis) HAY UNA PASADA DE APLICAR EN CURSO en la página (la 1.ª del popup, que ahora
+    //    corre A LA VEZ que este bucle): NO se lanza otra encima. Dos pasadas simultáneas se
+    //    pisan los campos, y dos clics reales sobre la misma casilla la DESMARCAN (ya pasó:
+    //    ver "clic real con identificador único"). Se mira ANTES que lo de "¿hay
+    //    formulario?" y NO cuenta como fallo: la página está bien, solo ocupada. En cuanto
+    //    esa pasada termine (o la página navegue y el contador desaparezca), sigue el bucle.
+    if (huella && huella.ocupado) {
+      await dormir(1000);
       continue;
     }
 
@@ -1302,7 +1347,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // escribir los datos de la marca en otra pantalla o guardarla como comprobante.
     // `modoPrueba` e `idDenuncia` son OPCIONALES: un mensaje viejo sin ellos se comporta
     // exactamente como antes (idDenuncia -> la denuncia en curso; modoPrueba -> false).
-    if (tabId && Array.isArray(msg.pasos)) autorelleno(tabId, msg.pasos, { autoenviar: !!msg.autoenviar, marca: msg.marca, enviarLabel: msg.enviarLabel, urlForm: msg.urlForm || "", idDenuncia: msg.idDenuncia, modoPrueba: !!msg.modoPrueba }); // bucle en segundo plano; envía al completar si procede
+    // `retrasoInicialMs` (OPCIONAL, autorelleno lo acota a 10 s): el popup ahora arranca el
+    // bucle ANTES de su 1.a pasada, y con esto el bucle espera a que esa pasada ya este
+    // marcada como "en curso" antes de mirar la pagina. Sin el, se arranca al momento.
+    if (tabId && Array.isArray(msg.pasos)) autorelleno(tabId, msg.pasos, { autoenviar: !!msg.autoenviar, marca: msg.marca, enviarLabel: msg.enviarLabel, urlForm: msg.urlForm || "", idDenuncia: msg.idDenuncia, modoPrueba: !!msg.modoPrueba, retrasoInicialMs: msg.retrasoInicialMs }); // bucle en segundo plano; envía al completar si procede
     sendResponse({ ok: true });
     return; // no necesitamos mantener el canal abierto
   }
