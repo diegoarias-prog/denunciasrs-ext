@@ -51,6 +51,72 @@ let instantanea_cajon = "";
 let fechas_seleccionadas = [];
 
 // ----------------------------------------------------------------------------
+//  FILTROS DE CABECERA (estilo Excel). NO son un segundo sistema: comparten el
+//  estado con la barra de arriba.
+//   - Marca / Plataforma / Estado: la VERDAD es el <select> de arriba. Si en la
+//     cabecera se elige UNA sola, el select la muestra tal cual; si se eligen
+//     VARIAS, el select pasa a la opción oculta VALOR_VARIAS_FILTRO_REGISTRO
+//     ("2 marcas") y la lista vive en filtros_de_columna_registro. Cambiar el
+//     select (o ponerle .value por código, como hace "Registrarlos ahora")
+//     manda sobre la lista: ver valores_efectivos_de_filtro().
+//   - Fechas: los días concretos son los MISMOS fechas_seleccionadas del menú
+//     📅; el rango Desde/Hasta es nuevo y el menú 📅 lo refleja en su resumen.
+//   - N.º de caso: el texto es el MISMO input #filtro_numero_caso; "Sin N.º de
+//     caso" es el MISMO chip sin_caso; "Con N.º de caso" es nuevo (caso_con).
+//   - Enviado a y Categoría sólo existen en la cabecera.
+// ----------------------------------------------------------------------------
+// La opción OCULTA de "varias" se reconoce SIEMPRE por su marca dataset.varias="1",
+// NUNCA por el value: una marca o plataforma real podría llamarse igual. Se
+// elige por índice (selectedIndex), porque sel.value = X elegiría la PRIMERA
+// opción con ese value, que podría ser la real.
+const VALOR_VARIAS_FILTRO_REGISTRO = "__varias__";
+
+function opcion_varias_elegida(sel) {
+  const o = sel && sel.selectedIndex >= 0 ? sel.options[sel.selectedIndex] : null;
+  return !!(o && o.dataset && o.dataset.varias === "1");
+}
+
+function quitar_opcion_varias(sel) {
+  if (!sel) return;
+  Array.prototype.slice.call(sel.options).forEach((o) => { if (o.dataset.varias === "1") o.remove(); });
+}
+
+// Texto de un estado SIN mirar el prototipo: un estado guardado como
+// "toString" o "constructor" se muestra tal cual y no como una función.
+function texto_de_estado(v) {
+  return Object.prototype.hasOwnProperty.call(ESTADOS_REGISTRO, v) ? ESTADOS_REGISTRO[v] : v;
+}
+
+// Para los buscadores de los paneles: sin mayúsculas, espacios de sobra NI
+// acentos ("nandu" encuentra "Ñandú").
+function normalizar_sin_acentos(texto) {
+  return normalizar_para_buscar(texto).normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+const CLAVE_ORDEN_FECHA_REGISTRO = "registro_denuncias_orden_fecha";
+let filtros_de_columna_registro = {
+  marcas: [], plataformas: [], estados: [],     // sólo cuentan con el select en "varias"
+  destinos: [], texto_destino: "",
+  categorias: [],
+  caso_con: false,                              // "Con N.º de caso"
+  fecha_desde: "", fecha_hasta: ""              // "aaaa-mm-dd" (día LOCAL)
+};
+// Orden de la tabla por fecha+hora REAL de la denuncia: "desc" = más recientes arriba.
+let orden_fecha_registro = leer_orden_fecha_guardado();
+// Columna cuyo panel de filtro está abierto ("" = ninguno).
+let columna_con_panel_abierto = "";
+
+function leer_orden_fecha_guardado() {
+  try {
+    const v = window.localStorage.getItem(CLAVE_ORDEN_FECHA_REGISTRO);
+    return v === "asc" ? "asc" : "desc";
+  } catch (e) { return "desc"; }
+}
+
+function guardar_orden_fecha(valor) {
+  try { window.localStorage.setItem(CLAVE_ORDEN_FECHA_REGISTRO, valor); } catch (e) { /* sin storage: sólo esta sesión */ }
+}
+
+// ----------------------------------------------------------------------------
 //  NÚMEROS DE CASO: una denuncia puede tener VARIOS.
 //  Campo canónico: `numeros_caso` (arreglo de textos). Se conserva SIEMPRE
 //  `numero_caso` (los mismos, unidos por ", ") porque no es sólo nuestro: el
@@ -189,9 +255,15 @@ function poblar_selects_de_plataforma(plataformas) {
   ].forEach(({ sel, inicial }) => {
     if (!sel) return;
     const elegido = sel.value;                 // se guarda ANTES de vaciar
+    const estaba_en_varias = opcion_varias_elegida(sel);
     llenar_select(sel, plataformas, inicial);
     // Sólo se reasigna si la opción sigue existiendo; si no, queda el valor inicial.
-    if (elegido && plataformas.indexOf(elegido) !== -1) sel.value = elegido;
+    if (!estaba_en_varias && elegido && plataformas.indexOf(elegido) !== -1) sel.value = elegido;
+    // Filtro con VARIAS plataformas elegidas en la cabecera: se rehace la opción
+    // oculta "N plataformas" para no perder la selección al repoblar.
+    if (sel.id === "filtro_plataforma" && estaba_en_varias) {
+      reflejar_seleccion_en_select("filtro_plataforma", filtros_de_columna_registro.plataformas, "plataformas");
+    }
   });
 }
 
@@ -434,18 +506,33 @@ function denuncias_filtradas() {
   // Buscador DEDICADO: mira sólo los números de caso. Se normalizan los espacios
   // de sobra en los dos lados para que "0148 - 77" encuentre "0148 - 77321".
   const qCaso = normalizar_para_buscar($("filtro_numero_caso").value);
-  const fMarca = $("filtro_marca").value;
-  const fPlat = $("filtro_plataforma").value;
-  const fEstado = $("filtro_estado").value;
+  // Marca / plataforma / estado admiten VARIOS valores (cabecera); con uno solo
+  // equivalen al select de arriba de siempre.
+  const fMarcas = valores_efectivos_de_filtro("filtro_marca", "marcas");
+  const fPlats = valores_efectivos_de_filtro("filtro_plataforma", "plataformas");
+  const fEstados = valores_efectivos_de_filtro("filtro_estado", "estados");
+  const fc = filtros_de_columna_registro;
+  const qDestino = normalizar_para_buscar(fc.texto_destino);
   return DENUNCIAS.filter((d) => {
     // Chips (excluyentes entre sí) ADEMÁS de los selects y de los buscadores.
     if (chip_activo === "sin_caso" && numeros_de_caso(d).length > 0) return false;
     if (chip_activo === "sin_captura" && !(d.tipo === "formulario" && !d.comprobante_img)) return false;
-    if (fMarca && d.marca !== fMarca) return false;
-    if (fPlat && d.plataforma !== fPlat) return false;
-    if (fEstado && d.estado !== fEstado) return false;
+    if (fMarcas.length && fMarcas.indexOf(d.marca || "") === -1) return false;
+    if (fPlats.length && fPlats.indexOf(d.plataforma || "") === -1) return false;
+    if (fEstados.length && fEstados.indexOf(d.estado || "") === -1) return false;
     // Días CONCRETOS marcados (no un rango). Sin ninguno marcado, pasan todas.
     if (fechas_seleccionadas.length && fechas_seleccionadas.indexOf(dia_de_denuncia(d)) === -1) return false;
+    // Rango Desde / Hasta de la cabecera (día LOCAL, extremos incluidos).
+    if (fc.fecha_desde || fc.fecha_hasta) {
+      const dia = dia_iso_local_de(d && d.fecha);
+      if (!dia) return false;
+      if (fc.fecha_desde && dia < fc.fecha_desde) return false;
+      if (fc.fecha_hasta && dia > fc.fecha_hasta) return false;
+    }
+    if (fc.caso_con && numeros_de_caso(d).length === 0) return false;
+    if (fc.destinos.length && fc.destinos.indexOf(destino_de(d)) === -1) return false;
+    if (qDestino && normalizar_para_buscar(destino_de(d) + " " + correos_destino_de(d).join(" ")).indexOf(qDestino) < 0) return false;
+    if (fc.categorias.length && fc.categorias.indexOf(String(d.categoria || "").trim()) === -1) return false;
     if (qCaso && normalizar_para_buscar(numeros_de_caso(d).join(" ")).indexOf(qCaso) < 0) return false;
     if (q) {
       // El buscador general incluye el destino (softonic.com…), los correos a los
@@ -475,11 +562,38 @@ function dia_de_denuncia(d) {
   return partes_de_fecha(d && d.fecha).dia;
 }
 
+// Marca de tiempo REAL (milisegundos) de la denuncia. Nunca el texto dd/mm/aaaa:
+// ordenado como texto, el 02/10 iría antes que el 30/09.
+function marca_de_tiempo_de(d) {
+  // new Date(...) como formatear_fecha: lo que se ordena es lo que se ve.
+  if (!d || d.fecha == null || d.fecha === "") return null;
+  const t = new Date(d.fecha).getTime();
+  return isNaN(t) ? null : t;
+}
+
+// Ordena por fecha+hora. "desc" = las MÁS RECIENTES ARRIBA (por defecto).
+// Empates (misma marca de tiempo): manda el orden de guardado, que también es
+// cronológico (la última guardada es la más nueva). Sin fecha válida: al final.
+function ordenar_denuncias_por_fecha(lista, orden) {
+  const signo = orden === "asc" ? 1 : -1;
+  return lista
+    .map((d, i) => ({ d: d, i: i, t: marca_de_tiempo_de(d) }))
+    .sort((a, b) => {
+      if (a.t === null && b.t === null) return a.i - b.i;
+      if (a.t === null) return 1;
+      if (b.t === null) return -1;
+      if (a.t !== b.t) return (a.t - b.t) * signo;
+      return (a.i - b.i) * signo;
+    })
+    .map((x) => x.d);
+}
+
 function pintar_tabla() {
   const cuerpo = $("cuerpo_registro");
-  const lista = denuncias_filtradas();
+  const lista = ordenar_denuncias_por_fecha(denuncias_filtradas(), orden_fecha_registro);
   cuerpo.innerHTML = "";
   $("mensaje_vacio").style.display = lista.length ? "none" : "block";
+  actualizar_indicadores_de_cabecera(lista.length);
 
   lista.forEach((d) => {
     const tr = document.createElement("tr");
@@ -517,7 +631,7 @@ function pintar_tabla() {
         escapar_html(destino_de(d) || "—") + '</td>' +
       '<td>' + escapar_html(d.categoria || "—") + '</td>' +
       '<td class="celda_caso"></td>' +
-      '<td><span class="pastilla ' + escapar_html(clase_estado) + '">' + escapar_html(ESTADOS_REGISTRO[d.estado] || d.estado || "") + '</span></td>' +
+      '<td><span class="pastilla ' + escapar_html(clase_estado) + '">' + escapar_html(texto_de_estado(d.estado) || "") + '</span></td>' +
       '<td class="celda_adjuntos" title="' + escapar_html(titulo_adjuntos) + '">' + iconos_adjuntos + '</td>' +
       '<td class="acciones_fila">' +
         '<button type="button" class="icono_btn" data-accion="ver" title="Ver comprobante">👁</button>' +
@@ -776,11 +890,15 @@ async function guardar_caso_en_linea(celda, denuncia_de_la_fila, valores) {
 // Chips excluyentes: "todas" | "sin_caso" | "sin_captura".
 function activar_chip(valor) {
   chip_activo = valor || "todas";
+  // "Sin N.º de caso" y "Con N.º de caso" (cabecera) no pueden convivir.
+  if (chip_activo === "sin_caso") filtros_de_columna_registro.caso_con = false;
   document.querySelectorAll(".chip_filtro").forEach((b) => {
     const es_activo = b.dataset.chip === chip_activo;
     b.classList.toggle("activo", es_activo);
     b.setAttribute("aria-pressed", es_activo ? "true" : "false");
   });
+  // El panel "N.º de caso" de la cabecera refleja el chip (Con / Sin / Todas).
+  if (columna_con_panel_abierto === "caso") construir_panel_filtro_columna("caso");
   pintar_tabla();
 }
 
@@ -793,6 +911,15 @@ function ir_a_registrar_numeros_de_caso() {
   $("filtro_marca").value = "";
   $("filtro_plataforma").value = "";
   $("filtro_estado").value = "";
+  // Selección múltiple de la cabecera: se olvida la lista y se quita la opción
+  // oculta "varias" (si no, quedaría colgada en el select).
+  ["marcas", "plataformas", "estados"].forEach((clave) => {
+    filtros_de_columna_registro[clave] = [];
+    quitar_opcion_varias($(SELECTS_DE_FILTRO_MULTIPLE[clave].id));
+  });
+  // Los filtros que sólo viven en la cabecera, por la misma razón.
+  limpiar_filtros_solo_de_cabecera();
+  cerrar_panel_filtro_columna(false);
   activar_chip("sin_caso");
   const primera = celdas_caso_de_la_tabla()[0];
   if (!primera) return;
@@ -814,13 +941,13 @@ function clave_de_orden_del_dia(dia) {
 
 // Días que aparecen en el registro con cuántas denuncias tiene cada uno.
 function fechas_del_registro() {
-  const cuenta = {};
+  const cuenta = new Map();   // Map: ninguna clave choca con el prototipo
   DENUNCIAS.forEach((d) => {
     const dia = dia_de_denuncia(d);
-    if (dia) cuenta[dia] = (cuenta[dia] || 0) + 1;
+    if (dia) cuenta.set(dia, (cuenta.get(dia) || 0) + 1);
   });
-  return Object.keys(cuenta)
-    .map((dia) => ({ dia: dia, cuantas: cuenta[dia] }))
+  return Array.from(cuenta.keys())
+    .map((dia) => ({ dia: dia, cuantas: cuenta.get(dia) }))
     .sort((a, b) => clave_de_orden_del_dia(b.dia).localeCompare(clave_de_orden_del_dia(a.dia)));
 }
 
@@ -833,6 +960,17 @@ function renderizar_menu_de_fechas() {
   const existentes = fechas.map((f) => f.dia);
   fechas_seleccionadas = fechas_seleccionadas.filter((f) => existentes.indexOf(f) !== -1);
 
+  crear_casillas_de_fechas(lista, fechas);
+  // La misma lista de días vive también en el panel de la cabecera "Fecha".
+  const lista_cabecera = $("lista_dias_cabecera_registro");
+  if (lista_cabecera) crear_casillas_de_fechas(lista_cabecera, fechas);
+
+  actualizar_resumen_de_fechas();
+}
+
+// Pinta las casillas de los días en un contenedor (el menú 📅 o el panel de la
+// cabecera). Las dos listas comparten fechas_seleccionadas.
+function crear_casillas_de_fechas(lista, fechas) {
   lista.innerHTML = "";   // se vacía; las opciones se re-crean con createElement
   if (!fechas.length) {
     const vacio = document.createElement("div");
@@ -846,6 +984,7 @@ function renderizar_menu_de_fechas() {
 
     const casilla = document.createElement("input");
     casilla.type = "checkbox";
+    casilla.className = "casilla_dia_registro";
     casilla.value = f.dia;                                     // por propiedad
     casilla.checked = fechas_seleccionadas.indexOf(f.dia) !== -1;
     casilla.addEventListener("change", () => marcar_fecha(f.dia, casilla.checked));
@@ -861,32 +1000,47 @@ function renderizar_menu_de_fechas() {
     opcion.appendChild(conteo);
     lista.appendChild(opcion);
   });
+}
 
-  actualizar_resumen_de_fechas();
+// Deja TODAS las casillas de días (menú 📅 y cabecera) igual que el estado.
+function sincronizar_casillas_de_dias() {
+  document.querySelectorAll("input.casilla_dia_registro").forEach((c) => {
+    c.checked = fechas_seleccionadas.indexOf(c.value) !== -1;
+  });
 }
 
 function marcar_fecha(dia, marcada) {
   const i = fechas_seleccionadas.indexOf(dia);
   if (marcada && i === -1) fechas_seleccionadas.push(dia);
   if (!marcada && i !== -1) fechas_seleccionadas.splice(i, 1);
+  sincronizar_casillas_de_dias();
   actualizar_resumen_de_fechas();
   pintar_tabla();
 }
 
+// "Todas las fechas" / "Limpiar" del menú 📅: quita los días Y el rango de la
+// cabecera (es el mismo filtro de fechas, visto desde dos sitios).
 function limpiar_filtro_de_fechas() {
   fechas_seleccionadas = [];
+  filtros_de_columna_registro.fecha_desde = "";
+  filtros_de_columna_registro.fecha_hasta = "";
   $("lista_fechas").querySelectorAll('input[type="checkbox"]').forEach((c) => { c.checked = false; });
+  sincronizar_casillas_de_dias();
+  sincronizar_rango_en_panel_de_fecha();
   actualizar_resumen_de_fechas();
   pintar_tabla();
 }
 
-// El botón resume el estado: "Todas las fechas" / la fecha / "N fechas seleccionadas".
+// El botón resume el estado: "Todas las fechas" / la fecha / "N fechas seleccionadas"
+// y, si hay rango puesto en la cabecera, también el rango.
 function actualizar_resumen_de_fechas() {
   const n = fechas_seleccionadas.length;
-  $("resumen_fechas").textContent = n === 0 ? "Todas las fechas"
-    : (n === 1 ? fechas_seleccionadas[0] : n + " fechas seleccionadas");
-  $("boton_menu_fechas").classList.toggle("con_filtro", n > 0);
-  $("casilla_todas_las_fechas").checked = n === 0;
+  const rango = texto_del_rango_de_fechas();
+  let resumen = n === 0 ? "Todas las fechas" : (n === 1 ? fechas_seleccionadas[0] : n + " fechas seleccionadas");
+  if (rango) resumen = n === 0 ? rango : resumen + " · " + rango;
+  $("resumen_fechas").textContent = resumen;
+  $("boton_menu_fechas").classList.toggle("con_filtro", n > 0 || !!rango);
+  $("casilla_todas_las_fechas").checked = n === 0 && !rango;
 }
 
 function menu_de_fechas_abierto() {
@@ -895,6 +1049,7 @@ function menu_de_fechas_abierto() {
 }
 
 function abrir_menu_de_fechas() {
+  if (panel_filtro_columna_abierto()) cerrar_panel_filtro_columna(false);   // un desplegable a la vez
   $("panel_menu_fechas").hidden = false;
   $("boton_menu_fechas").setAttribute("aria-expanded", "true");
 }
@@ -902,6 +1057,511 @@ function abrir_menu_de_fechas() {
 function cerrar_menu_de_fechas() {
   $("panel_menu_fechas").hidden = true;
   $("boton_menu_fechas").setAttribute("aria-expanded", "false");
+}
+
+// ============================================================================
+//  FILTROS EN LA CABECERA DE LA TABLA (estilo Excel) + ORDEN POR FECHA
+//  Un ▾ junto a cada título abre UN panel flotante (position: fixed, fuera del
+//  contenedor con scroll, así nunca queda recortado). Todo se crea con
+//  createElement y los datos del usuario entran por textContent/value.
+// ============================================================================
+
+// ---- Fechas en formato "aaaa-mm-dd" del día LOCAL (el de los <input type=date>).
+function iso_local_de_fecha(f) {
+  const p = (n) => String(n).padStart(2, "0");
+  return f.getFullYear() + "-" + p(f.getMonth() + 1) + "-" + p(f.getDate());
+}
+
+function dia_iso_local_de(iso) {
+  const f = new Date(iso);
+  return isNaN(f.getTime()) ? "" : iso_local_de_fecha(f);
+}
+
+// "aaaa-mm-dd" -> "dd/mm/aaaa" (para el resumen del menú 📅).
+function dia_iso_a_texto(dia) {
+  const p = String(dia || "").split("-");
+  return p.length === 3 ? p[2] + "/" + p[1] + "/" + p[0] : "";
+}
+
+function texto_del_rango_de_fechas() {
+  const de = filtros_de_columna_registro.fecha_desde, ha = filtros_de_columna_registro.fecha_hasta;
+  if (!de && !ha) return "";
+  if (de && ha) return de === ha ? dia_iso_a_texto(de) : dia_iso_a_texto(de) + " – " + dia_iso_a_texto(ha);
+  return de ? "Desde " + dia_iso_a_texto(de) : "Hasta " + dia_iso_a_texto(ha);
+}
+
+// Rangos de los atajos, calculados en el día LOCAL de hoy.
+function rango_de_atajo_de_fecha(tipo) {
+  const hoy = new Date();
+  const dia = (y, m, d) => iso_local_de_fecha(new Date(y, m, d));
+  const y = hoy.getFullYear(), m = hoy.getMonth(), d = hoy.getDate();
+  if (tipo === "hoy") return [dia(y, m, d), dia(y, m, d)];
+  if (tipo === "ayer") return [dia(y, m, d - 1), dia(y, m, d - 1)];
+  if (tipo === "ultimos_7") return [dia(y, m, d - 6), dia(y, m, d)];
+  if (tipo === "este_mes") return [dia(y, m, 1), dia(y, m + 1, 0)];
+  if (tipo === "mes_pasado") return [dia(y, m - 1, 1), dia(y, m, 0)];
+  return ["", ""];   // "todas"
+}
+
+const ATAJOS_DE_FECHA_REGISTRO = [
+  { tipo: "hoy", texto: "Hoy" }, { tipo: "ayer", texto: "Ayer" },
+  { tipo: "ultimos_7", texto: "Últimos 7 días" }, { tipo: "este_mes", texto: "Este mes" },
+  { tipo: "mes_pasado", texto: "Mes pasado" }, { tipo: "todas", texto: "Todas" }
+];
+
+// Un atajo REEMPLAZA el filtro de fechas: pone su rango y quita los días sueltos
+// (si no, "Hoy" con un día viejo marcado daría 0 filas sin motivo aparente).
+function aplicar_atajo_de_fecha(tipo) {
+  const r = rango_de_atajo_de_fecha(tipo);
+  fechas_seleccionadas = [];
+  filtros_de_columna_registro.fecha_desde = r[0];
+  filtros_de_columna_registro.fecha_hasta = r[1];
+  sincronizar_casillas_de_dias();
+  sincronizar_rango_en_panel_de_fecha();
+  actualizar_resumen_de_fechas();
+  pintar_tabla();
+}
+
+function fijar_rango_de_fechas(desde, hasta) {
+  // Desde posterior a Hasta: se intercambian (el usuario las escribió al revés).
+  if (desde && hasta && desde > hasta) { const t = desde; desde = hasta; hasta = t; }
+  filtros_de_columna_registro.fecha_desde = desde || "";
+  filtros_de_columna_registro.fecha_hasta = hasta || "";
+  sincronizar_rango_en_panel_de_fecha();
+  actualizar_resumen_de_fechas();
+  pintar_tabla();
+}
+
+// Pone los Desde/Hasta y el atajo resaltado del panel (si está abierto) igual
+// que el estado: el estado puede cambiar desde el menú 📅 o "Limpiar filtros".
+function sincronizar_rango_en_panel_de_fecha() {
+  const de = $("fecha_desde_cabecera_registro"), ha = $("fecha_hasta_cabecera_registro");
+  if (de) de.value = filtros_de_columna_registro.fecha_desde;
+  if (ha) ha.value = filtros_de_columna_registro.fecha_hasta;
+  document.querySelectorAll(".atajo_fecha_registro").forEach((b) => {
+    const r = rango_de_atajo_de_fecha(b.dataset.atajo);
+    const activo = b.dataset.atajo === "todas"
+      ? (!filtros_de_columna_registro.fecha_desde && !filtros_de_columna_registro.fecha_hasta && !fechas_seleccionadas.length)
+      : (r[0] === filtros_de_columna_registro.fecha_desde && r[1] === filtros_de_columna_registro.fecha_hasta);
+    b.classList.toggle("activo", activo);
+    b.setAttribute("aria-pressed", activo ? "true" : "false");
+  });
+}
+
+// ---- Marca / Plataforma / Estado: el select de arriba es la verdad.
+// Con el select en una opción normal, se filtra por ESA; en "varias", por la
+// lista de la cabecera. Así poner .value por código sigue funcionando.
+function valores_efectivos_de_filtro(id_select, clave) {
+  const sel = $(id_select);
+  if (opcion_varias_elegida(sel)) return filtros_de_columna_registro[clave].slice();
+  const v = sel.value;
+  return v ? [v] : [];
+}
+
+// Refleja en el select de arriba lo elegido en la cabecera. Con UNA opción que
+// existe en el select, queda elegida tal cual; con varias (o una que el select
+// no trae, p. ej. un estado antiguo "Borrador"), se usa una opción OCULTA que
+// dice cuántas hay ("2 marcas").
+function reflejar_seleccion_en_select(id_select, valores, plural, texto_de) {
+  const sel = $(id_select);
+  if (!sel) return;
+  quitar_opcion_varias(sel);
+  if (!valores.length) { sel.value = ""; return; }
+  // OJO: el valor "" (p. ej. "(sin estado)") NO puede ir a la opción "" del
+  // select, que significa "Todos" y quitaría el filtro.
+  const existe = valores.length === 1 && valores[0] !== "" &&
+    Array.prototype.some.call(sel.options, (o) => o.value === valores[0]);
+  if (existe) { sel.value = valores[0]; return; }
+  const o = document.createElement("option");
+  o.value = VALOR_VARIAS_FILTRO_REGISTRO;
+  o.dataset.varias = "1";                   // ESTO la identifica (no el value)
+  o.hidden = true;                          // no se ofrece en la lista del select
+  o.textContent = valores.length === 1
+    ? (texto_de ? texto_de(valores[0]) : valores[0]) || "(vacío)"
+    : valores.length + " " + plural;
+  sel.appendChild(o);
+  sel.selectedIndex = sel.options.length - 1;   // por índice: nunca la homónima real
+}
+
+const SELECTS_DE_FILTRO_MULTIPLE = {
+  marcas: { id: "filtro_marca", plural: "marcas" },
+  plataformas: { id: "filtro_plataforma", plural: "plataformas" },
+  estados: { id: "filtro_estado", plural: "estados", texto_de: (v) => texto_de_estado(v) }
+};
+
+function fijar_filtro_multiple(clave, valores) {
+  const conf = SELECTS_DE_FILTRO_MULTIPLE[clave];
+  filtros_de_columna_registro[clave] = valores.slice();
+  reflejar_seleccion_en_select(conf.id, valores, conf.plural, conf.texto_de);
+  pintar_tabla();
+}
+
+// ---- Limpiezas
+function limpiar_filtros_solo_de_cabecera() {
+  const fc = filtros_de_columna_registro;
+  fc.destinos = []; fc.texto_destino = ""; fc.categorias = []; fc.caso_con = false;
+  fc.fecha_desde = ""; fc.fecha_hasta = "";
+  sincronizar_rango_en_panel_de_fecha();
+  actualizar_resumen_de_fechas();
+}
+
+// "Limpiar filtros" de la columna Acción: TODOS, los de la cabecera y los de la
+// barra de arriba (buscadores, selects, fechas y chips). No borra datos.
+function limpiar_todos_los_filtros_registro() {
+  $("filtro_busqueda").value = "";
+  $("filtro_numero_caso").value = "";
+  ["marcas", "plataformas", "estados"].forEach((clave) => {
+    filtros_de_columna_registro[clave] = [];
+    reflejar_seleccion_en_select(SELECTS_DE_FILTRO_MULTIPLE[clave].id, [], "");
+  });
+  limpiar_filtros_solo_de_cabecera();
+  fechas_seleccionadas = [];
+  renderizar_menu_de_fechas();
+  if (columna_con_panel_abierto) construir_panel_filtro_columna(columna_con_panel_abierto);
+  activar_chip("todas");   // repinta la tabla
+}
+
+// ---- ¿Qué columna tiene filtro puesto? (para resaltar su ▾)
+function columna_tiene_filtro(columna) {
+  const fc = filtros_de_columna_registro;
+  if (columna === "fecha") return fechas_seleccionadas.length > 0 || !!fc.fecha_desde || !!fc.fecha_hasta;
+  if (columna === "marca_plataforma") return valores_efectivos_de_filtro("filtro_marca", "marcas").length > 0 ||
+    valores_efectivos_de_filtro("filtro_plataforma", "plataformas").length > 0;
+  if (columna === "destino") return fc.destinos.length > 0 || !!fc.texto_destino.trim();
+  if (columna === "categoria") return fc.categorias.length > 0;
+  if (columna === "caso") return !!$("filtro_numero_caso").value.trim() || chip_activo === "sin_caso" || fc.caso_con;
+  if (columna === "estado") return valores_efectivos_de_filtro("filtro_estado", "estados").length > 0;
+  return false;
+}
+
+function hay_algun_filtro_registro() {
+  return ["fecha", "marca_plataforma", "destino", "categoria", "caso", "estado"].some(columna_tiene_filtro) ||
+    !!$("filtro_busqueda").value.trim() || chip_activo !== "todas";
+}
+
+function actualizar_indicadores_de_cabecera(visibles) {
+  document.querySelectorAll(".boton_filtro_columna_registro").forEach((b) => {
+    const activo = columna_tiene_filtro(b.dataset.columna);
+    b.classList.toggle("con_filtro_columna_registro", activo);
+    const th = b.closest("th");
+    if (th) th.classList.toggle("columna_filtrada_registro", activo);
+    const base = (b.getAttribute("aria-label") || "").replace(/ \(filtro activo\)$/, "");
+    b.setAttribute("aria-label", activo ? base + " (filtro activo)" : base);
+  });
+  const limpiar = $("boton_limpiar_filtros_registro");
+  if (limpiar) limpiar.classList.toggle("hay_filtros_registro", hay_algun_filtro_registro());
+  const conteo = $("conteo_filas_registro");
+  if (conteo) {
+    conteo.textContent = visibles + " de " + DENUNCIAS.length;
+    conteo.title = "Se ven " + visibles + " de " + DENUNCIAS.length + " denuncias";
+  }
+  // Flecha y aria-sort de la columna Fecha.
+  // (La flecha ↓/↑ la pone el CSS según aria-sort del <th>.)
+  const boton_orden = $("boton_orden_fecha_registro");
+  if (boton_orden) {
+    boton_orden.setAttribute("aria-label", "Fecha: " + (orden_fecha_registro === "asc"
+      ? "más antiguas arriba. Pulsa para poner las más recientes arriba"
+      : "más recientes arriba. Pulsa para poner las más antiguas arriba"));
+    const th = boton_orden.closest("th");
+    if (th) th.setAttribute("aria-sort", orden_fecha_registro === "asc" ? "ascending" : "descending");
+  }
+}
+
+function alternar_orden_fecha() {
+  orden_fecha_registro = orden_fecha_registro === "asc" ? "desc" : "asc";
+  guardar_orden_fecha(orden_fecha_registro);
+  pintar_tabla();
+}
+
+// ---- Construcción de los paneles
+function crear_elemento(etiqueta, clase, texto) {
+  const e = document.createElement(etiqueta);
+  if (clase) e.className = clase;
+  if (texto != null) e.textContent = texto;   // por propiedad (anti-XSS)
+  return e;
+}
+
+// Lista de casillas (multiselección) con su conteo y, si son muchas, buscador.
+// opciones = [{ valor, texto, cuantas }]; al_cambiar recibe la lista marcada.
+function crear_lista_de_casillas(contenedor, titulo, opciones, seleccionados, al_cambiar) {
+  const seccion = crear_elemento("div", "seccion_panel_filtro_registro");
+  seccion.appendChild(crear_elemento("div", "titulo_panel_filtro_registro", titulo));
+  let buscador = null;
+  if (opciones.length > 8) {
+    buscador = crear_elemento("input", "buscador_opciones_filtro_registro");
+    buscador.type = "text";
+    buscador.placeholder = "Buscar…";
+    buscador.setAttribute("aria-label", "Buscar en " + titulo);
+    seccion.appendChild(buscador);
+  }
+  const lista = crear_elemento("div", "lista_casillas_filtro_registro");
+  lista.setAttribute("role", "group");
+  lista.setAttribute("aria-label", titulo);
+  if (!opciones.length) lista.appendChild(crear_elemento("div", "sin_opciones_filtro_registro", "No hay valores todavía."));
+  const casillas = [];
+  opciones.forEach((op) => {
+    const fila = crear_elemento("label", "opcion_casilla_filtro_registro" + (op.valor === "" ? " sin_valor_registro" : ""));
+    const casilla = crear_elemento("input");
+    casilla.type = "checkbox";
+    casilla.value = op.valor;
+    casilla.checked = seleccionados.indexOf(op.valor) !== -1;
+    casilla.addEventListener("change", () => {
+      al_cambiar(casillas.filter((c) => c.checked).map((c) => c.value));
+    });
+    casillas.push(casilla);
+    fila.appendChild(casilla);
+    fila.appendChild(crear_elemento("span", "texto_opcion_filtro_registro", op.texto));
+    fila.appendChild(crear_elemento("span", "conteo_opcion_filtro_registro", "(" + op.cuantas + ")"));
+    fila.dataset.textoBusqueda = normalizar_sin_acentos(op.texto);
+    lista.appendChild(fila);
+  });
+  if (buscador) {
+    buscador.addEventListener("input", () => {
+      const q = normalizar_sin_acentos(buscador.value);
+      Array.prototype.forEach.call(lista.querySelectorAll(".opcion_casilla_filtro_registro"), (f) => {
+        f.style.display = !q || f.dataset.textoBusqueda.indexOf(q) !== -1 ? "" : "none";
+      });
+    });
+  }
+  seccion.appendChild(lista);
+  contenedor.appendChild(seccion);
+  return seccion;
+}
+
+// Valores distintos de un campo en TODO el registro, con su conteo; se suman los
+// ya elegidos aunque no queden filas con ellos (para poder desmarcarlos).
+function opciones_presentes(obtener_valor, elegidos, texto_de) {
+  // Map: valores como "toString", "constructor" o "__proto__" cuentan igual que
+  // cualquier otro (con un objeto literal chocarían con el prototipo).
+  const cuenta = new Map();
+  DENUNCIAS.forEach((d) => {
+    const v = String(obtener_valor(d) == null ? "" : obtener_valor(d)).trim();
+    cuenta.set(v, (cuenta.get(v) || 0) + 1);
+  });
+  (elegidos || []).forEach((v) => { if (!cuenta.has(v)) cuenta.set(v, 0); });
+  return Array.from(cuenta.keys())
+    .map((v) => ({ valor: v, texto: String(texto_de(v)), cuantas: cuenta.get(v) }))
+    .sort((a, b) => {
+      if (a.valor === "") return 1;          // el "(vacío)" al final
+      if (b.valor === "") return -1;
+      return String(a.texto).localeCompare(String(b.texto), "es");
+    });
+}
+
+function crear_pie_del_panel(panel, al_limpiar) {
+  const pie = crear_elemento("div", "pie_panel_filtro_registro");
+  const limpiar = crear_elemento("button", "boton gris mini", "Limpiar");
+  limpiar.type = "button";
+  limpiar.addEventListener("click", () => { al_limpiar(); construir_panel_filtro_columna(columna_con_panel_abierto); });
+  const cerrar = crear_elemento("button", "boton primario mini", "Cerrar");
+  cerrar.type = "button";
+  cerrar.addEventListener("click", () => cerrar_panel_filtro_columna(true));
+  pie.appendChild(limpiar);
+  pie.appendChild(cerrar);
+  panel.appendChild(pie);
+}
+
+const TITULOS_DE_COLUMNA_REGISTRO = {
+  fecha: "Fecha", marca_plataforma: "Marca / Plataforma", destino: "Enviado a",
+  categoria: "Categoría", caso: "N.º de caso", estado: "Estado"
+};
+
+function construir_panel_filtro_columna(columna) {
+  const panel = $("panel_filtro_columna_registro");
+  panel.innerHTML = "";   // se vacía; todo se recrea con createElement
+  panel.setAttribute("aria-label", "Filtro de la columna " + (TITULOS_DE_COLUMNA_REGISTRO[columna] || ""));
+  panel.dataset.columna = columna;
+  const fc = filtros_de_columna_registro;
+
+  if (columna === "fecha") {
+    const rango = crear_elemento("div", "seccion_panel_filtro_registro");
+    rango.appendChild(crear_elemento("div", "titulo_panel_filtro_registro", "Rango de fechas"));
+    const fila = crear_elemento("div", "fila_rango_fechas_registro");
+    [["fecha_desde_cabecera_registro", "Desde", "fecha_desde"], ["fecha_hasta_cabecera_registro", "Hasta", "fecha_hasta"]].forEach((c) => {
+      const caja = crear_elemento("div");
+      const et = crear_elemento("label", "", c[1]);
+      et.htmlFor = c[0];
+      const entrada = crear_elemento("input");
+      entrada.type = "date";
+      entrada.id = c[0];
+      entrada.value = fc[c[2]];
+      entrada.addEventListener("change", () => {
+        const de = $("fecha_desde_cabecera_registro").value, ha = $("fecha_hasta_cabecera_registro").value;
+        fijar_rango_de_fechas(de, ha);
+      });
+      caja.appendChild(et);
+      caja.appendChild(entrada);
+      fila.appendChild(caja);
+    });
+    rango.appendChild(fila);
+    const atajos = crear_elemento("div", "atajos_fechas_registro");
+    ATAJOS_DE_FECHA_REGISTRO.forEach((a) => {
+      const b = crear_elemento("button", "atajo_fecha_registro", a.texto);
+      b.type = "button";
+      b.dataset.atajo = a.tipo;
+      b.addEventListener("click", () => aplicar_atajo_de_fecha(a.tipo));
+      atajos.appendChild(b);
+    });
+    rango.appendChild(atajos);
+    panel.appendChild(rango);
+
+    const dias = crear_elemento("div", "seccion_panel_filtro_registro");
+    dias.appendChild(crear_elemento("div", "titulo_panel_filtro_registro", "Días concretos (los mismos del menú 📅)"));
+    const lista = crear_elemento("div", "lista_casillas_filtro_registro");
+    lista.id = "lista_dias_cabecera_registro";
+    crear_casillas_de_fechas(lista, fechas_del_registro());
+    dias.appendChild(lista);
+    panel.appendChild(dias);
+    crear_pie_del_panel(panel, () => limpiar_filtro_de_fechas());
+    sincronizar_rango_en_panel_de_fecha();
+
+  } else if (columna === "marca_plataforma") {
+    const marcas = valores_efectivos_de_filtro("filtro_marca", "marcas");
+    crear_lista_de_casillas(panel, "Marcas", opciones_presentes((d) => d.marca, marcas, (v) => v || "(sin marca)"),
+      marcas, (vals) => fijar_filtro_multiple("marcas", vals));
+    const plats = valores_efectivos_de_filtro("filtro_plataforma", "plataformas");
+    crear_lista_de_casillas(panel, "Plataformas", opciones_presentes((d) => d.plataforma, plats, (v) => v || "(sin plataforma)"),
+      plats, (vals) => fijar_filtro_multiple("plataformas", vals));
+    crear_pie_del_panel(panel, () => { fijar_filtro_multiple("marcas", []); fijar_filtro_multiple("plataformas", []); });
+
+  } else if (columna === "destino") {
+    const seccion = crear_elemento("div", "seccion_panel_filtro_registro");
+    const et = crear_elemento("label", "titulo_panel_filtro_registro", "Contiene (sitio o correo)");
+    et.htmlFor = "texto_destino_cabecera_registro";
+    et.style.display = "block";
+    const entrada = crear_elemento("input");
+    entrada.type = "text";
+    entrada.id = "texto_destino_cabecera_registro";
+    entrada.placeholder = "softonic, @gmail.com…";
+    entrada.value = fc.texto_destino;
+    entrada.addEventListener("input", () => { fc.texto_destino = entrada.value; pintar_tabla(); });
+    seccion.appendChild(et);
+    seccion.appendChild(entrada);
+    panel.appendChild(seccion);
+    crear_lista_de_casillas(panel, "Destinos", opciones_presentes((d) => destino_de(d), fc.destinos, (v) => v || "(sin destino)"),
+      fc.destinos, (vals) => { fc.destinos = vals; pintar_tabla(); });
+    crear_pie_del_panel(panel, () => { fc.destinos = []; fc.texto_destino = ""; pintar_tabla(); });
+
+  } else if (columna === "categoria") {
+    crear_lista_de_casillas(panel, "Categorías", opciones_presentes((d) => d.categoria, fc.categorias, (v) => v || "(sin categoría)"),
+      fc.categorias, (vals) => { fc.categorias = vals; pintar_tabla(); });
+    crear_pie_del_panel(panel, () => { fc.categorias = []; pintar_tabla(); });
+
+  } else if (columna === "caso") {
+    const seccion = crear_elemento("div", "seccion_panel_filtro_registro");
+    const et = crear_elemento("label", "titulo_panel_filtro_registro", "Contiene (el mismo buscador de arriba)");
+    et.htmlFor = "texto_caso_cabecera_registro";
+    et.style.display = "block";
+    const entrada = crear_elemento("input");
+    entrada.type = "text";
+    entrada.id = "texto_caso_cabecera_registro";
+    entrada.placeholder = "Buscar por N.º de caso…";
+    entrada.value = $("filtro_numero_caso").value;
+    entrada.addEventListener("input", () => { $("filtro_numero_caso").value = entrada.value; pintar_tabla(); });
+    seccion.appendChild(et);
+    seccion.appendChild(entrada);
+    panel.appendChild(seccion);
+
+    const grupo_sec = crear_elemento("div", "seccion_panel_filtro_registro");
+    grupo_sec.appendChild(crear_elemento("div", "titulo_panel_filtro_registro", "Mostrar"));
+    const grupo = crear_elemento("div", "grupo_presencia_caso_registro");
+    grupo.setAttribute("role", "radiogroup");
+    grupo.setAttribute("aria-label", "Con o sin N.º de caso");
+    const actual = chip_activo === "sin_caso" ? "sin" : (fc.caso_con ? "con" : "");
+    [["", "Todas"], ["con", "Con N.º de caso"], ["sin", "Sin N.º de caso"]].forEach((op) => {
+      const fila = crear_elemento("label", "opcion_casilla_filtro_registro");
+      const radio = crear_elemento("input");
+      radio.type = "radio";
+      radio.name = "presencia_caso_cabecera_registro";
+      radio.value = op[0];
+      radio.checked = op[0] === actual;
+      radio.addEventListener("change", () => { if (radio.checked) fijar_presencia_de_caso(op[0]); });
+      fila.appendChild(radio);
+      fila.appendChild(crear_elemento("span", "texto_opcion_filtro_registro", op[1]));
+      grupo.appendChild(fila);
+    });
+    grupo_sec.appendChild(grupo);
+    panel.appendChild(grupo_sec);
+    crear_pie_del_panel(panel, () => { $("filtro_numero_caso").value = ""; fijar_presencia_de_caso(""); });
+
+  } else if (columna === "estado") {
+    const estados = valores_efectivos_de_filtro("filtro_estado", "estados");
+    // Los tres estados del alta siempre se ofrecen, más los que haya guardados.
+    const opciones = opciones_presentes((d) => d.estado, estados.concat(["pendiente", "enviada", "resuelta"]),
+      (v) => texto_de_estado(v) || "(sin estado)");
+    crear_lista_de_casillas(panel, "Estados", opciones, estados, (vals) => fijar_filtro_multiple("estados", vals));
+    crear_pie_del_panel(panel, () => fijar_filtro_multiple("estados", []));
+  }
+}
+
+// "Con" / "Sin" / todas. "Sin" ES el chip "Sin N.º de caso" de arriba.
+function fijar_presencia_de_caso(valor) {
+  filtros_de_columna_registro.caso_con = valor === "con";
+  if (valor === "sin") { activar_chip("sin_caso"); return; }
+  if (chip_activo === "sin_caso") { activar_chip("todas"); return; }
+  pintar_tabla();
+}
+
+// ---- Abrir / cerrar / colocar el panel
+function boton_de_filtro_de(columna) {
+  return document.querySelector('.boton_filtro_columna_registro[data-columna="' + columna + '"]');
+}
+
+function panel_filtro_columna_abierto() {
+  const panel = $("panel_filtro_columna_registro");
+  return !!panel && !panel.hidden;
+}
+
+function posicionar_panel_filtro_columna() {
+  const panel = $("panel_filtro_columna_registro");
+  const boton = boton_de_filtro_de(columna_con_panel_abierto);
+  if (!panel || panel.hidden || !boton) return;
+  const r = boton.getBoundingClientRect();
+  const ancho = panel.offsetWidth || 280;
+  const izquierda = Math.max(8, Math.min(r.left, window.innerWidth - ancho - 8));
+  let arriba = r.bottom + 6;
+  // Preferencia: DEBAJO del ▾ (sin tapar la cabecera). Si debajo queda poco
+  // sitio, el panel se acorta (tiene su propio scroll); sólo si ni así cabe, se
+  // sube lo justo para no salirse de la ventana.
+  const espacio_abajo = window.innerHeight - arriba - 8;
+  panel.style.maxHeight = "";
+  if (espacio_abajo >= 220) {
+    if (panel.offsetHeight > espacio_abajo) panel.style.maxHeight = espacio_abajo + "px";
+  } else {
+    const alto = panel.offsetHeight || 0;
+    arriba = Math.max(8, Math.min(arriba, window.innerHeight - alto - 8));
+  }
+  panel.style.left = izquierda + "px";
+  panel.style.top = arriba + "px";
+}
+
+function abrir_panel_filtro_columna(columna) {
+  if (columna_con_panel_abierto) cerrar_panel_filtro_columna(false);
+  if (menu_de_fechas_abierto()) cerrar_menu_de_fechas();
+  const panel = $("panel_filtro_columna_registro");
+  columna_con_panel_abierto = columna;
+  construir_panel_filtro_columna(columna);
+  panel.hidden = false;
+  const boton = boton_de_filtro_de(columna);
+  if (boton) boton.setAttribute("aria-expanded", "true");
+  posicionar_panel_filtro_columna();
+  // Foco en el primer control del panel (teclado).
+  const primero = panel.querySelector("input, button, select, textarea");
+  if (primero) primero.focus();
+}
+
+function cerrar_panel_filtro_columna(devolver_foco) {
+  const panel = $("panel_filtro_columna_registro");
+  if (!panel) return;
+  const columna = columna_con_panel_abierto;
+  panel.hidden = true;
+  panel.innerHTML = "";
+  columna_con_panel_abierto = "";
+  document.querySelectorAll(".boton_filtro_columna_registro").forEach((b) => b.setAttribute("aria-expanded", "false"));
+  if (devolver_foco && columna) {
+    const boton = boton_de_filtro_de(columna);
+    if (boton) boton.focus();
+  }
 }
 
 function cajon_esta_abierto() {
@@ -1166,7 +1826,7 @@ function abrir_comprobante(id) {
     // comprobante respeta los saltos con white-space: pre-wrap).
     [casos_del_comprobante.length > 1 ? "N.º de caso (" + casos_del_comprobante.length + ")" : "N.º de caso",
       casos_del_comprobante.join("\n") || "—"],
-    ["Estado", ESTADOS_REGISTRO[d.estado] || d.estado],
+    ["Estado", texto_de_estado(d.estado)],
     ["Notas", d.notas || "—"]
   ];
   $("compro_cuerpo").innerHTML = filas.map((f) =>
@@ -1452,6 +2112,9 @@ async function inicializar_registro() {
   // con stopPropagation, y no llega hasta aquí.)
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
+    // El panel de filtro de cabecera va primero (es lo que está "encima") y
+    // devuelve el foco a su ▾.
+    if (panel_filtro_columna_abierto()) { cerrar_panel_filtro_columna(true); return; }
     if (menu_de_fechas_abierto()) { cerrar_menu_de_fechas(); return; }
     if (cajon_esta_abierto()) cerrar_cajon_denuncia(true);
   });
@@ -1470,6 +2133,56 @@ async function inicializar_registro() {
   document.addEventListener("paste", al_pegar_documento);
   ["filtro_busqueda", "filtro_numero_caso", "filtro_marca", "filtro_plataforma", "filtro_estado"].forEach((id) =>
     $(id).addEventListener("input", pintar_tabla));
+
+  // ---- Sincronía barra de arriba -> cabecera.
+  // Elegir una opción normal en un select de arriba manda sobre la selección
+  // múltiple de la cabecera: se olvida la lista y se quita la opción "varias".
+  Object.keys(SELECTS_DE_FILTRO_MULTIPLE).forEach((clave) => {
+    const conf = SELECTS_DE_FILTRO_MULTIPLE[clave];
+    $(conf.id).addEventListener("change", () => {
+      if (opcion_varias_elegida($(conf.id))) return;
+      const v = $(conf.id).value;
+      filtros_de_columna_registro[clave] = v ? [v] : [];
+      quitar_opcion_varias($(conf.id));
+      if (columna_con_panel_abierto) construir_panel_filtro_columna(columna_con_panel_abierto);
+      pintar_tabla();
+    });
+  });
+  // El buscador de N.º de caso de arriba y el de la cabecera son el MISMO filtro.
+  $("filtro_numero_caso").addEventListener("input", () => {
+    const espejo = $("texto_caso_cabecera_registro");
+    if (espejo && espejo.value !== $("filtro_numero_caso").value) espejo.value = $("filtro_numero_caso").value;
+  });
+
+  // ---- Filtros de cabecera: ▾ abre/cierra su panel; orden por fecha; limpiar todo.
+  document.querySelectorAll(".boton_filtro_columna_registro").forEach((b) =>
+    b.addEventListener("click", () => {
+      if (columna_con_panel_abierto === b.dataset.columna) cerrar_panel_filtro_columna(true);
+      else abrir_panel_filtro_columna(b.dataset.columna);
+    }));
+  $("boton_orden_fecha_registro").addEventListener("click", alternar_orden_fecha);
+  $("boton_limpiar_filtros_registro").addEventListener("click", () => {
+    cerrar_panel_filtro_columna(false);
+    limpiar_todos_los_filtros_registro();
+  });
+  // Clic FUERA del panel (y fuera de los ▾): se cierra. Como en el menú 📅, sólo
+  // si se apretó Y soltó fuera (arrastrar desde un campo del panel no lo cierra).
+  let apretado_fuera_del_panel_columna = false;
+  const esta_dentro_del_filtro_de_columna = (objetivo) =>
+    $("panel_filtro_columna_registro").contains(objetivo) ||
+    !!(objetivo && objetivo.closest && objetivo.closest(".boton_filtro_columna_registro"));
+  document.addEventListener("mousedown", (e) => {
+    apretado_fuera_del_panel_columna = !esta_dentro_del_filtro_de_columna(e.target);
+  });
+  document.addEventListener("click", (e) => {
+    if (panel_filtro_columna_abierto() && apretado_fuera_del_panel_columna && !esta_dentro_del_filtro_de_columna(e.target)) {
+      cerrar_panel_filtro_columna(false);
+    }
+  });
+  // El panel va con position: fixed: se recoloca si se mueve la página o la tabla.
+  window.addEventListener("resize", posicionar_panel_filtro_columna);
+  window.addEventListener("scroll", posicionar_panel_filtro_columna, true);
+  actualizar_indicadores_de_cabecera(denuncias_filtradas().length);
 
   // Desplegable de fechas concretas: abre/cierra, marca días y limpia.
   $("boton_menu_fechas").addEventListener("click", () => {

@@ -84,9 +84,64 @@ body { margin: 0; background: #e2e8f0; color: #0f172a; font-family: "Segoe UI", 
 .sin_fechas { padding: 10px 8px; color: #64748b; font-size: 12px; }
 
 /* ------------------------------ Tabla ------------------------------------- */
-.tabla_registro_scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-table.tabla_registro_denuncias { width: 100%; min-width: 940px; border-collapse: collapse; font-size: 12.5px; }
+/* El contenedor tiene ALTO MÁXIMO y scroll propio: así la cabecera (sticky)
+   queda fija arriba mientras se baja por las filas, y el scroll horizontal de
+   pantallas estrechas se conserva. (Con sólo overflow-x el sticky no seguía
+   al usuario: el contenedor de scroll era éste y no bajaba nunca.) */
+.tabla_registro_scroll { overflow: auto; -webkit-overflow-scrolling: touch; max-height: max(380px, calc(100vh - 150px)); }
+table.tabla_registro_denuncias { width: 100%; min-width: 1040px; border-collapse: separate; border-spacing: 0; font-size: 12.5px; }
 table.tabla_registro_denuncias th { background: #f8fafc; text-align: left; padding: 10px 12px; font-size: 11px; text-transform: uppercase; letter-spacing: .4px; color: #64748b; border-bottom: 1px solid #e2e8f0; white-space: nowrap; }
+/* Cabecera fija: se queda arriba al bajar por la tabla. */
+table.tabla_registro_denuncias thead th { position: sticky; top: 0; z-index: 5; box-shadow: 0 1px 0 #e2e8f0; }
+
+/* ------------------------------ Filtros de cabecera (estilo Excel) -------- */
+.cabecera_filtrable_registro { display: inline-flex; align-items: center; gap: 5px; }
+.boton_filtro_columna_registro { border: 1px solid transparent; background: transparent; color: #64748b; border-radius: 6px; width: 22px; height: 22px; padding: 0; font-size: 13px; line-height: 1; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.boton_filtro_columna_registro:hover { background: #e2e8f0; color: #0f172a; }
+.boton_filtro_columna_registro:focus-visible, .boton_orden_fecha_registro:focus-visible, .boton_limpiar_filtros_registro:focus-visible { outline: 2px solid #2563eb; outline-offset: 1px; }
+.boton_filtro_columna_registro[aria-expanded="true"] { background: #e2e8f0; color: #0f172a; }
+/* Columna con filtro puesto: el icono se resalta (mismo azul que el menú de fechas con filtro). */
+.boton_filtro_columna_registro.con_filtro_columna_registro { background: #2563eb; border-color: #2563eb; color: #fff; }
+.th_filtrable_registro.columna_filtrada_registro { color: #1d4ed8; }
+.boton_orden_fecha_registro { border: 0; background: transparent; padding: 0; font: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit; cursor: pointer; display: inline-flex; align-items: center; gap: 3px; }
+.boton_orden_fecha_registro:hover { color: #0f172a; }
+/* El ▾ y la flecha de orden van por CSS (::before) y no como texto: así el
+   texto de la cabecera sigue siendo sólo el título ("Enviado a"). */
+.boton_filtro_columna_registro::before { content: "▾"; }
+.flecha_orden_registro { font-size: 12px; color: #2563eb; margin-left: 3px; }
+th[aria-sort="descending"] .flecha_orden_registro::before { content: "↓"; }
+th[aria-sort="ascending"] .flecha_orden_registro::before { content: "↑"; }
+.cabecera_accion_registro { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 3px; }
+.boton_limpiar_filtros_registro { border: 1px solid #cbd5e1; background: #fff; color: #475569; border-radius: 999px; padding: 3px 9px; font: 600 10.5px "Segoe UI", Arial, sans-serif; text-transform: none; letter-spacing: 0; cursor: pointer; }
+.boton_limpiar_filtros_registro:hover { border-color: #94a3b8; color: #0f172a; }
+.boton_limpiar_filtros_registro.hay_filtros_registro { border-color: #2563eb; background: #eff6ff; color: #1d4ed8; }
+.conteo_filas_registro { font-size: 10.5px; color: #64748b; text-transform: none; letter-spacing: 0; font-weight: 600; }
+
+/* Panel flotante: position fixed (lo coloca registro.js bajo su ▾), así no lo
+   recorta el overflow del contenedor de la tabla. */
+.panel_filtro_columna_registro { position: fixed; z-index: 50; background: #fff; border: 1px solid #cbd5e1; border-radius: 10px; box-shadow: 0 14px 30px -14px rgba(15,23,42,.5); width: 280px; max-width: calc(100vw - 16px); max-height: min(460px, calc(100vh - 16px)); overflow: auto; padding: 10px; font-size: 12.5px; color: #0f172a; text-transform: none; letter-spacing: 0; }
+.panel_filtro_columna_registro[hidden] { display: none; }
+.titulo_panel_filtro_registro { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; color: #64748b; margin: 2px 2px 6px; }
+.seccion_panel_filtro_registro + .seccion_panel_filtro_registro { border-top: 1px solid #e2e8f0; margin-top: 8px; padding-top: 8px; }
+.fila_rango_fechas_registro { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.fila_rango_fechas_registro label { display: block; font-size: 10.5px; font-weight: 700; color: #64748b; margin-bottom: 2px; }
+.panel_filtro_columna_registro input[type="date"], .panel_filtro_columna_registro input[type="search"], .panel_filtro_columna_registro input[type="text"] { width: 100%; border: 1px solid #cbd5e1; border-radius: 8px; padding: 6px 8px; font-size: 12px; font-family: inherit; color: #0f172a; background: #fff; }
+.panel_filtro_columna_registro input:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,.15); }
+.atajos_fechas_registro { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+.atajo_fecha_registro { background: #fff; border: 1px solid #cbd5e1; border-radius: 999px; padding: 4px 9px; font: 600 11px "Segoe UI", Arial, sans-serif; cursor: pointer; color: #475569; }
+.atajo_fecha_registro:hover { border-color: #94a3b8; color: #0f172a; }
+.atajo_fecha_registro.activo { background: #0f172a; color: #fff; border-color: #0f172a; }
+.lista_casillas_filtro_registro { max-height: 190px; overflow: auto; margin-top: 4px; }
+.opcion_casilla_filtro_registro { display: flex; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 7px; cursor: pointer; }
+.opcion_casilla_filtro_registro:hover { background: #f1f5f9; }
+.opcion_casilla_filtro_registro input { margin: 0; flex: 0 0 auto; }
+.opcion_casilla_filtro_registro .texto_opcion_filtro_registro { word-break: break-word; }
+.opcion_casilla_filtro_registro .conteo_opcion_filtro_registro { margin-left: auto; color: #94a3b8; font-size: 11.5px; padding-left: 6px; }
+.opcion_casilla_filtro_registro.sin_valor_registro .texto_opcion_filtro_registro { color: #64748b; font-style: italic; }
+.buscador_opciones_filtro_registro { margin-bottom: 4px; }
+.sin_opciones_filtro_registro { padding: 8px 6px; color: #64748b; font-size: 12px; }
+.pie_panel_filtro_registro { display: flex; gap: 6px; justify-content: flex-end; border-top: 1px solid #e2e8f0; margin-top: 8px; padding-top: 8px; }
+.grupo_presencia_caso_registro { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
 table.tabla_registro_denuncias td { padding: 10px 12px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
 table.tabla_registro_denuncias tr:hover td { background: #f8fbff; }
 .celda_indice { color: #94a3b8; font-weight: 700; }
@@ -289,16 +344,56 @@ table.tabla_registro_denuncias tr:hover td { background: #f8fbff; }
       <div class="tabla_registro_scroll">
         <table class="tabla_registro_denuncias">
           <thead>
+            <!-- Cabecera FIJA (sticky) con un filtro estilo Excel en cada columna:
+                 el ▾ abre un panel flotante (#panel_filtro_columna_registro) que
+                 arma registro.js. Los filtros de aquí y los de la barra de arriba
+                 comparten el MISMO estado (no son dos sistemas). -->
             <tr>
-              <th>#</th>
-              <th>Fecha</th>
-              <th>Marca / Plataforma</th>
-              <th title="Sitio o correo concreto al que se envió la denuncia (softonic.com, appbrain.com…)">Enviado a</th>
-              <th>Categoría</th>
-              <th title="Clic en la celda para escribir el N.º de caso; Tab pasa al siguiente">N.º de caso</th>
-              <th>Estado</th>
+              <th title="N.º consecutivo de la denuncia dentro de su marca">#</th>
+              <th class="th_filtrable_registro" data-columna="fecha" aria-sort="descending">
+                <span class="cabecera_filtrable_registro">
+                  <button type="button" class="boton_orden_fecha_registro" id="boton_orden_fecha_registro" title="Cambiar el orden: más recientes arriba / más antiguas arriba">Fecha<span class="flecha_orden_registro" id="flecha_orden_fecha_registro" aria-hidden="true"></span></button>
+                  <button type="button" class="boton_filtro_columna_registro" data-columna="fecha" aria-haspopup="dialog" aria-expanded="false" aria-controls="panel_filtro_columna_registro" aria-label="Filtrar por fecha" title="Filtrar por fecha"></button>
+                </span>
+              </th>
+              <th class="th_filtrable_registro" data-columna="marca_plataforma">
+                <span class="cabecera_filtrable_registro">
+                  <span>Marca / Plataforma</span>
+                  <button type="button" class="boton_filtro_columna_registro" data-columna="marca_plataforma" aria-haspopup="dialog" aria-expanded="false" aria-controls="panel_filtro_columna_registro" aria-label="Filtrar por marca y plataforma" title="Filtrar por marca y plataforma"></button>
+                </span>
+              </th>
+              <th class="th_filtrable_registro" data-columna="destino" title="Sitio o correo concreto al que se envió la denuncia (softonic.com, appbrain.com…)">
+                <span class="cabecera_filtrable_registro">
+                  <span>Enviado a</span>
+                  <button type="button" class="boton_filtro_columna_registro" data-columna="destino" aria-haspopup="dialog" aria-expanded="false" aria-controls="panel_filtro_columna_registro" aria-label="Filtrar por destino (enviado a)" title="Filtrar por destino"></button>
+                </span>
+              </th>
+              <th class="th_filtrable_registro" data-columna="categoria">
+                <span class="cabecera_filtrable_registro">
+                  <span>Categoría</span>
+                  <button type="button" class="boton_filtro_columna_registro" data-columna="categoria" aria-haspopup="dialog" aria-expanded="false" aria-controls="panel_filtro_columna_registro" aria-label="Filtrar por categoría" title="Filtrar por categoría"></button>
+                </span>
+              </th>
+              <th class="th_filtrable_registro" data-columna="caso" title="Clic en la celda para escribir el N.º de caso; Tab pasa al siguiente">
+                <span class="cabecera_filtrable_registro">
+                  <span>N.º de caso</span>
+                  <button type="button" class="boton_filtro_columna_registro" data-columna="caso" aria-haspopup="dialog" aria-expanded="false" aria-controls="panel_filtro_columna_registro" aria-label="Filtrar por número de caso" title="Filtrar por N.º de caso"></button>
+                </span>
+              </th>
+              <th class="th_filtrable_registro" data-columna="estado">
+                <span class="cabecera_filtrable_registro">
+                  <span>Estado</span>
+                  <button type="button" class="boton_filtro_columna_registro" data-columna="estado" aria-haspopup="dialog" aria-expanded="false" aria-controls="panel_filtro_columna_registro" aria-label="Filtrar por estado" title="Filtrar por estado"></button>
+                </span>
+              </th>
               <th title="Adjuntos: 📎 comprobante · 💬 respuesta de la red · ✉ correo">📎💬</th>
-              <th class="acciones_fila">Acción</th>
+              <th class="acciones_fila th_accion_registro">
+                <span class="cabecera_accion_registro">
+                  <span>Acción</span>
+                  <button type="button" class="boton_limpiar_filtros_registro" id="boton_limpiar_filtros_registro" title="Quitar TODOS los filtros (los de la cabecera y los de la barra de arriba)">⟲ Limpiar filtros</button>
+                  <span class="conteo_filas_registro" id="conteo_filas_registro" aria-live="polite"></span>
+                </span>
+              </th>
             </tr>
           </thead>
           <tbody id="cuerpo_registro"></tbody>
@@ -306,6 +401,11 @@ table.tabla_registro_denuncias tr:hover td { background: #f8fbff; }
       </div>
       <div class="vacio_tabla" id="mensaje_vacio" style="display:none;">No hay denuncias que coincidan con la búsqueda.</div>
     </section>
+
+    <!-- Panel flotante ÚNICO de los filtros de cabecera. Vive fuera de la tabla y
+         va con position: fixed, así el overflow del contenedor no lo recorta.
+         Su contenido lo arma registro.js según la columna (sin datos por innerHTML). -->
+    <div class="panel_filtro_columna_registro" id="panel_filtro_columna_registro" role="dialog" aria-modal="false" aria-label="Filtro de columna" hidden></div>
 
   </main>
 
