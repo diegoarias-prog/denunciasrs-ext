@@ -2283,6 +2283,16 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 // Reconstruye el menú al instalar/arrancar y cuando cambian las marcas (no en cada relleno).
 chrome.runtime.onInstalled.addListener(ctxConstruirMenus);
 chrome.runtime.onStartup.addListener(ctxConstruirMenus);
+
+// MIGRACIÓN DE UNA SOLA VEZ: los correos ya enviados (Registro) pasan a la ficha
+// "para siempre" del sitio denunciado (ver migrar_correos_del_registro en
+// datos/correos_denuncia.js; lleva su propia bandera). También la lanzan correo.html
+// y memoria_correos.html al abrirse, por si el service worker no llegó a hacerlo.
+function migrarCorreosDelRegistro() {
+  try { if (self.CORREOS_DENUNCIA) self.CORREOS_DENUNCIA.migrar_correos_del_registro(); } catch (e) { /* nunca rompe el arranque */ }
+}
+chrome.runtime.onInstalled.addListener(migrarCorreosDelRegistro);
+chrome.runtime.onStartup.addListener(migrarCorreosDelRegistro);
 chrome.storage.onChanged.addListener((cambios, area) => {
   if (area !== "local") return;
   // plataformas_usuario: al crear (o quitar) una plataforma desde el popup, el menú

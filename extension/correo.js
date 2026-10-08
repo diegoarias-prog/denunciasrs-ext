@@ -80,15 +80,22 @@ chrome.storage.local.get("email_reporte", (d) => {
   // Destinos FIJOS de la red (p. ej. TikTok: sus tres buzones de propiedad
   // intelectual). Van SIEMPRE, aunque el correo se hubiera generado antes.
   $("para").value = CD ? CD.unir_correos(e.to || "", CD.fijos_de_red(REPORTE.red)) : (e.to || "");
+  pintar_selector_sitio_para_siempre();
   pintar_boton_guardar_para_siempre();
   // Y los correos que el usuario GUARDÓ PARA SIEMPRE para esta red (botón 💾).
   // Primero se suman y después se pinta la memoria, que solo rellena si el
   // "Para" sigue vacío.
+  // En una red que es CATEGORÍA (Apps maliciosas, Delisting…) son los del SITIO
+  // denunciado, nunca los de toda la categoría (ver correos_para_siempre).
+  // Antes, la migración de una sola vez de los correos ya enviados (Registro) a la
+  // ficha de su sitio: si el service worker no llegó a hacerla, se hace aquí.
   if (CD) {
-    CD.correos_para_siempre(REPORTE.red, (siempre) => {
-      if (siempre.length) $("para").value = CD.unir_correos($("para").value, siempre);
-      pintar_correos_para_siempre(siempre);
-      pintar_memoria_correos();
+    CD.migrar_correos_del_registro(() => {
+      CD.correos_para_siempre(REPORTE.red, (siempre, grupos) => {
+        if (siempre.length) $("para").value = CD.unir_correos($("para").value, siempre);
+        pintar_correos_para_siempre(grupos);
+        pintar_memoria_correos();
+      }, REPORTE.urls);
     });
   } else {
     pintar_memoria_correos();
@@ -205,25 +212,83 @@ function recordar_correos_usados() {
 //  Desde ese momento, cada reporte de esta red trae esos correos puestos solos.
 //  Guarda la lista exacta: si se quita un correo y se vuelve a guardar, se va.
 // ---------------------------------------------------------------------------
+//  REDES QUE SON CATEGORÍAS (Apps maliciosas, Delisting, Ofertas falsas…): cada
+//  sitio tiene SU buzón, así que lo guardado va a la ficha del SITIO denunciado
+//  (aptoide.com, apkpure.com…), nunca a la de toda la categoría. Sin enlace no se
+//  guarda; con enlaces de varios sitios, el usuario elige de cuál son los correos.
+// ---------------------------------------------------------------------------
+// Sitio elegido en el selector (solo se ve con enlaces de VARIOS sitios).
+function sitio_elegido_para_siempre() {
+  const s = $("sitio_para_siempre");
+  return s && s.style.display !== "none" ? s.value : "";
+}
+function destino_para_siempre_actual() {
+  return CD.destino_para_siempre(REPORTE.red, REPORTE.urls, sitio_elegido_para_siempre());
+}
+
+// Con enlaces de varios sitios aparece un selector "¿De qué sitio son?". Las
+// opciones se crean con textContent: el dominio viene de una URL denunciada.
+function pintar_selector_sitio_para_siempre() {
+  const s = $("sitio_para_siempre");
+  if (!s || !CD) return;
+  const dest = CD.destino_para_siempre(REPORTE.red, REPORTE.urls, "");
+  if (!(dest.por_sitio && dest.sitios.length > 1)) { s.style.display = "none"; return; }
+  s.textContent = "";
+  const vacia = document.createElement("option");
+  vacia.value = "";
+  vacia.textContent = "¿De qué sitio son estos correos?";
+  s.appendChild(vacia);
+  dest.sitios.forEach((d) => {
+    const o = document.createElement("option");
+    o.value = d;
+    o.textContent = d;
+    s.appendChild(o);
+  });
+  s.style.display = "";
+}
+
 function pintar_boton_guardar_para_siempre() {
   const b = $("guardar_correos_para_siempre");
   if (!b) return;
   const red = (REPORTE.red || "").trim();
-  b.textContent = "💾 Guardar estos correos para futuros reportes" + (red ? " de " + red : "");
-  b.title = red
-    ? "La próxima vez que hagas un reporte por correo de " + red + ", estos correos se pondrán solos en «Para»."
-    : "Este reporte no dice de qué red es: no hay dónde guardarlos.";
+  const dest = CD ? destino_para_siempre_actual() : { clave: "", por_sitio: false, sitios: [], motivo: "" };
+  if (!dest.por_sitio) {
+    b.textContent = "💾 Guardar estos correos para futuros reportes" + (red ? " de " + red : "");
+    b.title = red
+      ? "La próxima vez que hagas un reporte por correo de " + red + ", estos correos se pondrán solos en «Para»."
+      : "Este reporte no dice de qué red es: no hay dónde guardarlos.";
+    return;
+  }
+  if (dest.clave) {
+    b.textContent = "💾 Guardar estos correos para futuros reportes de " + dest.clave;
+    b.title = "La próxima vez que denuncies algo de " + dest.clave + " (" + red + "), estos correos se pondrán solos en «Para». " +
+      "No se ponen en los reportes de otros sitios.";
+  } else if (dest.motivo === "varios_sitios") {
+    b.textContent = "💾 Guardar estos correos para futuros reportes (elige el sitio)";
+    b.title = "Este reporte tiene enlaces de varios sitios: elige en la lista de qué sitio son estos correos.";
+  } else {
+    b.textContent = "💾 Guardar estos correos para futuros reportes";
+    b.title = "Pon primero el enlace denunciado para saber de qué sitio son estos correos.";
+  }
 }
 
-// "📌 Guardados para <Red>: a, b, c" debajo del "Para": lo que se puso solo tiene
-// que verse entero (textContent: los correos guardados nunca se pintan como HTML).
-function pintar_correos_para_siempre(lista) {
+// "📌 Guardados para <Red o sitio>: a, b, c" debajo del "Para": lo que se puso solo
+// tiene que verse entero (textContent: los correos guardados nunca se pintan como
+// HTML). `grupos` = [{ clave, nombre, correos }] de correos_para_siempre.
+function pintar_correos_para_siempre(grupos) {
   const p = $("linea_correos_para_siempre");
   if (!p) return;
-  const correos = Array.isArray(lista) ? lista : [];
-  if (!correos.length) { p.textContent = ""; p.style.display = "none"; return; }
-  const red = (REPORTE.red || "").trim();
-  p.textContent = "📌 Guardados para " + (red || "esta red") + " (se ponen solos en «Para»): " + correos.join(", ");
+  const lista = (Array.isArray(grupos) ? grupos : []).filter((g) => g && g.correos && g.correos.length);
+  if (!lista.length) { p.textContent = ""; p.style.display = "none"; return; }
+  // En una CATEGORÍA se nombra el sitio (aptoide.com); en las demás, la red, como siempre.
+  const por_sitio = CD && CD.es_red_por_sitio(REPORTE.red);
+  const nombre = (g) => por_sitio ? nombre_de_clave(g.clave) : ((REPORTE.red || "").trim() || "esta red");
+  if (lista.length === 1) {
+    p.textContent = "📌 Guardados para " + nombre(lista[0]) + " (se ponen solos en «Para»): " + lista[0].correos.join(", ");
+  } else {
+    p.textContent = "📌 Guardados (se ponen solos en «Para»): " +
+      lista.map((g) => nombre(g) + " → " + g.correos.join(", ")).join(" · ");
+  }
   p.style.display = "";
 }
 
@@ -231,19 +296,29 @@ function guardar_correos_para_siempre() {
   if (!CD) return;
   const red = (REPORTE.red || "").trim();
   if (!red) { aviso("⚠ Este reporte no dice de qué red es: no hay dónde guardar los correos."); return; }
+  const dest = destino_para_siempre_actual();
+  if (dest.motivo === "sin_enlace") { aviso("⚠ Pon primero el enlace denunciado para saber de qué sitio son estos correos."); return; }
+  if (dest.motivo === "varios_sitios") {
+    aviso("⚠ Este reporte tiene enlaces de varios sitios (" + dest.sitios.join(", ") + "): elige en la lista de qué sitio son estos correos.");
+    return;
+  }
   const correos = CD.lista_correos($("para").value);
   if (!correos.length) { aviso("⚠ El campo «Para» no tiene ningún correo válido: no se guardó nada."); return; }
   CD.guardar_para_siempre(red, $("para").value, (ok, clave, guardados) => {
     if (!ok) { aviso("⚠ No se pudo guardar."); return; }
     const n = guardados.length;
     aviso("✓ Guardado: la próxima vez " + (n === 1 ? "este correo se pondrá solo" : "estos " + n + " correos se pondrán solos") +
-      " en «Para» de " + red);
-    pintar_correos_para_siempre(guardados);
+      " en «Para» de " + (dest.por_sitio ? "los reportes de " + clave : red));
+    // Se vuelve a leer lo guardado: con varios sitios, la línea 📌 los enseña todos.
+    CD.correos_para_siempre(red, (siempre, grupos) => pintar_correos_para_siempre(grupos), REPORTE.urls);
     pintar_memoria_correos();
-  });
+  }, { urls: REPORTE.urls, sitio: sitio_elegido_para_siempre() });
 }
 if ($("guardar_correos_para_siempre")) {
   $("guardar_correos_para_siempre").addEventListener("click", guardar_correos_para_siempre);
+}
+if ($("sitio_para_siempre")) {
+  $("sitio_para_siempre").addEventListener("change", pintar_boton_guardar_para_siempre);
 }
 
 if ($("abrir_memoria")) {

@@ -104,21 +104,33 @@ function pintar_tabla() {
     });
     tdAcc.appendChild(bCop);
     tdAcc.appendChild(document.createTextNode(" "));
-    // Encender / apagar "siempre" sin tener que editar la ficha.
-    const bSie = document.createElement("button");
-    bSie.className = "boton sec mini boton_alternar_siempre_correos";
-    bSie.textContent = f.siempre ? "📌 Quitar «siempre»" : "📌 Siempre";
-    bSie.title = f.siempre
-      ? "Dejar de poner estos correos solos en cada reporte (se quedan como sugerencia)."
-      : "Poner estos correos solos en «Para» de cada reporte futuro de esta red.";
-    bSie.addEventListener("click", () => {
-      CD.marcar_siempre(k, !f.siempre, (ok) => {
-        aviso(ok ? (f.siempre ? "Ya no se ponen solos: " : "✅ Se pondrán solos siempre: ") + k : "⚠ No se pudo cambiar.");
-        recargar();
+    // Encender / apagar "siempre" sin tener que editar la ficha. Una ficha
+    // "red:<categoría>" (Apps maliciosas, Delisting…) NO puede ser "siempre": su
+    // buzón depende del sitio denunciado y se pondría solo en TODOS (ver
+    // migrar_categorias en datos/correos_denuncia.js). Se ve, pero sin ese botón.
+    if (CD.es_clave_de_red_por_sitio && CD.es_clave_de_red_por_sitio(k) && !f.siempre) {
+      const nota = document.createElement("span");
+      nota.className = "nota_categoria_correos";
+      nota.textContent = "Categoría: se guarda por sitio";
+      nota.title = "Esta red agrupa muchos sitios y cada uno tiene su buzón: guarda los correos «siempre» en la ficha del sitio (aptoide.com, apkpure.com…).";
+      tdAcc.appendChild(nota);
+      tdAcc.appendChild(document.createTextNode(" "));
+    } else {
+      const bSie = document.createElement("button");
+      bSie.className = "boton sec mini boton_alternar_siempre_correos";
+      bSie.textContent = f.siempre ? "📌 Quitar «siempre»" : "📌 Siempre";
+      bSie.title = f.siempre
+        ? "Dejar de poner estos correos solos en cada reporte (se quedan como sugerencia)."
+        : "Poner estos correos solos en «Para» de cada reporte futuro de esta red.";
+      bSie.addEventListener("click", () => {
+        CD.marcar_siempre(k, !f.siempre, (ok) => {
+          aviso(ok ? (f.siempre ? "Ya no se ponen solos: " : "✅ Se pondrán solos siempre: ") + k : "⚠ No se pudo cambiar.");
+          recargar();
+        });
       });
-    });
-    tdAcc.appendChild(bSie);
-    tdAcc.appendChild(document.createTextNode(" "));
+      tdAcc.appendChild(bSie);
+      tdAcc.appendChild(document.createTextNode(" "));
+    }
     const bDel = document.createElement("button");
     bDel.className = "boton del mini";
     bDel.textContent = "🗑";
@@ -186,4 +198,98 @@ $("guardar_sitio").addEventListener("click", () => {
 $("limpiar_form").addEventListener("click", limpiar_formulario);
 $("buscador").addEventListener("input", pintar_tabla);
 
-recargar();
+// ---------------------------------------------------------------------------
+//  RESUMEN DE LAS MIGRACIONES (ver datos/correos_denuncia.js). Se enseña UNA vez:
+//   - migrar_correos_del_registro: qué correos ya enviados se guardaron en qué
+//     dominio, cuáles se descartaron por no ser de ese sitio, qué denuncias no
+//     tenían enlace y qué fichas "siempre" se APAGARON por tener correos de otro
+//     sitio (reparación), para que el usuario lo revise y lo añada a mano;
+//   - migrar_categorias: qué fichas antiguas de categoría se movieron o apagaron.
+//  Todo con createElement / textContent: los correos son datos, no HTML.
+// ---------------------------------------------------------------------------
+function linea_resumen(texto_linea) {
+  const li = document.createElement("li");
+  li.textContent = texto_linea;
+  return li;
+}
+function bloque_resumen(caja, titulo, lineas) {
+  if (!lineas.length) return;
+  const p = document.createElement("p");
+  p.textContent = titulo;
+  caja.appendChild(p);
+  const ul = document.createElement("ul");
+  lineas.forEach((t) => ul.appendChild(linea_resumen(t)));
+  caja.appendChild(ul);
+}
+const POR_QUE_SIN_SIEMPRE = {
+  apagada: "lo apagaste tú a mano",
+  borrada: "borraste esa ficha a mano (no se ha vuelto a crear)",
+  red_con_dominio: "es una red con dominio propio: sus correos van por la red",
+  sin_confirmar_envio: "no consta que se ENVIARAN",
+  no_anadidos_sin_envio: "no se añadieron a su lista «siempre» porque no consta que se enviaran",
+  ajenos: "su ficha tiene correos de OTRO sitio"
+};
+function texto_sin_siempre(s) {
+  let t = s.sitio + ": " + (POR_QUE_SIN_SIEMPRE[s.razon] || s.razon);
+  if (s.correos && s.correos.length) t += " (" + s.correos.join(", ") + ")";
+  if (s.ajenos && s.ajenos.length) t += ": " + s.ajenos.join(", ") + ". Quítalos con ✏ Editar y pulsa 📌 Siempre";
+  return t;
+}
+const POR_QUE_CATEGORIA = {
+  encendida: "se movieron a %s y se pondrán solos al denunciar ese sitio",
+  ya_encendida: "se añadieron a la lista «siempre» de %s",
+  apagada: "se movieron a %s como sugerencia (esa ficha la apagaste tú)",
+  red_con_dominio: "se movieron a %s como sugerencia (va por la red)",
+  ajenos: "se movieron a %s como sugerencia: esa ficha tiene correos de otro sitio, revísala",
+  oculta: "NO se movieron: borraste la ficha de %s. La de la categoría queda apagada",
+  red_con_dominio_siempre: "NO se movieron a %s (ya tiene su lista «siempre»). La de la categoría queda apagada",
+  varios_sitios: "son de varios sitios: la ficha de la categoría queda apagada (no se pone sola)"
+};
+function texto_aviso_categoria(a) {
+  const que = (POR_QUE_CATEGORIA[a.razon] || a.razon).replace("%s", a.a || "");
+  return a.de + " (" + (a.correos || []).join(", ") + "): " + que;
+}
+
+function pintar_resumen_migraciones(resumen, avisos) {
+  const caja = $("resumen_migracion_registro");
+  if (!caja || (!resumen && !avisos)) return;
+  caja.textContent = "";
+  const titulo = document.createElement("div");
+  titulo.className = "titulo_resumen_migracion_correos";
+  titulo.textContent = resumen
+    ? "📥 Correos de tus denuncias ya enviadas, guardados en el sitio que les corresponde"
+    : "📥 Cambios en tus correos guardados";
+  caja.appendChild(titulo);
+
+  if (resumen) {
+    const guardados = (resumen.guardados || []).filter((g) => g && g.correos && g.correos.length);
+    if (!guardados.length) {
+      const p = document.createElement("p");
+      p.textContent = "No había correos nuevos que guardar: lo que encontré en el Registro ya estaba aquí.";
+      caja.appendChild(p);
+    }
+    bloque_resumen(caja, "Se guardaron:",
+      guardados.map((g) => g.sitio + " → " + g.correos.join(", ") + (g.siempre ? " (se ponen solos en «Para» al denunciar ese sitio)" : " (como sugerencia)")));
+    bloque_resumen(caja, "En estos sitios NO se encendió «siempre»:", (resumen.sin_siempre || []).map(texto_sin_siempre));
+    bloque_resumen(caja, "Se APAGÓ «siempre» porque la ficha tenía correos de OTRO sitio (no se borró nada; revísala con ✏ Editar y pulsa 📌 Siempre):",
+      (resumen.reparadas || []).map((r) => r.sitio + ": " + r.ajenos.join(", ")));
+    bloque_resumen(caja, "Descartados por no corresponder al sitio denunciado (si eran buenos, añádelos a mano arriba):",
+      (resumen.descartados || []).map((d) => d.correo + " (en una denuncia de " + (d.sitios || []).join(", ") + ")"));
+    bloque_resumen(caja, "Denuncias sin enlace (no se sabe de qué sitio son sus correos; añádelos a mano si quieres):",
+      (resumen.sin_enlace || []).map((d) => (d.marca ? d.marca + " · " : "") + (d.plataforma || "") + " → " + d.correos.join(", ")));
+  }
+  if (avisos) bloque_resumen(caja, "Fichas antiguas de categorías (Apps maliciosas, Delisting…):", avisos.map(texto_aviso_categoria));
+
+  caja.style.display = "";
+  // Ya se enseñó: no vuelve a salir la próxima vez que se abra esta página.
+  if (resumen) CD.marcar_resumen_migracion_visto();
+  if (avisos) CD.marcar_avisos_vistos();
+}
+
+// Primero la migración (si el service worker no la hizo ya), luego la tabla.
+CD.migrar_correos_del_registro(() => {
+  recargar();
+  CD.resumen_migracion_registro_pendiente((resumen) => {
+    CD.avisos_pendientes((avisos) => pintar_resumen_migraciones(resumen, avisos));
+  });
+});
