@@ -80,7 +80,19 @@ chrome.storage.local.get("email_reporte", (d) => {
   // Destinos FIJOS de la red (p. ej. TikTok: sus tres buzones de propiedad
   // intelectual). Van SIEMPRE, aunque el correo se hubiera generado antes.
   $("para").value = CD ? CD.unir_correos(e.to || "", CD.fijos_de_red(REPORTE.red)) : (e.to || "");
-  pintar_memoria_correos();
+  pintar_boton_guardar_para_siempre();
+  // Y los correos que el usuario GUARDÓ PARA SIEMPRE para esta red (botón 💾).
+  // Primero se suman y después se pinta la memoria, que solo rellena si el
+  // "Para" sigue vacío.
+  if (CD) {
+    CD.correos_para_siempre(REPORTE.red, (siempre) => {
+      if (siempre.length) $("para").value = CD.unir_correos($("para").value, siempre);
+      pintar_correos_para_siempre(siempre);
+      pintar_memoria_correos();
+    });
+  } else {
+    pintar_memoria_correos();
+  }
   $("asunto_en").value = e.asunto || "";
   // Los cuerpos son editores con formato: el prefill (texto plano con saltos) se
   // convierte a HTML seguro (escapado, con <br>) para verse bien y ser editable.
@@ -132,6 +144,13 @@ function anadir_a_para(correo) {
   aviso("✓ " + correo + " añadido al campo \"Para\"");
 }
 
+// Las fichas de una red sin dominio se guardan como "red:<nombre>"; al usuario se
+// le enseña el nombre de la red, no la clave interna.
+function nombre_de_clave(clave) {
+  const pre = (CD && CD.PREFIJO_RED) || "red:";
+  return String(clave).indexOf(pre) === 0 ? (REPORTE.red || String(clave).slice(pre.length)) : clave;
+}
+
 function pintar_memoria_correos() {
   if (!CD || !$("caja_memoria")) return;
   CD.sugerencias(REPORTE.red, REPORTE.urls, (lista, claves) => {
@@ -144,17 +163,17 @@ function pintar_memoria_correos() {
       const del_sitio = lista.filter((s) => s.clave === mejor).map((s) => s.correo);
       $("para").value = CD.unir_correos(del_sitio);
       $("titulo_memoria").textContent =
-        "📒 Puesto solo: correo(s) que ya usaste para denunciar a " + mejor;
+        "📒 Puesto solo: correo(s) que ya usaste para denunciar a " + nombre_de_clave(mejor);
     } else {
       $("titulo_memoria").textContent =
-        "📒 Correos que ya usaste para " + claves.join(", ");
+        "📒 Correos que ya usaste para " + claves.map(nombre_de_clave).join(", ");
     }
     // Fichas con un clic para añadir (textContent: nada de HTML desde datos guardados).
     lista.forEach((s) => {
       const b = document.createElement("button");
       b.type = "button";
       b.className = "ficha_correo_memoria";
-      b.title = (s.nombre ? s.nombre + " · " : "") + s.clave + (s.nota ? " · " + s.nota : "");
+      b.title = (s.nombre ? s.nombre + " · " : "") + nombre_de_clave(s.clave) + (s.nota ? " · " + s.nota : "");
       const t = document.createElement("span");
       t.textContent = s.correo;
       b.appendChild(t);
@@ -178,6 +197,53 @@ function recordar_correos_usados() {
     if (!claves.length) return;
     CD.recordar_uso(claves, $("para").value, { nombre: REPORTE.red || "" });
   } catch (e) { /* la memoria nunca bloquea el envío */ }
+}
+
+// ---------------------------------------------------------------------------
+//  💾 GUARDAR PARA FUTUROS REPORTES: deja la lista ACTUAL del "Para" guardada en
+//  la ficha de esta red (ver guardar_para_siempre en datos/correos_denuncia.js).
+//  Desde ese momento, cada reporte de esta red trae esos correos puestos solos.
+//  Guarda la lista exacta: si se quita un correo y se vuelve a guardar, se va.
+// ---------------------------------------------------------------------------
+function pintar_boton_guardar_para_siempre() {
+  const b = $("guardar_correos_para_siempre");
+  if (!b) return;
+  const red = (REPORTE.red || "").trim();
+  b.textContent = "💾 Guardar estos correos para futuros reportes" + (red ? " de " + red : "");
+  b.title = red
+    ? "La próxima vez que hagas un reporte por correo de " + red + ", estos correos se pondrán solos en «Para»."
+    : "Este reporte no dice de qué red es: no hay dónde guardarlos.";
+}
+
+// "📌 Guardados para <Red>: a, b, c" debajo del "Para": lo que se puso solo tiene
+// que verse entero (textContent: los correos guardados nunca se pintan como HTML).
+function pintar_correos_para_siempre(lista) {
+  const p = $("linea_correos_para_siempre");
+  if (!p) return;
+  const correos = Array.isArray(lista) ? lista : [];
+  if (!correos.length) { p.textContent = ""; p.style.display = "none"; return; }
+  const red = (REPORTE.red || "").trim();
+  p.textContent = "📌 Guardados para " + (red || "esta red") + " (se ponen solos en «Para»): " + correos.join(", ");
+  p.style.display = "";
+}
+
+function guardar_correos_para_siempre() {
+  if (!CD) return;
+  const red = (REPORTE.red || "").trim();
+  if (!red) { aviso("⚠ Este reporte no dice de qué red es: no hay dónde guardar los correos."); return; }
+  const correos = CD.lista_correos($("para").value);
+  if (!correos.length) { aviso("⚠ El campo «Para» no tiene ningún correo válido: no se guardó nada."); return; }
+  CD.guardar_para_siempre(red, $("para").value, (ok, clave, guardados) => {
+    if (!ok) { aviso("⚠ No se pudo guardar."); return; }
+    const n = guardados.length;
+    aviso("✓ Guardado: la próxima vez " + (n === 1 ? "este correo se pondrá solo" : "estos " + n + " correos se pondrán solos") +
+      " en «Para» de " + red);
+    pintar_correos_para_siempre(guardados);
+    pintar_memoria_correos();
+  });
+}
+if ($("guardar_correos_para_siempre")) {
+  $("guardar_correos_para_siempre").addEventListener("click", guardar_correos_para_siempre);
 }
 
 if ($("abrir_memoria")) {
