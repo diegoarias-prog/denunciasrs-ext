@@ -985,6 +985,110 @@ async function APLICAR(pasos, opciones) {
           else if (yaLleno) { ok++; } // ya estaba relleno (correo verificado, etc.)
           else faltan.push("etiqueta:" + p.label);
         }
+      } else if (p.tipo === "fillEditorRico") {
+        // =====================================================================
+        //  EDITOR DE TEXTO ENRIQUECIDO (contenteditable). Caso real: la descripción del
+        //  formulario de Aptoide (Zendesk) es un CKEditor 5; el <textarea> de verdad está
+        //  OCULTO y es el editor quien lo alimenta al escribir. Escribir en el textarea
+        //  no basta (el editor lo vuelve a pisar con lo suyo, vacío) y tocar el innerHTML
+        //  del editor tampoco: CKEditor tiene su propio modelo, repinta encima y lo que se
+        //  metió a mano desaparece o no llega al envío.
+        //  Desde aquí (mundo AISLADO) no se ve `ckeditorInstance`, así que se le habla al
+        //  editor como lo haría una persona que PEGA: un evento `paste` con el texto en
+        //  text/html y text/plain (MEDIDO contra la página real de Aptoide desde un mundo
+        //  aislado: CKEditor lo mete en SU modelo). Si no lo acepta, se prueba a TECLEAR con
+        //  execCommand('insertText'/'insertParagraph'); OJO, Chrome NO dispara `beforeinput`
+        //  con execCommand, así que esto solo sirve en un contenteditable sencillo (sin
+        //  modelo propio). Y en los dos casos se COMPRUEBA leyendo el editor:
+        //  solo cuenta como hecho si el texto quedó de verdad dentro.
+        //  `respaldo` (selector del textarea oculto): se le deja el mismo valor por si el
+        //  editor no lo sincroniza; no cuenta en `hechos` (el campo es el editor).
+        //  Lo que el USUARIO ya escribió en el editor se respeta (como fillLabel con una
+        //  caja llena): no se borra ni se le pega nada encima.
+        // =====================================================================
+        if (p.valor != null && p.valor !== "") {
+          const visibleEd = (e) => { const q = e.getBoundingClientRect(); return q.width >= 2 && q.height >= 2; };
+          const buscarEditor = () => Array.prototype.slice.call(
+            document.querySelectorAll(p.css || '.ck-editor__editable[contenteditable="true"],.ck-editor__editable[contenteditable=""]'))
+            .filter(visibleEd)[0] || null;
+          const plano = (s) => norm(s).replace(/\s+/g, " ").trim();
+          const objetivo = plano(p.valor);
+          // Se compara el PRINCIPIO y el FINAL del texto (el editor puede retocar espacios,
+          // convertir URLs en enlaces o partir párrafos, pero no se come el texto).
+          const muestraIni = objetivo.slice(0, 60), muestraFin = objetivo.slice(-40);
+          const quedoDentro = (el) => { const t = plano(el.innerText || el.textContent || ""); return t.indexOf(muestraIni) >= 0 && t.indexOf(muestraFin) >= 0; };
+          let ed = null, usarRespaldo = true;   // el respaldo NO se usa si el texto es del usuario
+          for (let intentoEd = 0; intentoEd < (p.reintentos || 1) && !ed; intentoEd++) {
+            ed = buscarEditor();
+            if (!ed && intentoEd + 1 < (p.reintentos || 1)) await dur(400);
+          }
+          if (!ed) {
+            faltan.push("editor:" + (p.css || "texto enriquecido"));
+          } else if (quedoDentro(ed)) {
+            ok++;                       // ya estaba (2.ª pasada): ni se duplica ni se anota
+          } else if (plano(ed.innerText || ed.textContent || "")) {
+            ok++;                       // lo escribió el usuario: se respeta
+            usarRespaldo = false;
+            anotar("respetada la eleccion del usuario", ed, "el editor ya tenia texto");
+          } else {
+            const escapar = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+            const parrafos = String(p.valor).replace(/\r/g, "").split(/\n{2,}/);
+            const html = parrafos.map((pa) => "<p>" + escapar(pa).replace(/\n/g, "<br>") + "</p>").join("");
+            try { ed.focus(); } catch (e) {}
+            // Todo el contenido del editor seleccionado: lo pegado REEMPLAZA el párrafo
+            // vacío de relleno en vez de quedar detrás de él.
+            try {
+              const sel = window.getSelection(), rango = document.createRange();
+              rango.selectNodeContents(ed); sel.removeAllRanges(); sel.addRange(rango);
+            } catch (e) {}
+            // 1) Como un PEGADO.
+            try {
+              const dt = new DataTransfer();
+              dt.setData("text/html", html);
+              dt.setData("text/plain", String(p.valor));
+              ed.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
+            } catch (e) {}
+            await dur(200);
+            // 2) Si no lo tomó, TECLEADO (párrafo a párrafo).
+            if (!quedoDentro(ed)) {
+              try {
+                const sel = window.getSelection(), rango = document.createRange();
+                rango.selectNodeContents(ed); sel.removeAllRanges(); sel.addRange(rango);
+                parrafos.forEach((pa, i) => {
+                  if (i > 0) document.execCommand("insertParagraph", false);
+                  document.execCommand("insertText", false, pa);
+                });
+              } catch (e) {}
+              await dur(200);
+            }
+            if (quedoDentro(ed)) {
+              try { ed.setAttribute("data-rs-escrito-por-la-extension", "1"); } catch (e) {}
+              anotar("escribio", ed, String(p.valor).replace(/\s+/g, " ").slice(0, 70));
+              ok++;
+            } else {
+              faltan.push("editor:no acepto el texto");
+            }
+          }
+          // Respaldo: el <textarea> oculto que se envía de verdad, si sigue vacío.
+          if (p.respaldo && usarRespaldo) {
+            try {
+              const ta = document.querySelector(p.respaldo);
+              if (ta && !String(ta.value || "").trim()) {
+                Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set.call(ta, String(p.valor));
+                ta.dispatchEvent(new Event("input", { bubbles: true }));
+                ta.dispatchEvent(new Event("change", { bubbles: true }));
+              }
+            } catch (e) {}
+          }
+        }
+      } else if (p.tipo === "comprobarValor") {
+        // SOLO LEE. Para campos que la página trae YA puestos y que no hay que tocar (la
+        // categoría «DMCA» de Aptoide viene fijada por la URL): si siguen con el valor
+        // esperado, bien; si no, sale en `faltan` para que el usuario lo revise. Nunca
+        // escribe ni llama a `anotar` (no es un campo rellenado: `hechos` no lo cuenta).
+        const elC = p.css ? document.querySelector(p.css) : null;
+        if (elC && String(elC.value || "") === String(p.valor == null ? "" : p.valor)) ok++;
+        else faltan.push("comprobar:" + (p.aviso || p.css) + " (hay: " + (elC ? (elC.value || "vacio") : "no existe") + ")");
       } else if (p.tipo === "fillUrlsUnaCaja") {
         // UNA sola caja para TODAS las URLs (TikTok: una por línea; portal nuevo de Meta:
         // separadas por coma -> p.separador). Se llena por partes, así que si la caja aún

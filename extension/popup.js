@@ -262,6 +262,8 @@ async function cargar_plataformas_de_usuario() {
   if (typeof window.APLICAR_PLATAFORMAS_DE_USUARIO === "function") {
     window.APLICAR_PLATAFORMAS_DE_USUARIO(PLATAFORMAS_DE_USUARIO);
   }
+  // Apps maliciosas: las tiendas que creó el usuario y los enlaces que guardó.
+  await cargar_apps_maliciosas();
 }
 
 // ¿Esta red la creó el usuario? (para saber si se puede quitar)
@@ -287,9 +289,190 @@ function clave_nueva_de_plataforma(nombre, tipo) {
 }
 
 function formularios_de_red(red, tipo) {
-  return Object.keys(window.FORMULARIOS)
+  const lista = Object.keys(window.FORMULARIOS)
     .filter((k) => window.FORMULARIOS[k].red === red && form_es_del_tipo(window.FORMULARIOS[k], tipo))
     .map((k) => ({ value: k, texto: window.FORMULARIOS[k].nombre }));
+  // Apps maliciosas por formulario: la ÚLTIMA opción es dar de alta otra tienda / sitio
+  // (igual que «➕ Nueva plataforma…» en la lista de redes). No es un reporte.
+  if (red === RED_APPS_MALICIOSAS && tipo === "formulario") {
+    lista.push({ value: OPCION_NUEVA_APP, texto: "➕ Nueva app / sitio…" });
+  }
+  return lista;
+}
+
+// ===========================================================================
+//  APPS MALICIOSAS — el SUBMENÚ de tiendas de apps no oficiales (Por formulario)
+//  Aptoide, APKPure, FileHippo, APKCombo (de fábrica, no se pueden quitar) y las
+//  que el usuario cree con «➕ Nueva app / sitio…». El ENLACE del formulario de
+//  cada una se puede cambiar y se guarda. Las dos claves de chrome.storage.local
+//  y la función que las mezcla en FORMULARIOS viven en datos/formularios.js
+//  (APLICAR_APPS_MALICIOSAS_DE_USUARIO): la misma que usa el menú del clic derecho.
+// ===========================================================================
+const RED_APPS_MALICIOSAS = "Apps maliciosas";
+const OPCION_NUEVA_APP = "__NUEVA_APP__";
+const CLAVE_APPS_USUARIO = window.CLAVE_APPS_MALICIOSAS_USUARIO || "apps_maliciosas_usuario";
+const CLAVE_ENLACES_APPS = window.CLAVE_ENLACES_FORMULARIOS_APPS || "enlaces_formularios_apps";
+
+function diccionario_guardado(v) {
+  return (v && typeof v === "object" && !Array.isArray(v)) ? v : {};
+}
+
+// Se relee SIEMPRE antes de escribir (por si otra ventana guardó algo mientras tanto).
+function leer_apps_y_enlaces() {
+  return new Promise((res) => chrome.storage.local.get([CLAVE_APPS_USUARIO, CLAVE_ENLACES_APPS], (d) => res({
+    apps: diccionario_guardado(d && d[CLAVE_APPS_USUARIO]),
+    enlaces: diccionario_guardado(d && d[CLAVE_ENLACES_APPS])
+  })));
+}
+
+async function cargar_apps_maliciosas() {
+  if (typeof window.APLICAR_APPS_MALICIOSAS_DE_USUARIO !== "function") return;
+  const g = await leer_apps_y_enlaces();
+  window.APLICAR_APPS_MALICIOSAS_DE_USUARIO(g.enlaces, g.apps);
+}
+
+// El enlace escrito, ya validado: "" si no es https. Sin protocolo se le pone https://
+// (como en «➕ Nueva plataforma…»). Un «javascript:» o un «data:» acabaría abriéndose, y
+// un http:// no lo cubre optional_host_permissions (solo https): no se podría rellenar.
+function enlace_de_formulario_valido(dato) {
+  const t = String(dato || "").trim();
+  if (!t) return "";
+  let u = null;
+  try { u = new URL(/^[a-z][a-z0-9+.-]*:/i.test(t) ? t : "https://" + t); } catch (e) { u = null; }
+  if (!u || u.protocol !== "https:" || !u.hostname) return "";
+  return u.href;
+}
+
+function nombre_de_tienda(f) { return (f && (f.tienda || f.nombre)) || ""; }
+
+// Enseña el panel que toca según el reporte elegido: el ALTA si es «➕ Nueva app…», el
+// ENLACE si es una tienda con enlace editable, o ninguno.
+function pintar_panel_de_app() {
+  const valor = $("sel_form").value;
+  const f = window.FORMULARIOS[valor];
+  const esNueva = (valor === OPCION_NUEVA_APP);
+  const editable = !esNueva && tipo_de_denuncia() === "formulario" && !!(f && f.urlEditable);
+  $("panel_nueva_app").style.display = esNueva ? "" : "none";
+  $("panel_enlace_app").style.display = editable ? "" : "none";
+  mostrar_pregunta_de_quitar_app(false);
+  if (esNueva) {
+    $("caja_nombre_app").value = "";
+    $("caja_url_app").value = "";
+    $("caja_nombre_app").focus();
+    return;
+  }
+  if (!editable) return;
+  const tienda = nombre_de_tienda(f);
+  $("rotulo_enlace_app").textContent = "Enlace del formulario de " + tienda;
+  $("caja_enlace_app").value = f.url || "";
+  let nota;
+  if (!f.url) nota = "«" + tienda + "» todavía no tiene formulario guardado: pega aquí su enlace y pulsa «Guardar enlace».";
+  else if (f.app_de_usuario) nota = "App creada por ti. Puedes cambiar su enlace y guardarlo, o quitarla.";
+  else if (f.urlFabrica && f.url !== f.urlFabrica) nota = "Usas un enlace guardado por ti. Para volver al de fábrica, vacía la caja y pulsa «Guardar enlace».";
+  else nota = "Enlace de fábrica. Si " + tienda + " cambia su formulario, pega el nuevo y pulsa «Guardar enlace».";
+  $("nota_enlace_app").textContent = nota;
+  $("boton_quitar_app").style.display = f.app_de_usuario ? "" : "none";
+}
+
+// Guarda (o borra, si la caja queda vacía) el enlace del formulario de la tienda elegida.
+async function guardar_enlace_de_app() {
+  const clave = $("sel_form").value;
+  const f = window.FORMULARIOS[clave];
+  if (!f || !f.urlEditable) return;
+  const tienda = nombre_de_tienda(f);
+  const dato = String($("caja_enlace_app").value || "").trim();
+  const url = enlace_de_formulario_valido(dato);
+  if (dato && !url) {
+    mostrar_estado("aviso", "Ese enlace no es válido: <b>" + escapar_html(dato) + "</b>. Tiene que empezar por https://");
+    $("caja_enlace_app").focus(); return;
+  }
+  if (!url && f.app_de_usuario) {
+    mostrar_estado("aviso", "Una app creada por ti necesita el enlace de su formulario. Si ya no la usas, quítala con <b>🗑 Quitar app</b>.");
+    $("caja_enlace_app").focus(); return;
+  }
+  const g = await leer_apps_y_enlaces();
+  // Igual al de fábrica (o vacío) = no hace falta guardar nada: manda el de fábrica.
+  if (url && url !== f.urlFabrica) g.enlaces[clave] = url; else delete g.enlaces[clave];
+  await new Promise((res) => chrome.storage.local.set({ [CLAVE_ENLACES_APPS]: g.enlaces }, res));
+  await cargar_plataformas_de_usuario();
+  pintar_panel_de_app();
+  const ahora = window.FORMULARIOS[clave];
+  mostrar_estado("ok", ahora && ahora.url
+    ? "✓ Enlace de «" + escapar_html(tienda) + "» guardado. Ya puedes pulsar <b>Rellenar formulario</b> (también desde el clic derecho)."
+    : "✓ Se quitó el enlace de «" + escapar_html(tienda) + "»: queda sin formulario hasta que pegues uno.");
+  // El permiso del sitio se pide AQUÍ, aprovechando el clic (Chrome exige un gesto del
+  // usuario). Va lo último: si el aviso del navegador cerrara el popup, lo de arriba ya
+  // está guardado. Si dice que no, se volverá a pedir al pulsar Rellenar.
+  if (ahora && ahora.url) await asegurar_permiso_para(ahora.url);
+}
+
+// Clave interna única para una app nueva ("Uptodown" -> "app_u_uptodown"). Nunca pisa
+// una existente (de fábrica o suya): si ya está, se le suma un número.
+function clave_nueva_de_app(nombre) {
+  const base = "app_u_" + (String(nombre).toLowerCase()
+    .normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 30) || "sitio");
+  let clave = base, n = 2;
+  while (Object.prototype.hasOwnProperty.call(window.FORMULARIOS, clave)) { clave = base + "_" + n; n++; }
+  return clave;
+}
+
+async function guardar_app_nueva() {
+  const nombre = String($("caja_nombre_app").value || "").replace(/\s+/g, " ").trim();
+  const dato = String($("caja_url_app").value || "").trim();
+  if (!nombre) { mostrar_estado("aviso", "Ponle un <b>nombre</b> a la app / sitio (es el que saldrá en la lista)."); $("caja_nombre_app").focus(); return; }
+  if (!dato) { mostrar_estado("aviso", "Falta el <b>enlace</b> del formulario de denuncia de «" + escapar_html(nombre) + "»."); $("caja_url_app").focus(); return; }
+  const url = enlace_de_formulario_valido(dato);
+  if (!url) {
+    mostrar_estado("aviso", "Ese enlace no es válido: <b>" + escapar_html(dato) + "</b>. Tiene que empezar por https://");
+    $("caja_url_app").focus(); return;
+  }
+  // Sin repetidos (sin mirar mayúsculas ni acentos): dos «Aptoide» en la lista confunden.
+  const comparable = (t) => String(t || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
+  const yaEsta = Object.keys(window.FORMULARIOS).some((k) => {
+    const f = window.FORMULARIOS[k];
+    return f && f.red === RED_APPS_MALICIOSAS && f.urlEditable && comparable(f.tienda) === comparable(nombre);
+  });
+  if (yaEsta) {
+    mostrar_estado("aviso", "Ya existe «" + escapar_html(nombre) + "» en Apps maliciosas. Elígela en la lista o ponle otro nombre.");
+    return;
+  }
+  const clave = clave_nueva_de_app(nombre);
+  const g = await leer_apps_y_enlaces();
+  g.apps[clave] = { nombre: nombre, url: url };
+  await new Promise((res) => chrome.storage.local.set({ [CLAVE_APPS_USUARIO]: g.apps }, res));
+  await cargar_plataformas_de_usuario();
+  refrescar_formularios();
+  $("sel_form").value = clave;
+  pintar_panel_de_app();
+  mostrar_estado("ok", "✓ App «" + escapar_html(nombre) + "» creada en Apps maliciosas. Ya sale también en el menú del clic derecho.");
+  await asegurar_permiso_para(url);
+}
+
+function mostrar_pregunta_de_quitar_app(visible) {
+  const fila = $("fila_quitar_app");
+  if (visible) {
+    const f = window.FORMULARIOS[$("sel_form").value];
+    if (!f || !f.app_de_usuario) return;   // las de fábrica no se quitan
+    $("pregunta_de_quitar_app").textContent = "¿Quitar la app " + nombre_de_tienda(f) + "?";
+    fila.style.display = "";
+  } else { fila.style.display = "none"; }
+}
+
+async function confirmar_quitar_app() {
+  const clave = $("sel_form").value;
+  const f = window.FORMULARIOS[clave];
+  // Solo las que creó el usuario. Las de fábrica NO se quitan nunca desde aquí.
+  if (!f || !f.app_de_usuario) { mostrar_pregunta_de_quitar_app(false); return; }
+  const tienda = nombre_de_tienda(f);
+  const g = await leer_apps_y_enlaces();
+  delete g.apps[clave];
+  delete g.enlaces[clave];
+  await new Promise((res) => chrome.storage.local.set({ [CLAVE_APPS_USUARIO]: g.apps, [CLAVE_ENLACES_APPS]: g.enlaces }, res));
+  await cargar_plataformas_de_usuario();   // la quita también de FORMULARIOS
+  refrescar_formularios();
+  mostrar_pregunta_de_quitar_app(false);
+  mostrar_estado("ok", "✓ App «" + escapar_html(tienda) + "» quitada. Las de fábrica no se tocan.");
 }
 
 let MARCAS = {};
@@ -338,7 +521,7 @@ function al_cambiar_de_red() {
   mostrar_panel_de_plataforma(esAlta);
   mostrar_pregunta_de_quitar_plataforma(false);
   $("sel_form").disabled = esAlta;
-  if (esAlta) { llenar_select($("sel_form"), [], "(primero crea la plataforma)"); $("boton_quitar_plataforma").disabled = true; pintar_buzon_destino(); return; }
+  if (esAlta) { llenar_select($("sel_form"), [], "(primero crea la plataforma)"); $("boton_quitar_plataforma").disabled = true; pintar_buzon_destino(); pintar_panel_de_app(); return; }
   refrescar_formularios();
   // El 🗑 solo se enciende en las plataformas creadas por el usuario.
   $("boton_quitar_plataforma").disabled = !clave_de_plataforma_de_usuario($("sel_red").value, tipo_de_denuncia());
@@ -347,6 +530,7 @@ function al_cambiar_de_red() {
 function refrescar_formularios() {
   llenar_select($("sel_form"), formularios_de_red($("sel_red").value, tipo_de_denuncia()));
   pintar_buzon_destino();
+  pintar_panel_de_app();
 }
 
 // Enseña el panel de alta y adapta lo que se pide al modo elegido: por formulario
@@ -597,7 +781,22 @@ $("boton_confirmar_quitar_plataforma").addEventListener("click", al_pulsar(confi
 ["caja_nombre_plataforma", "caja_url_plataforma"].forEach((id) => {
   $(id).addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); guardar_plataforma_nueva(); } });
 });
-$("sel_form").addEventListener("change", pintar_buzon_destino);
+$("sel_form").addEventListener("change", () => { pintar_buzon_destino(); pintar_panel_de_app(); });
+// Apps maliciosas: enlace del formulario, alta y baja de apps del usuario.
+$("boton_guardar_enlace_app").addEventListener("click", al_pulsar(guardar_enlace_de_app));
+$("caja_enlace_app").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); al_pulsar(guardar_enlace_de_app)(); } });
+$("boton_guardar_app").addEventListener("click", al_pulsar(guardar_app_nueva));
+["caja_nombre_app", "caja_url_app"].forEach((id) => {
+  $(id).addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); al_pulsar(guardar_app_nueva)(); } });
+});
+$("boton_cancelar_app").addEventListener("click", () => {
+  // Al cancelar se vuelve al primer reporte de verdad, no se queda en el alta.
+  $("sel_form").selectedIndex = 0;
+  pintar_panel_de_app();
+});
+$("boton_quitar_app").addEventListener("click", () => mostrar_pregunta_de_quitar_app(true));
+$("boton_cancelar_quitar_app").addEventListener("click", () => mostrar_pregunta_de_quitar_app(false));
+$("boton_confirmar_quitar_app").addEventListener("click", al_pulsar(confirmar_quitar_app));
 $("sel_marca").addEventListener("change", async () => {
   mostrar_caja_de_nuevo_correo(false);
   mostrar_pregunta_de_quitar(false);   // la pregunta era de la marca anterior
@@ -1713,7 +1912,19 @@ async function rellenar() {
   // La pregunta de la denuncia anterior no debe quedarse encima de la nueva.
   if ($("panel_confirmar_denuncia")) $("panel_confirmar_denuncia").style.display = "none";
 
+  if (formKey === OPCION_NUEVA_APP) {
+    mostrar_estado("aviso", "Primero crea la app (nombre + enlace de su formulario) o elige una de la lista.");
+    return;
+  }
   const form = window.FORMULARIOS[formKey];
+  // Apps maliciosas: una tienda SIN enlace guardado no tiene formulario que abrir.
+  // Se avisa ANTES de nada (sin registrar denuncia ni abrir pestañas).
+  if (form && form.tipo !== "email" && form.urlEditable && !form.url) {
+    mostrar_estado("aviso", "«" + escapar_html(form.tienda || form.nombre) + "» todavía no tiene el enlace de su formulario. " +
+      "Pégalo en <b>Enlace del formulario de " + escapar_html(form.tienda || form.nombre) + "</b> y pulsa <b>Guardar enlace</b>.");
+    try { $("caja_enlace_app").focus(); } catch (e) {}
+    return;
+  }
   const datos = datos_de_la_marca(marca);
   // Código de red para la justificación de difamación (fb/ig/tk).
   const redCode = { Facebook: "fb", Instagram: "ig", TikTok: "tk" }[form.red] || "";
@@ -1862,7 +2073,15 @@ async function rellenar() {
   const es_la_misma_ruta = !rutaForm
     ? (rutaTab === rutaForm) // formulario en la raíz del sitio: solo vale la raíz
     : (rutaTab === rutaForm || rutaTab.indexOf(rutaForm + "/") === 0);
-  const es_el_mismo_sitio = es_el_mismo_host && es_la_misma_ruta;
+  // RUTA EXACTA (Apps maliciosas): la raíz de 2 niveles de arriba NO vale. La de Aptoide
+  // es zendesk.com, que comparten miles de empresas: estar en otra-empresa.zendesk.com
+  // con la misma ruta haría escribir los datos de la marca en un helpdesk AJENO. Se decide
+  // con la MISMA función que el clic derecho (ctxDetectarForm): host propio o subdominio
+  // suyo + ruta. Sin la función (formularios.js viejo) se va por lo seguro: pestaña nueva.
+  const es_el_mismo_sitio = form.exigeRutaExacta
+    ? (typeof window.PESTANA_ES_EL_FORMULARIO_EXACTO === "function" &&
+       window.PESTANA_ES_EL_FORMULARIO_EXACTO(tab.url || "", plan.url))
+    : (es_el_mismo_host && es_la_misma_ruta);
   if (!es_el_mismo_sitio) {
     mostrar_estado("aviso", "Abriendo el formulario en una pestaña aparte…");
     const nueva = await chrome.tabs.create({ url: plan.url, active: false });

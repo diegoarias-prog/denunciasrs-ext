@@ -111,7 +111,12 @@
     telegram_abuso: ["Condiciones del Servicio de Telegram", "https://telegram.org/tos"],
     yt_difam:     ["Normas de la Comunidad de YouTube", "https://www.youtube.com/howyoutubeworks/policies/community-guidelines/"],
     yt_marca:     ["Política de marcas registradas de YouTube", "https://support.google.com/youtube/answer/6154218"],
-    go_ads:       ["Políticas de publicidad de Google — Tergiversación (estafas y phishing)", "https://support.google.com/adspolicy/answer/6020955"]
+    go_ads:       ["Políticas de publicidad de Google — Tergiversación (estafas y phishing)", "https://support.google.com/adspolicy/answer/6020955"],
+    // Apps maliciosas: formularios de las tiendas de apps NO oficiales (formularios.js, app_*).
+    app_aptoide:  ["Términos de Aptoide — Uso aceptable (8.3 y 8.4) y aviso DMCA (9.8)", "https://en.aptoide.com/company/legal?section=terms"],
+    app_apkpure:  ["Política de derechos de autor y Condiciones de uso de APKPure", "https://apkpure.com/copyright-policy.html | https://apkpure.com/terms.html"],
+    app_filehippo:["Política DMCA de FileHippo y Condiciones de uso de Softonic (su operador)", "https://filehippo.com/info/dmca-policy/ | https://hello.softonic.com/terms-of-use/"],
+    app_apkcombo: ["Aviso DMCA y Condiciones de uso de APKCombo", "https://apkcombo.com/dmca/ | https://apkcombo.com/terms/"]
   };
 
   function justifES(cat, red, nombre, pais) {

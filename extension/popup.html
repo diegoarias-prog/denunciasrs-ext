@@ -168,6 +168,43 @@
     <label for="sel_form">Reporte</label>
     <select id="sel_form"></select>
 
+    <!-- Apps maliciosas (Por formulario): el ENLACE del formulario de la tienda elegida.
+         Se puede cambiar y se guarda (las tiendas cambian de formulario, y algunas aún
+         no tienen uno conocido). Solo se ve con un reporte de enlace editable. -->
+    <div id="panel_enlace_app" style="display:none;">
+      <label for="caja_enlace_app" id="rotulo_enlace_app">Enlace del formulario</label>
+      <input type="text" id="caja_enlace_app" class="caja_de_correo_nuevo" style="width:100%"
+             placeholder="https://…" autocomplete="off" maxlength="500">
+      <p class="nota_de_plataforma" id="nota_enlace_app"></p>
+      <div class="fila_del_remitente">
+        <button type="button" class="boton_mini" id="boton_guardar_enlace_app">Guardar enlace</button>
+        <!-- Solo en las apps que creó el usuario: las de fábrica no se pueden quitar. -->
+        <button type="button" class="boton_mini rojo" id="boton_quitar_app" style="display:none;"
+                title="Quitar esta app (solo las que creaste tú)">🗑 Quitar app</button>
+      </div>
+      <div class="fila_del_remitente" id="fila_quitar_app" style="display:none;">
+        <span class="pregunta_de_quitar" id="pregunta_de_quitar_app"></span>
+        <button type="button" class="boton_mini rojo" id="boton_confirmar_quitar_app">Quitar</button>
+        <button type="button" class="boton_mini gris" id="boton_cancelar_quitar_app" title="Cancelar">✕</button>
+      </div>
+    </div>
+
+    <!-- Alta de una app / sitio nuevo dentro de Apps maliciosas: aparece al elegir
+         "➕ Nueva app / sitio…" en el Reporte. -->
+    <div id="panel_nueva_app" style="display:none;">
+      <label for="caja_nombre_app">Nombre de la app / sitio</label>
+      <input type="text" id="caja_nombre_app" class="caja_de_correo_nuevo" style="width:100%"
+             placeholder="Ej. Uptodown, APKMirror…" autocomplete="off" maxlength="60">
+      <label for="caja_url_app">Enlace del formulario de denuncia</label>
+      <input type="text" id="caja_url_app" class="caja_de_correo_nuevo" style="width:100%"
+             placeholder="https://…" autocomplete="off" maxlength="500">
+      <p class="nota_de_plataforma">La extensión abrirá ese formulario y rellenará por el RÓTULO de cada campo lo que reconozca, con el texto de app no oficial en inglés. Lo que no encuentre te lo dirá en «📋 Copiar informe».</p>
+      <div class="fila_del_remitente">
+        <button type="button" class="boton_mini" id="boton_guardar_app">Crear app</button>
+        <button type="button" class="boton_mini gris" id="boton_cancelar_app">Cancelar</button>
+      </div>
+    </div>
+
     <!-- Alta de una plataforma nueva: aparece al elegir "➕ Nueva plataforma…" en
          el desplegable de arriba. Lo que se pide depende de cómo se denuncie:
          una URL si es por formulario, un buzón si es por correo. -->

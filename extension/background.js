@@ -1518,6 +1518,20 @@ function ctxDetectarForm(urlTab) {
     let fh = "", fp = "";
     try { const fu = new URL(f.url); fh = fu.host.replace(/^www\./, ""); fp = (fu.pathname || "").toLowerCase(); }
     catch (e) { return; }
+    // RUTA EXACTA (Apps maliciosas): el usuario suele estar EN la tienda que denuncia
+    // (la ficha de la app falsa en apkpure.com, por ejemplo). Ahí «Rellenar ESTA página»
+    // NO puede tomar esa ficha por el formulario solo porque comparten dominio, ni el
+    // de Aptoide valer para cualquier *.zendesk.com: tiene que ser el MISMO host y la
+    // ruta del formulario (vale un subdominio DEL PROPIO host, p. ej. m.apkpure.com).
+    // La regla vive en datos/formularios.js (PESTANA_ES_EL_FORMULARIO_EXACTO) y es la
+    // MISMA que usa el popup al decidir si ya está en el formulario.
+    if (f.exigeRutaExacta) {
+      if (typeof self.PESTANA_ES_EL_FORMULARIO_EXACTO !== "function" ||
+          !self.PESTANA_ES_EL_FORMULARIO_EXACTO(urlTab, f.url)) return;
+      const fpLimpia = fp.replace(/\/+$/, "");
+      if (fpLimpia.length > mejorLargo) { mejor = k; mejorLargo = fpLimpia.length; }
+      return;
+    }
     // Sitio del formulario, p.ej. tiktok.com. OJO al añadir formularios: si alguno llegara
     // a estar en un dominio de DOS niveles (algo.com.mx, algo.co.uk), este slice(-2) daría
     // "com.mx" y valdría CUALQUIER web de ese país -> habría que tratarlo aparte.
@@ -1671,7 +1685,9 @@ function ctxEsperarCarga(tabId) {
 async function ctxArmar(marca, formKey, urlsOverride) {
   // El service worker se duerme y al despertar solo tiene los formularios de fábrica:
   // si la denuncia es de una plataforma creada por el usuario, hay que recargarla.
-  if (!self.FORMULARIOS[formKey]) await ctxCargarPlataformasDeUsuario();
+  // Los de enlace EDITABLE (Apps maliciosas) también: al despertar traen el enlace de
+  // fábrica, no el que el usuario guardó en el popup.
+  if (!self.FORMULARIOS[formKey] || self.FORMULARIOS[formKey].urlEditable) await ctxCargarPlataformasDeUsuario();
   const form = self.FORMULARIOS[formKey];
   const MARCAS = await ctxObtenerMarcas();
   const datos = MARCAS[marca];
@@ -1757,9 +1773,31 @@ function activarBotonCaptura(tabId, intentos) {
   try {
     chrome.tabs.sendMessage(tabId, { accion: "activarBotonCaptura" }, () => {
       const err = chrome.runtime.lastError; // aún sin content script escuchando
-      if (err && quedan > 0) setTimeout(() => activarBotonCaptura(tabId, quedan - 1), 700);
+      if (!err) return;
+      // En el PRIMER fallo se intenta poner el botón a mano: los sitios que no están en
+      // `content_scripts` del manifest (el formulario de APKPure, las apps y plataformas
+      // que crea el usuario) nunca lo cargan solos, y el botón 📸 tiene que verse
+      // durante TODA la denuncia. Los reintentos siguen igual por si era solo que la
+      // página aún cargaba.
+      if (quedan === 3) inyectarBotonCapturaSiHayPermiso(tabId);
+      if (quedan > 0) setTimeout(() => activarBotonCaptura(tabId, quedan - 1), 700);
     });
   } catch (e) { /* la pestaña no admite content scripts */ }
+}
+
+// Inyecta captura_flotante.js en la pestaña SOLO si la extensión ya tiene permiso sobre
+// ese sitio (el que el usuario dio al pulsar Rellenar / Guardar enlace). No pide nada ni
+// amplía permisos: sin permiso, no se inyecta y queda el botón 📸 del popup. El propio
+// script se protege contra una doble carga (window.__denunciasRSBoton).
+async function inyectarBotonCapturaSiHayPermiso(tabId) {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    const u = new URL((tab && tab.url) || "");
+    if (u.protocol !== "https:") return;
+    const hay = await chrome.permissions.contains({ origins: [u.origin + "/*"] });
+    if (!hay) return;
+    await chrome.scripting.executeScript({ target: { tabId }, files: ["captura_flotante.js"] });
+  } catch (e) { /* pestaña cerrada, página del navegador o sin permiso: nada que hacer */ }
 }
 
 // Marca la pestaña como "pestaña de denuncia" y muestra ya el botón en ella.
@@ -1906,6 +1944,9 @@ async function ctxEjecutarPlan(tabId, plan, marca, form, datos, urlEsperada) {
 
 // "Rellenar ESTA página": autodetecta el formulario por la URL de la pestaña actual.
 async function ctxRellenarPagina(tab, marca, objetivo) {
+  // Con las apps y enlaces del usuario ya cargados: un formulario cuyo enlace guardó el
+  // usuario (Apps maliciosas) solo se reconoce por ESE enlace.
+  await ctxCargarPlataformasDeUsuario();
   const formKey = ctxDetectarForm(tab.url || "");
   if (!formKey) {
     ctxAvisar(tab.id, "Denuncias RS: esta página no es un formulario de denuncia. Usa la marca ▸ el formulario que quieras para abrirlo.", true);
@@ -1931,6 +1972,16 @@ async function ctxAbrirDenuncia(tabOrigen, marca, formKey, objetivo) {
   if (ctxFaltaElCorreo(tabOrigen && tabOrigen.id, marca, a.datos)) return;
   const form = a.form, ctx = a.ctx, datos = a.datos;
   const urlDen = (objetivo && objetivo[0]) || "";
+  // Apps maliciosas: una tienda SIN formulario guardado (FileHippo, APKCombo…) no tiene
+  // nada que abrir. Se dice qué hacer en vez de abrir una pestaña en blanco, y no se da
+  // de alta ninguna denuncia.
+  if (form.tipo !== "email" && form.urlEditable && !form.url) {
+    if (tabOrigen && tabOrigen.id) {
+      ctxAvisar(tabOrigen.id, "Denuncias RS: «" + (form.tienda || form.nombre) + "» todavía no tiene el enlace de su formulario. " +
+        "Abre la extensión, elige Apps maliciosas ▸ " + (form.tienda || form.nombre) + ", pega el enlace y pulsa «Guardar enlace».", true);
+    }
+    return;
+  }
   if (form.tipo === "email") {
     const em = form.construirEmail(ctx);
     // En modo prueba `ctxRegistrarDenuncia` devuelve null y `ctxGuardarCorreo` no hace
@@ -2072,8 +2123,15 @@ const ctxEsperarCallbacksDeMenu = () => dormir(0);
 async function ctxCargarPlataformasDeUsuario() {
   try {
     if (typeof self.APLICAR_PLATAFORMAS_DE_USUARIO !== "function") return;
-    const d = await chrome.storage.local.get(["plataformas_usuario"]);
+    const d = await chrome.storage.local.get(["plataformas_usuario",
+      self.CLAVE_APPS_MALICIOSAS_USUARIO, self.CLAVE_ENLACES_FORMULARIOS_APPS]);
     self.APLICAR_PLATAFORMAS_DE_USUARIO(d.plataformas_usuario || {});
+    // Apps maliciosas: las tiendas que creó el usuario y los enlaces que guardó (la
+    // MISMA función que usa el popup, así los dos ven exactamente lo mismo).
+    if (typeof self.APLICAR_APPS_MALICIOSAS_DE_USUARIO === "function") {
+      self.APLICAR_APPS_MALICIOSAS_DE_USUARIO(d[self.CLAVE_ENLACES_FORMULARIOS_APPS] || {},
+                                              d[self.CLAVE_APPS_MALICIOSAS_USUARIO] || {});
+    }
   } catch (e) { /* sin ellas, el menú sale con las de fábrica */ }
 }
 
@@ -2229,7 +2287,10 @@ chrome.storage.onChanged.addListener((cambios, area) => {
   if (area !== "local") return;
   // plataformas_usuario: al crear (o quitar) una plataforma desde el popup, el menú
   // del clic derecho se rehace para que aparezca (o desaparezca) al momento.
-  if (cambios.marcas_usuario || cambios.marcas_eliminadas || cambios.plataformas_usuario) ctxConstruirMenus();
+  // Igual al crear o quitar una app en Apps maliciosas (y al cambiar el enlace de una:
+  // así el clic derecho abre ya el enlace nuevo).
+  if (cambios.marcas_usuario || cambios.marcas_eliminadas || cambios.plataformas_usuario ||
+      cambios[self.CLAVE_APPS_MALICIOSAS_USUARIO] || cambios[self.CLAVE_ENLACES_FORMULARIOS_APPS]) ctxConstruirMenus();
 });
 
 // ============================================================================
