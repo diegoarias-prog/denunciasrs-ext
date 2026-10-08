@@ -1031,6 +1031,9 @@ const CLAVES_QUE_NO_SE_IMPORTAN = [
   // sitio" (v1 y v2): si viajara, la otra PC se saltaría su propia migración. Y los
   // avisos de esas migraciones, que son de lo que pasó en ESTA computadora.
   "correos_del_registro_migrados", "correos_del_registro_migrados_v2", "avisos_memoria_correos",
+  // La bandera (e informe) de la restauración de Delisting / Ofertas falsas / Banguat
+  // tras la v1.2.103: cada PC restaura lo SUYO.
+  "correos_categorias_restauradas",
   // El candado de "importación en curso" de la otra PC: si viajara, dejaría esta
   // computadora sin poder importar hasta que caducara.
   "importacion_en_curso"
