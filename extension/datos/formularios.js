@@ -856,28 +856,54 @@
 
   // ---- APKPure: formulario propio «Submit a Takedown Notice» ----
   // Encontrado el 2026-10-08 desde su Copyright Policy («the takedown notices ONLY can be
-  // accepted here»). Campos con `name` fijo (volcado con descarga directa). El código de
-  // verificación del correo, el adjunto y las 3 declaraciones juradas los hace el usuario.
+  // accepted here»). Volcado REAL con Playwright headless (2026-10-08, sin pulsar nada):
+  // TODO es HTML nativo con `name` fijo —el país es un <select name="country"> de verdad
+  // (envuelto en un <div class="select"> con estilo, y SIN opción vacía: de entrada pone
+  // «Afghanistan», así que hay que elegirlo SIEMPRE), los textos son <input>/<textarea> y
+  // las 3 declaraciones juradas son <input type="checkbox"> dentro de su <label>, sin id—.
+  // Copia fiel en pruebas/apkpure_takedown_real.html.
+  // Lo que hace el USUARIO (no se toca a propósito): pulsar «Get code» y escribir el
+  // código que le llega al correo, subir la carta de autorización y pulsar Submit.
   function planApkpure(ctx) {
     var d = ctx.datos || {}, marca = ctx.marca;
     var repres = /seguridadmaxima\.net/i.test(d.correo || "");
+    // Nombre legal y firma: la PERSONA que denuncia (como en Cloudflare), y APKPure exige
+    // que la firma sea EXACTAMENTE igual al nombre legal: sale de la misma variable.
     var persona = personaDeCorreo(d.correo);
+    var nombreLegal = persona.completo;
     var tx = textoDeAppNoOficial(ctx, "APKPure");
-    // «Where can we see an authorized example of the work?»: dónde está lo ORIGINAL (las
-    // apps oficiales y la web), seguido de la explicación con las políticas citadas.
-    var obra = (tx.oficiales.length ? "Official apps of " + marca + ":\n" + tx.oficiales.join("\n") + "\n" : "") +
-      (d.sitio ? "Official website: " + d.sitio + "\n" : "") + "\n" + tx.descripcion;
+    // «Where can we see an authorized example of the work?»: dónde está lo ORIGINAL (apps
+    // oficiales, web y perfiles oficiales de la marca) y, debajo, el texto de Apps
+    // maliciosas con la política de APKPure y su enlace. Solo lo que la marca tiene
+    // guardado: nada de «[ … ]» a la vista de la tienda.
+    var web = webOficialDe(marca, d);
+    var perfiles = [["Facebook", d.facebook], ["Instagram", d.instagram], ["TikTok", d.tiktok],
+                    ["X", d.x], ["YouTube", d.youtube], ["LinkedIn", d.linkedin]]
+      .map(function (r) { return [r[0], String(r[1] || "").trim()]; })
+      .filter(function (r) { return /^https?:\/\//i.test(r[1]) && r[1] !== web; })
+      .map(function (r) { return "- " + r[0] + ": " + r[1]; });
+    var obra =
+      (tx.oficiales.length ? "Official apps of " + marca + ":\n" + tx.oficiales.join("\n") + "\n" : "") +
+      (web ? "Official website of " + marca + ": " + web + "\n" : "") +
+      (perfiles.length ? "Official profiles of " + marca + ":\n" + perfiles.join("\n") + "\n" : "") +
+      "\n" + tx.descripcion;
     return { url: this.url, manual: this.manual, pasos: [
       { tipo: "selectPais", name: "country", valor: paisParaFormularioEnIngles(d.pais) },
-      // Nombre legal y firma: la PERSONA que denuncia (deben coincidir, lo exige APKPure).
-      // Si el correo no dice quién es, se dejan vacíos para el usuario: nunca la marca.
-      { tipo: "fillName", name: "fullLegalName", valor: persona.completo },
+      // Si el correo no dice quién es, nombre y firma se quedan VACÍOS para el usuario
+      // (el motor no escribe valores vacíos): nunca se firma con la marca.
+      { tipo: "fillName", name: "fullLegalName", valor: nombreLegal },
       { tipo: "fillName", name: "companyName", valor: repres ? "Security Maximum in Computer Networks" : marca },
       { tipo: "fillName", name: "fullLegalNameOfCopyrightHolder", valor: marca },
       { tipo: "fillName", name: "emailAddress", valor: d.correo || "" },
       { tipo: "fillName", name: "copyrightedWork", valor: obra },
       { tipo: "fillName", name: "allegedlyInfringingContent", valor: tx.urls.join("\n") },
-      { tipo: "fillName", name: "signature", valor: persona.completo }
+      // Las 3 declaraciones juradas. El paso `check` no vuelve a clicar una casilla que ya
+      // está marcada (un 2.º clic la DESMARCARÍA) y respeta la que el usuario desmarque.
+      { tipo: "check", name: "goodFaithBeliefStatement" },
+      { tipo: "check", name: "accuracyAndAuthorityStatement" },
+      { tipo: "check", name: "noticeCopyAcknowledgment" },
+      { tipo: "fillName", name: "signature", valor: nombreLegal }
+      // «Get code» / emailCode, el adjunto y Submit: NUNCA se tocan (ver `manual`).
     ] };
   }
 
@@ -1781,9 +1807,12 @@
       "La categoría ya viene en «DMCA»: compruébala. Adjunta la captura de la app si la tienes." + APPS_MANUAL_FIN,
       planAptoide),
     app_apkpure: formularioDeApp("APKPure", URL_APKPURE_RETIRADA,
-      "Se rellenan país, nombre legal, empresa, titular, correo, la obra original y los enlaces. TE TOCA: pedir y " +
-      "escribir el código de verificación del correo («Get code»), adjuntar la carta de autorización si actúas como " +
-      "agente, marcar las 3 declaraciones juradas y revisar la firma (debe ser igual al nombre legal)." + APPS_MANUAL_FIN,
+      "Se rellenan solos: país, nombre legal, empresa, titular, correo, la obra original (apps, web y perfiles " +
+      "oficiales + políticas de APKPure), los enlaces denunciados, las 3 declaraciones juradas y la firma (igual al " +
+      "nombre legal). TE TOCA: pulsar «Get code», escribir el código que te llega al correo y subir la carta de " +
+      "autorización (Letter of Authorization). Revisa que el nombre legal y la firma sean de la PERSONA que denuncia " +
+      "(si sale vacío o raro, escríbelo tú y pon el MISMO en la firma) y lee las 3 declaraciones antes de pulsar Submit." +
+      APPS_MANUAL_FIN,
       planApkpure),
     app_filehippo: formularioDeApp("FileHippo", "",
       "FileHippo (de Softonic) no publica formulario: a 2026-10-08 recibe las denuncias por correo en " +
