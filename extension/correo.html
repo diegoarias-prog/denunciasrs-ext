@@ -31,6 +31,8 @@
   #aviso { color: #065f46; font-size: 13px; margin-left: auto; }
   .nota { margin-top: 12px; font-size: 12px; color: #6b7280; }
   /* --- Memoria de correos (destinatarios ya usados para este mismo sitio) --- */
+  /* Correos guardados "para siempre" de esta red: a la vista, nunca escondidos al final del "Para" */
+  .linea_correos_para_siempre { margin: 6px 0 0; padding: 6px 10px; border-radius: 7px; background: #ecfdf5; border-left: 4px solid #059669; color: #065f46; font-size: 12px; overflow-wrap: anywhere; }
   .caja_memoria_correos { margin-top: 10px; border: 1px solid #bfdbfe; background: #eff6ff; border-radius: 9px; padding: 10px 12px; }
   .caja_memoria_correos .titulo_memoria { font-size: 12px; font-weight: 700; color: #1e40af; margin-bottom: 6px; }
   .caja_memoria_correos .lista_memoria { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -69,11 +71,17 @@
 
   <label for="para">Para</label>
   <input id="para" placeholder="Escribe aquí el correo del destinatario (algunos reportes, como Apps maliciosas, Delisting y Ofertas falsas de trabajo, lo dejan vacío para que lo completes)">
+  <!-- Correos que se pusieron SOLOS por estar guardados "para siempre" para esta red.
+       Se ven aquí para que ninguno quede escondido al final del campo. Lo pinta correo.js. -->
+  <p class="linea_correos_para_siempre" id="linea_correos_para_siempre" style="display:none;"></p>
   <div class="barra">
     <button class="boton" id="enviar_directo" style="display:none;background:#059669;">✅ Enviar ahora</button>
     <button class="boton" id="mailto">✉ Abrir en mi correo (inglés)</button>
     <button class="boton gm" id="gmail">Abrir en Gmail (inglés)</button>
     <button class="boton sec" id="copiar_para">📋 Copiar correos</button>
+    <!-- Guarda la lista ACTUAL del "Para" para todos los reportes futuros de esta red.
+         El texto (con el nombre de la red) lo pone correo.js. -->
+    <button type="button" class="boton sec" id="guardar_correos_para_siempre">💾 Guardar estos correos para futuros reportes</button>
     <span id="aviso"></span>
   </div>
   <p class="nota" id="de_info" style="display:none;color:#065f46;font-weight:600;"></p>

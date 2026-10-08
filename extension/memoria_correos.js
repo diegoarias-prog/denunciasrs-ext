@@ -12,7 +12,7 @@ function aviso(t) {
   setTimeout(() => ($("aviso").textContent = ""), 3500);
 }
 
-let MEMORIA = {};   // { dominio: {nombre, nota, base, correos:[{correo,veces,ultima}]} }
+let MEMORIA = {};   // { clave: {nombre, nota, base, siempre, correos:[{correo,veces,ultima}]} }
 
 function fecha_corta(iso) {
   if (!iso) return "";
@@ -52,6 +52,14 @@ function pintar_tabla() {
       et.textContent = "base";
       et.title = "Viene de fábrica con la extensión; puedes editarlo o borrarlo.";
       tdSitio.appendChild(et);
+    }
+    if (f.siempre) {
+      tdSitio.appendChild(document.createTextNode(" "));
+      const es = document.createElement("span");
+      es.className = "etiqueta_siempre_correos";
+      es.textContent = "siempre";
+      es.title = "Estos correos se ponen solos en «Para» de cada reporte de esta red.";
+      tdSitio.appendChild(es);
     }
     tr.appendChild(tdSitio);
 
@@ -96,6 +104,21 @@ function pintar_tabla() {
     });
     tdAcc.appendChild(bCop);
     tdAcc.appendChild(document.createTextNode(" "));
+    // Encender / apagar "siempre" sin tener que editar la ficha.
+    const bSie = document.createElement("button");
+    bSie.className = "boton sec mini boton_alternar_siempre_correos";
+    bSie.textContent = f.siempre ? "📌 Quitar «siempre»" : "📌 Siempre";
+    bSie.title = f.siempre
+      ? "Dejar de poner estos correos solos en cada reporte (se quedan como sugerencia)."
+      : "Poner estos correos solos en «Para» de cada reporte futuro de esta red.";
+    bSie.addEventListener("click", () => {
+      CD.marcar_siempre(k, !f.siempre, (ok) => {
+        aviso(ok ? (f.siempre ? "Ya no se ponen solos: " : "✅ Se pondrán solos siempre: ") + k : "⚠ No se pudo cambiar.");
+        recargar();
+      });
+    });
+    tdAcc.appendChild(bSie);
+    tdAcc.appendChild(document.createTextNode(" "));
     const bDel = document.createElement("button");
     bDel.className = "boton del mini";
     bDel.textContent = "🗑";
@@ -118,11 +141,13 @@ function cargar_en_formulario(clave) {
   $("campo_nombre").value = f.nombre || "";
   $("campo_correos").value = f.correos.map((c) => c.correo).join(", ");
   $("campo_nota").value = f.nota || "";
+  $("campo_siempre").checked = !!f.siempre;
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
 function limpiar_formulario() {
   ["campo_sitio", "campo_nombre", "campo_correos", "campo_nota"].forEach((id) => ($(id).value = ""));
+  $("campo_siempre").checked = false;
 }
 
 function recargar() {
@@ -147,8 +172,11 @@ $("guardar_sitio").addEventListener("click", () => {
   CD.guardar_ficha(clave, {
     nombre: ($("campo_nombre").value || "").trim(),
     nota: ($("campo_nota").value || "").trim(),
+    siempre: $("campo_siempre").checked,
     correos: correosFicha
-  }, () => {
+  }, (ok) => {
+    // guardar_ficha solo admite un dominio (ejemplo.com) o "red:<nombre>".
+    if (!ok) { aviso("⚠ «" + clave + "» no es un sitio válido: escribe un dominio (ejemplo.com) o red:nombre."); return; }
     aviso("✅ Guardado: " + clave);
     limpiar_formulario();
     recargar();

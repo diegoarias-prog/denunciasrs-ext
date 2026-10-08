@@ -35,6 +35,9 @@
   .correo_guardado { display: block; }
   .correo_guardado .veces { color: #6b7280; font-size: 11px; }
   .etiqueta_base { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; background: #e0e7ff; color: #3730a3; }
+  .etiqueta_siempre_correos { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; background: #d1fae5; color: #065f46; }
+  .casilla_siempre_correos { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; text-transform: none; letter-spacing: 0; color: #1f2937; margin: 0; }
+  .casilla_siempre_correos input { width: auto; }
   .vacio_tabla { color: #6b7280; font-size: 13px; padding: 16px 4px; }
   .sitio_clave { font-weight: 700; }
 </style>
@@ -46,6 +49,8 @@
     la extensión guarda sola el destinatario junto al dominio del sitio denunciado; la próxima vez
     que denuncies algo de ese mismo sitio, el correo aparece puesto y ya no hay que buscarlo en su
     web oficial. También puedes agregarlos o corregirlos a mano aquí.
+    Las fichas marcadas <b>siempre</b> se ponen solas en el «Para» de cada reporte de esa red
+    (las plataformas sin dominio propio aparecen como <b>red:nombre</b>).
   </p>
 
   <h2>Agregar / editar un sitio</h2>
@@ -66,6 +71,12 @@
       <div class="campo_correo ancho_total">
         <label for="campo_nota">Nota (opcional: para qué tipo de denuncia sirve)</label>
         <textarea id="campo_nota" placeholder="DMCA / apps no oficiales que suplantan a la marca"></textarea>
+      </div>
+      <div class="campo_correo ancho_total">
+        <label class="casilla_siempre_correos" for="campo_siempre">
+          <input type="checkbox" id="campo_siempre">
+          Siempre: poner estos correos solos en «Para» de cada reporte futuro de esta red
+        </label>
       </div>
     </div>
     <div class="barra">

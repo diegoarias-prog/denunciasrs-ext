@@ -973,7 +973,10 @@ cargar_marcas();
 //                              natural = red + tipo, igual que en popup.js).
 //    • plantillas ............ se añaden solo las que no existan (tema+nombre).
 //    • memoria_correos ....... se fusiona por sitio+correo y se SUMAN los
-//                              contadores de uso de las dos PCs.
+//                              contadores de uso de las dos PCs. La marca
+//                              `siempre` (correos que se ponen solos en cada
+//                              reporte de esa red) viaja con la ficha; si aquí ya
+//                              estaba decidida, gana la de aquí.
 //    • marcas_eliminadas ..... NO SE IMPORTA NUNCA: es una lista de marcas
 //                              ocultadas, e importarla haría DESAPARECER marcas
 //                              en la PC de destino.
@@ -1063,6 +1066,20 @@ let archivo_de_traspaso_en_espera = null;
 // ---------------------------------------------------------------------------
 function texto_plano(valor) {
   return (valor === 0 ? "0" : (valor == null ? "" : valor)) + "";
+}
+// UNA dirección de correo y nada más (la misma regla que correo_unico en
+// datos/correos_denuncia.js, que esta página no carga). "" si no lo es.
+function correo_unico_de_traspaso(valor) {
+  const c = texto_plano(valor).trim();
+  return /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(c) ? c : "";
+}
+// Clave de ficha de la memoria de correos: cualquier texto no vacío salvo los
+// nombres del prototipo de los objetos (la misma regla que clave_valida en
+// datos/correos_denuncia.js). NO se exige forma de dominio: hay fichas antiguas
+// con clave "softonic" o "mi sitio" que no pueden perderse en un traspaso.
+function clave_de_memoria_valida(clave) {
+  const t = texto_plano(clave);
+  return t.trim() !== "" && !clave_peligrosa(t) && !(t in Object.prototype);
 }
 function lista_de(valor) {
   return Array.isArray(valor) ? valor : [];
@@ -1463,7 +1480,11 @@ function historial_de_traspasos_actualizado(datos_actuales, archivo, resumen) {
 //  archivo y lo que hay ahora, y devuelve exactamente qué se escribiría.
 //  Esto es lo que se enseña en la vista previa y lo que luego se aplica.
 // ---------------------------------------------------------------------------
-function planificar_importacion(archivo, datos_actuales, ya_se_importo) {
+// `opciones.aceptar_siempre`: el usuario marcó en la vista previa la casilla de los
+// correos que se pondrán SOLOS en el "Para". Sin ella, esas fichas entran como
+// simples sugerencias (`siempre: false`).
+function planificar_importacion(archivo, datos_actuales, ya_se_importo, opciones) {
+  const aceptar_siempre = !!(opciones && opciones.aceptar_siempre === true);
   const validacion = validar_archivo_de_traspaso(archivo);
   if (!validacion.ok) return { ok: false, motivo: validacion.motivo };
 
@@ -1483,7 +1504,7 @@ function planificar_importacion(archivo, datos_actuales, ya_se_importo) {
   // Para que la vista previa pueda enseñar QUÉ entra, no solo cuántos: los
   // correos nuevos y el destino completo de cada plataforma deciden a dónde van
   // a parar las denuncias del usuario, así que tiene que poder verlos antes.
-  const nombres_nuevos = { marcas: [], plataformas: [], correos: [], borradas_aqui: [] };
+  const nombres_nuevos = { marcas: [], plataformas: [], correos: [], borradas_aqui: [], siempre: [] };
   const coincidencias_de_consecutivo = [];
 
   // CONTADORES DE USO SIN CONTAR DOS VECES: de cada computadora de origen se
@@ -1638,6 +1659,9 @@ function planificar_importacion(archivo, datos_actuales, ya_se_importo) {
 
     sitios_de_fuera.forEach((sitio) => {
       if (clave_peligrosa(sitio)) return;
+      // Nada de claves con nombre del prototipo ("toString", "valueOf"…): romperían
+      // la lectura de la memoria. Cualquier otra clave entra (también "softonic").
+      if (!clave_de_memoria_valida(sitio)) return;
       const ficha_fuera = diccionario_de(memoria_fuera[sitio]);
       // `oculto` es una ficha que el usuario BORRÓ a mano en la otra PC:
       // importarlo escondería correos aquí, así que nunca se trae.
@@ -1646,15 +1670,44 @@ function planificar_importacion(archivo, datos_actuales, ya_se_importo) {
       // Si aquí la escondió el usuario, se respeta su decisión: no se resucita.
       if (ficha_aqui && ficha_aqui.oculto) { resumen.fichas_de_correo_respetadas++; return; }
 
+      // Los correos de fuera, NORMALIZADOS: solo entradas que son UN correo válido
+      // (una "a@x.com\r\nb@evil.com" se partiría en dos al pasar al "Para").
+      const correos_fuera = [];
+      const vistos_fuera = Object.create(null);
+      lista_de(ficha_fuera.correos).forEach((c) => {
+        const direccion = correo_unico_de_traspaso(c && c.correo);
+        if (!direccion || vistos_fuera[direccion.toLowerCase()]) return;
+        vistos_fuera[direccion.toLowerCase()] = 1;
+        correos_fuera.push({ correo: direccion, veces: Number(c.veces) || 0, ultima: texto_plano(c.ultima) });
+      });
+
+      // CORREOS QUE SE PONDRÍAN SOLOS EN EL "PARA" (`siempre`). Es lo más delicado
+      // del archivo: una ficha así decide el destinatario de cada reporte de esa
+      // red sin que nadie lo escriba. Se apunta para la vista previa SIEMPRE, y
+      // solo se aplica si el usuario marcó su casilla (`aceptar_siempre`); si no,
+      // esa ficha entra como simples sugerencias.
+      const trae_siempre = ficha_fuera.siempre === true;
+      if (trae_siempre && !(ficha_aqui && ficha_aqui.siempre === false)) {
+        const ya_aqui = ficha_aqui ? lista_de(ficha_aqui.correos)
+          .map((o) => correo_unico_de_traspaso(o && o.correo)).filter(Boolean) : [];
+        const minus = ya_aqui.map((x) => x.toLowerCase());
+        const anadidos = correos_fuera.map((c) => c.correo).filter((x) => minus.indexOf(x.toLowerCase()) < 0);
+        const ya_era_siempre = !!(ficha_aqui && ficha_aqui.siempre === true);
+        if (!ya_era_siempre || anadidos.length) {
+          nombres_nuevos.siempre.push(sitio + " → " + (ya_era_siempre ? anadidos : ya_aqui.concat(anadidos)).join(", "));
+        }
+      }
+      const siempre_aceptado = trae_siempre && aceptar_siempre;
+
       if (!ficha_aqui) {
-        const correos = lista_de(ficha_fuera.correos)
-          .filter((c) => texto_plano(c && c.correo).trim())
-          .map((c) => {
-            const direccion = texto_plano(c.correo).trim();
-            nombres_nuevos.correos.push(sitio + " → " + direccion);
-            return { correo: direccion, veces: subida_de(sitio, direccion, Number(c.veces) || 0), ultima: texto_plano(c.ultima) };
-          });
+        const correos = correos_fuera.map((c) => {
+          nombres_nuevos.correos.push(sitio + " → " + c.correo);
+          return { correo: c.correo, veces: subida_de(sitio, c.correo, c.veces), ultima: c.ultima };
+        });
         memoria[sitio] = { nombre: texto_plano(ficha_fuera.nombre), nota: texto_plano(ficha_fuera.nota), correos: correos };
+        // `siempre` entra como `false` (simples sugerencias) salvo que el usuario
+        // haya aceptado expresamente los correos "para siempre" en la vista previa.
+        if (typeof ficha_fuera.siempre === "boolean") memoria[sitio].siempre = siempre_aceptado;
         resumen.fichas_de_correo_nuevas++;
         resumen.correos_nuevos += correos.length;
         toco_algo = true;
@@ -1670,20 +1723,31 @@ function planificar_importacion(archivo, datos_actuales, ya_se_importo) {
       if (!texto_plano(ficha_aqui.nota) && texto_plano(ficha_fuera.nota)) {
         ficha_aqui.nota = texto_plano(ficha_fuera.nota); toco_algo = true;
       }
-      lista_de(ficha_fuera.correos).forEach((c) => {
-        const direccion = texto_plano(c && c.correo).trim();
-        if (!direccion) return;
+      // `siempre` solo se trae si aquí nunca se decidió (ni encendido ni apagado):
+      // lo que ya decidió el usuario en esta PC gana. ENCENDERLO exige además que
+      // el usuario lo haya aceptado; un `false` (apagado) se trae sin más.
+      if (typeof ficha_aqui.siempre !== "boolean") {
+        if (siempre_aceptado) { ficha_aqui.siempre = true; toco_algo = true; }
+        else if (ficha_fuera.siempre === false) { ficha_aqui.siempre = false; toco_algo = true; }
+      }
+      // Una ficha "siempre" de aquí es una lista EXACTA: los correos de la otra PC
+      // no se le cuelan (se pondrían solos en cada reporte) salvo que allí también
+      // fueran "para siempre" Y el usuario lo haya aceptado.
+      const lista_cerrada = ficha_aqui.siempre === true && !siempre_aceptado;
+      correos_fuera.forEach((c) => {
+        const direccion = c.correo;
         const ya = ficha_aqui.correos.filter(
           (o) => texto_plano(o && o.correo).trim().toLowerCase() === direccion.toLowerCase())[0];
-        const sube = subida_de(sitio, direccion, Number(c.veces) || 0);
+        const sube = subida_de(sitio, direccion, c.veces);
         if (!ya) {
-          ficha_aqui.correos.push({ correo: direccion, veces: sube, ultima: texto_plano(c.ultima) });
+          if (lista_cerrada) return;
+          ficha_aqui.correos.push({ correo: direccion, veces: sube, ultima: c.ultima });
           nombres_nuevos.correos.push(sitio + " → " + direccion);
           resumen.correos_nuevos++; toco_algo = true;
           return;
         }
         if (sube) { ya.veces = (Number(ya.veces) || 0) + sube; resumen.correos_sumados++; toco_algo = true; }
-        if (texto_plano(c.ultima) > texto_plano(ya.ultima)) { ya.ultima = texto_plano(c.ultima); toco_algo = true; }
+        if (c.ultima > texto_plano(ya.ultima)) { ya.ultima = c.ultima; toco_algo = true; }
       });
       memoria[sitio] = ficha_aqui;
     });
@@ -1724,9 +1788,9 @@ function planificar_importacion(archivo, datos_actuales, ya_se_importo) {
 // callback de chrome.storage y dejaría la pantalla congelada en "Añadiendo los
 // datos…" con el botón muerto. Aquí se convierte en un plan con motivo, que sí
 // se sabe pintar.
-function planificar_sin_reventar(archivo, actuales) {
+function planificar_sin_reventar(archivo, actuales, opciones) {
   try {
-    return planificar_importacion(archivo, actuales, fecha_en_que_ya_se_importo(actuales, archivo));
+    return planificar_importacion(archivo, actuales, fecha_en_que_ya_se_importo(actuales, archivo), opciones);
   } catch (e) {
     return { ok: false, motivo: "No se pudo preparar la importación (" +
       (texto_plano(e && e.message) || "sin detalle") + "). No se tocó nada." };
@@ -1773,7 +1837,7 @@ const CLAVE_IMPORTACION_EN_CURSO = "importacion_en_curso";
 const MS_DE_CADUCIDAD_DEL_CANDADO = 2 * 60 * 1000;
 const INTENTOS_DE_IMPORTACION = 3;
 
-function aplicar_importacion(archivo, cb) {
+function aplicar_importacion(archivo, cb, opciones) {
   leer_storage([CLAVE_IMPORTACION_EN_CURSO], (d, err) => {
     if (err) { cb({ ok: false, motivo: "No se pudieron leer tus datos (" + err + "). NO se importó nada." }); return; }
     const candado = diccionario_de(d[CLAVE_IMPORTACION_EN_CURSO]);
@@ -1789,7 +1853,7 @@ function aplicar_importacion(archivo, cb) {
         cb({ ok: false, motivo: "NO se pudo empezar la importación (" + err2 + "). Tus datos siguen como estaban." });
         return;
       }
-      importar_con_comprobacion(archivo, mio, 1, (resultado) => {
+      importar_con_comprobacion(archivo, mio, 1, opciones, (resultado) => {
         soltar_candado_de_importacion(mio, () => cb(resultado));
       });
     });
@@ -1805,11 +1869,11 @@ function soltar_candado_de_importacion(mio, cb) {
   });
 }
 
-function importar_con_comprobacion(archivo, mio, intento, cb) {
+function importar_con_comprobacion(archivo, mio, intento, opciones, cb) {
   leer_storage(null, (actuales, err) => {
     if (err) { cb({ ok: false, motivo: "No se pudieron leer tus datos (" + err + "). NO se importó nada." }); return; }
 
-    const plan = planificar_sin_reventar(archivo, actuales);
+    const plan = planificar_sin_reventar(archivo, actuales, opciones);
     if (!plan.ok) { cb(plan); return; }
 
     const cambios = Object.assign({}, plan.cambios);
@@ -1849,7 +1913,7 @@ function importar_con_comprobacion(archivo, mio, intento, cb) {
         }
         // Alguien escribió justo después y nos pisó: se vuelve a fusionar sobre
         // lo suyo (así no se pierde ni lo de él ni lo del archivo).
-        if (intento < INTENTOS_DE_IMPORTACION) { importar_con_comprobacion(archivo, mio, intento + 1, cb); return; }
+        if (intento < INTENTOS_DE_IMPORTACION) { importar_con_comprobacion(archivo, mio, intento + 1, opciones, cb); return; }
         cb({ ok: false, motivo: "Se intentó " + INTENTOS_DE_IMPORTACION + " veces y la comprobación siguió " +
           "fallando (" + falta + "). Revisa el Registro: puede que falte algo por importar." });
       });
@@ -2230,6 +2294,29 @@ function pintar_vista_previa_de_importacion(plan, fichero) {
       lista_recortada(plan.nombres_nuevos.correos, 40), "bloque_anadir"));
   }
 
+  // CORREOS QUE SE PONDRÍAN SOLOS EN EL "PARA". Sección aparte, destacada y SIN
+  // recortar, con su propia casilla DESMARCADA: un archivo manipulado podría colar
+  // aquí un buzón ajeno que acabaría en cada reporte de esa plataforma (y, en una
+  // ficha de fábrica, desplazando al correo bueno). Sin marcarla, esas fichas
+  // entran como simples sugerencias.
+  if (plan.nombres_nuevos.siempre.length) {
+    const bloque = crear_lista_de_lineas(
+      "📌 Correos que se pondrán SOLOS en el «Para» de cada reporte de esa plataforma (plataforma → correos):",
+      plan.nombres_nuevos.siempre.slice(), "bloque_aviso bloque_correos_siempre_de_traspaso");
+    const etiqueta = document.createElement("label");
+    etiqueta.className = "casilla_correos_siempre_de_traspaso";
+    const casilla = document.createElement("input");
+    casilla.type = "checkbox";
+    casilla.id = "casilla_aceptar_correos_siempre";
+    casilla.checked = false;   // DESMARCADA por defecto: hay que aceptarlo a propósito
+    etiqueta.appendChild(casilla);
+    etiqueta.appendChild(document.createTextNode(
+      " Sí, revisé estos correos y quiero que se pongan solos en el «Para». " +
+      "(Si no la marcas, entran solo como sugerencias.)"));
+    bloque.appendChild(etiqueta);
+    caja.appendChild(bloque);
+  }
+
   caja.appendChild(crear_lista_de_lineas("Se RESPETA lo que ya tienes aquí:", [
     plural_de(r.denuncias_respetadas, "denuncia del archivo ya está en esta computadora", "denuncias del archivo ya están en esta computadora") + " (se dejan como están)",
     plural_de(r.marcas_respetadas, "marca ya existe aquí", "marcas ya existen aquí") + " (no se pisan)",
@@ -2294,8 +2381,11 @@ function confirmar_importacion_de_datos() {
 
   // Red de seguridad: pase lo que pase, la pantalla NO se queda congelada en
   // "Añadiendo los datos…" con el botón muerto.
+  // La casilla de los correos "para siempre" se lee AHORA, al confirmar.
+  const casilla_siempre = document.getElementById("casilla_aceptar_correos_siempre");
+  const opciones = { aceptar_siempre: !!(casilla_siempre && casilla_siempre.checked) };
   try {
-    aplicar_importacion(archivo_de_traspaso_en_espera, al_terminar_de_importar);
+    aplicar_importacion(archivo_de_traspaso_en_espera, al_terminar_de_importar, opciones);
   } catch (e) {
     cancelar_importacion_en_espera(true);
     mostrar_mensaje_de_traspaso("No se pudo importar (" +
