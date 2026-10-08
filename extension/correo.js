@@ -85,7 +85,7 @@ chrome.storage.local.get("email_reporte", (d) => {
   // Y los correos que el usuario GUARDÓ PARA SIEMPRE para esta red (botón 💾).
   // Primero se suman y después se pinta la memoria, que solo rellena si el
   // "Para" sigue vacío.
-  // En una red que es CATEGORÍA (Apps maliciosas, Delisting…) son los del SITIO
+  // En una red que es CATEGORÍA (Apps maliciosas) son los del SITIO
   // denunciado, nunca los de toda la categoría (ver correos_para_siempre).
   // Antes, la migración de una sola vez de los correos ya enviados (Registro) a la
   // ficha de su sitio: si el service worker no llegó a hacerla, se hace aquí.
@@ -212,7 +212,7 @@ function recordar_correos_usados() {
 //  Desde ese momento, cada reporte de esta red trae esos correos puestos solos.
 //  Guarda la lista exacta: si se quita un correo y se vuelve a guardar, se va.
 // ---------------------------------------------------------------------------
-//  REDES QUE SON CATEGORÍAS (Apps maliciosas, Delisting, Ofertas falsas…): cada
+//  REDES QUE SON CATEGORÍAS (hoy solo Apps maliciosas, ver REDES_POR_SITIO): cada
 //  sitio tiene SU buzón, así que lo guardado va a la ficha del SITIO denunciado
 //  (aptoide.com, apkpure.com…), nunca a la de toda la categoría. Sin enlace no se
 //  guarda; con enlaces de varios sitios, el usuario elige de cuál son los correos.

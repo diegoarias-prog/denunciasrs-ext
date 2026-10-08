@@ -105,7 +105,7 @@ function pintar_tabla() {
     tdAcc.appendChild(bCop);
     tdAcc.appendChild(document.createTextNode(" "));
     // Encender / apagar "siempre" sin tener que editar la ficha. Una ficha
-    // "red:<categoría>" (Apps maliciosas, Delisting…) NO puede ser "siempre": su
+    // "red:<categoría>" (Apps maliciosas) NO puede ser "siempre": su
     // buzón depende del sitio denunciado y se pondría solo en TODOS (ver
     // migrar_categorias en datos/correos_denuncia.js). Se ve, pero sin ese botón.
     if (CD.es_clave_de_red_por_sitio && CD.es_clave_de_red_por_sitio(k) && !f.siempre) {
@@ -250,16 +250,30 @@ function texto_aviso_categoria(a) {
   return a.de + " (" + (a.correos || []).join(", ") + "): " + que;
 }
 
-function pintar_resumen_migraciones(resumen, avisos) {
+function pintar_resumen_migraciones(resumen, avisos, restauracion) {
   const caja = $("resumen_migracion_registro");
-  if (!caja || (!resumen && !avisos)) return;
+  if (!caja || (!resumen && !avisos && !restauracion)) return;
   caja.textContent = "";
   const titulo = document.createElement("div");
   titulo.className = "titulo_resumen_migracion_correos";
   titulo.textContent = resumen
     ? "📥 Correos de tus denuncias ya enviadas, guardados en el sitio que les corresponde"
     : "📥 Cambios en tus correos guardados";
+  // El título va ENCIMA de todo (también de los bloques de la restauración).
   caja.appendChild(titulo);
+
+  // RESTAURACIÓN (ver restaurar_categorias): Delisting, Ofertas falsas de trabajo y
+  // Sitios maliciosos Banguat vuelven a guardar sus correos por RED, como antes.
+  if (restauracion) {
+    const r = restauracion;
+    bloque_resumen(caja, "Delisting, Ofertas falsas de trabajo y Sitios maliciosos Banguat vuelven a funcionar como antes. Se restauró:",
+      (r.recreadas || []).map((x) => x.clave + " → " + x.correos.join(", ") + " (otra vez «siempre»)")
+        .concat((r.reencendidas || []).map((k) => k + " (otra vez «siempre»)"))
+        .concat((r.siempre_devuelto || []).map((k) => k + ": «siempre» como estaba antes"))
+        .concat((r.quitados || []).map((x) => x.sitio + ": quitados los que había puesto la migración (" + x.correos.join(", ") + ")"))
+        .concat((r.fichas_quitadas || []).map((k) => k + ": quitada (la había creado la migración)")));
+    bloque_resumen(caja, "Para revisar:", r.dudas || []);
+  }
 
   if (resumen) {
     const guardados = (resumen.guardados || []).filter((g) => g && g.correos && g.correos.length);
@@ -278,18 +292,21 @@ function pintar_resumen_migraciones(resumen, avisos) {
     bloque_resumen(caja, "Denuncias sin enlace (no se sabe de qué sitio son sus correos; añádelos a mano si quieres):",
       (resumen.sin_enlace || []).map((d) => (d.marca ? d.marca + " · " : "") + (d.plataforma || "") + " → " + d.correos.join(", ")));
   }
-  if (avisos) bloque_resumen(caja, "Fichas antiguas de categorías (Apps maliciosas, Delisting…):", avisos.map(texto_aviso_categoria));
+  if (avisos) bloque_resumen(caja, "Fichas antiguas de Apps maliciosas:", avisos.map(texto_aviso_categoria));
 
   caja.style.display = "";
   // Ya se enseñó: no vuelve a salir la próxima vez que se abra esta página.
   if (resumen) CD.marcar_resumen_migracion_visto();
   if (avisos) CD.marcar_avisos_vistos();
+  if (restauracion) CD.marcar_restauracion_vista();
 }
 
 // Primero la migración (si el service worker no la hizo ya), luego la tabla.
 CD.migrar_correos_del_registro(() => {
   recargar();
   CD.resumen_migracion_registro_pendiente((resumen) => {
-    CD.avisos_pendientes((avisos) => pintar_resumen_migraciones(resumen, avisos));
+    CD.avisos_pendientes((avisos) => {
+      CD.informe_restauracion_pendiente((rest) => pintar_resumen_migraciones(resumen, avisos, rest));
+    });
   });
 });

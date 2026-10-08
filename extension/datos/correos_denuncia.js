@@ -41,10 +41,10 @@
 //     "siempre" no se mezcla con la semilla: es la lista que dejó el usuario, así
 //     que quitar un correo y volver a guardar lo quita de verdad.
 //
-//  5) REDES QUE SON CATEGORÍAS POR SITIO (REDES_POR_SITIO): "Apps maliciosas",
-//     "Delisting", "Ofertas falsas de trabajo"… no son una plataforma con UN
-//     buzón: agrupan muchos sitios (aptoide.com, apkpure.com…) y cada uno tiene
-//     el suyo. En ellas los correos "para siempre" se guardan y se leen bajo el
+//  5) REDES QUE SON CATEGORÍAS POR SITIO (REDES_POR_SITIO): hoy SOLO "Apps
+//     maliciosas" (Delisting, Ofertas falsas y Banguat siguen por red, como en la
+//     v1.2.101). No es una plataforma con UN buzón: agrupa muchos sitios
+//     (aptoide.com, apkpure.com…) y cada uno tiene el suyo. En ellas los correos "para siempre" se guardan y se leen bajo el
 //     DOMINIO del enlace denunciado, NUNCA bajo "red:<categoría>": si no, los
 //     buzones de Aptoide se ponían solos en la denuncia de APKPure.
 //     Las fichas "red:<categoría>" con `siempre` que dejaron versiones
@@ -101,24 +101,28 @@
   };
 
   // ---- 5) Redes que son CATEGORÍAS: su buzón depende del sitio denunciado ----
-  //  Son los reportes por correo de fábrica con `destino: ""` (datos/formularios.js)
-  //  cuya "red" no es una plataforma sino un tipo de sitio. Clave = nombre de la
-  //  red en minúsculas. Facebook/Instagram/WhatsApp/TikTok también tienen algún
+  //  Reportes por correo de fábrica con `destino: ""` (datos/formularios.js) cuya
+  //  "red" no es una plataforma sino un tipo de sitio y cuyo buzón es el de CADA
+  //  sitio. Clave = nombre de la red en minúsculas. Facebook/Instagram/WhatsApp/TikTok también tienen algún
   //  reporte con destino vacío (difamación), pero son UNA plataforma con dominio
   //  propio: esas no van aquí. Las plataformas que crea el usuario tampoco.
   //  `buzon_del_sitio`: el buzón de denuncia es del PROPIO sitio denunciado (o un
   //  agente suyo que está en la SEMILLA). Ahí las sugerencias aprendidas que no son
   //  de ese sitio se esconden (ver sugerencias): son restos del fallo de las
-  //  categorías (buzones de Aptoide aprendidos en apkpure.com). En Delisting y en
-  //  Banguat el buzón es por naturaleza de OTRO dominio (la lista negra, el hosting),
-  //  así que ese filtro dejaría la memoria inservible: allí no se aplica.
+  //  categorías (buzones de Aptoide aprendidos en apkpure.com).
+  //  SOLO "Apps maliciosas" (decisión del usuario, 2026-10-08: «esos cambios solo
+  //  eran en Apps maliciosas, lo demás está funcionando bien»). Delisting, Ofertas
+  //  falsas de trabajo y Sitios maliciosos Banguat siguen como en la v1.2.101: su
+  //  lista "para siempre" es la de la RED ("red:delisting"…). Lo que la v1.2.103 les
+  //  cambió en los datos lo deshace restaurar_categorias (más abajo).
   var REDES_POR_SITIO = {
-    "apps maliciosas": { buzon_del_sitio: true },
-    "ofertas falsas de trabajo": { buzon_del_sitio: true },
-    // El buzón es el de la lista negra / servicio que marcó el dominio.
-    "delisting": { buzon_del_sitio: false },
-    // El buzón es el del proveedor/hosting de CADA sitio malicioso.
-    "sitios maliciosos banguat": { buzon_del_sitio: false }
+    "apps maliciosas": { buzon_del_sitio: true }
+  };
+  // Las que la v1.2.103 trató por sitio y vuelven a ir por red (ver restaurar_categorias).
+  var CATEGORIAS_DEVUELTAS_A_RED = {
+    "delisting": "Delisting",
+    "ofertas falsas de trabajo": "Ofertas falsas de trabajo",
+    "sitios maliciosos banguat": "Sitios maliciosos Banguat"
   };
 
   var CLAVE_MEMORIA = "memoria_correos";
@@ -583,8 +587,7 @@
   // ordenadas por uso. La red con dominio va primero (es el destinatario más
   // probable). Una ficha "red:" solo cuenta si está marcada `siempre`.
   //
-  // En una categoría cuyo buzón es el del PROPIO sitio (Apps maliciosas, Ofertas
-  // falsas de trabajo) solo se proponen —y solo rellenan el «Para» vacío— los
+  // En una categoría cuyo buzón es el del PROPIO sitio (Apps maliciosas) solo se proponen —y solo rellenan el «Para» vacío— los
   // correos de ESE sitio (correo_es_del_sitio: su dominio exacto o su semilla,
   // p. ej. dmca.filehippo@delevitagent.com para filehippo.com). Los demás son
   // restos del fallo de las categorías (los buzones de Aptoide que se aprendieron
@@ -622,7 +625,7 @@
   // ficha de la red, marcada `siempre: true`. Reemplaza la lista anterior —así,
   // quitar un correo y volver a guardar lo quita— pero conserva los contadores de
   // uso de los que sigan. cb(ok, clave, correos, motivo).
-  // En una red POR SITIO (Apps maliciosas, Delisting…) la ficha es la del SITIO
+  // En una red POR SITIO (Apps maliciosas) la ficha es la del SITIO
   // denunciado: `opciones.urls` son los enlaces del reporte y `opciones.sitio` el
   // que eligió el usuario si hay enlaces de varios sitios (ver destino_para_siempre).
   // Sin un sitio claro NO se guarda: motivo "sin_enlace" o "varios_sitios".
@@ -755,7 +758,9 @@
     var por_sitio = {}, orden = [], descartados = [], vistos_desc = {}, sin_enlace = [], usadas = 0;
     (Array.isArray(lista) ? lista : []).forEach(function (d) {
       if (!d || typeof d !== "object" || d.provisional === true || d.modo_prueba) return;
-      if (dominio_de_red(d.plataforma)) return;          // TikTok, Cloudflare…: van por red
+      // SOLO Apps maliciosas (REDES_POR_SITIO). TikTok, Cloudflare… van por red, y
+      // Delisting, Ofertas falsas, Banguat y las plataformas del usuario, también.
+      if (!es_red_por_sitio(d.plataforma)) return;
       var to = lista_correos(d.correo && d.correo.to);
       if (!to.length) return;
       var sitios = sitios_de_denuncia(d);
@@ -828,10 +833,13 @@
   // de dominio, no "red:", no de una red con dominio propio) marcada "siempre" que
   // tenga correos que NO son de ese sitio se APAGA, sin borrar ningún correo.
   // Devuelve [{ sitio, ajenos }]. Idempotente: una ficha apagada ya no cuenta.
-  function reparar_fichas_siempre(mem) {
+  // `solo_sitios` (opcional): { sitio: 1 } — si viene, solo se miran esos sitios
+  // (los de Apps maliciosas, ver sitios_de_apps).
+  function reparar_fichas_siempre(mem, solo_sitios) {
     var reparadas = [];
     if (!mem || typeof mem !== "object") return reparadas;
     Object.keys(mem).forEach(function (k) {
+      if (solo_sitios && !solo_sitios[k]) return;
       var f = mem[k];
       if (!f || typeof f !== "object" || f.oculto || f.siempre !== true) return;
       if (!clave_valida(k) || es_clave_de_categoria(k) || dominio_de(k) !== k || es_dominio_de_red(k)) return;
@@ -851,13 +859,225 @@
   }
 
   // La corre UNA vez (bandera). cb(resumen) si la hizo ahora; cb(null) si ya estaba.
+  // ==========================================================================
+  //  RESTAURACIÓN DE UNA SOLA VEZ (v1.2.104): la v1.2.103 trató también Delisting,
+  //  Ofertas falsas de trabajo y Sitios maliciosos Banguat como categorías por
+  //  sitio, y el usuario lo descartó («esos cambios solo eran en Apps maliciosas»).
+  //  Esto deshace en sus datos lo que se pueda deshacer CON SEGURIDAD, sin borrar
+  //  nada que no se sepa que añadió la migración:
+  //   a) cada ficha "red:<una de esas tres>" que migrar_categorias movió a un sitio
+  //      o apagó (lo dice `avisos_memoria_correos`) vuelve a existir con sus correos
+  //      y `siempre: true` (los contadores de uso no se apuntaron: vuelven a 0). Si
+  //      la migración le ENCENDIÓ "siempre" al sitio de destino, se le devuelve el
+  //      de antes (no tenía); los correos movidos se quedan ahí como sugerencia;
+  //   b) con el resumen de la migración del Registro (v1 y v2): a las fichas de
+  //      SITIO de denuncias que no son de Apps maliciosas se les QUITAN los correos
+  //      que esa migración añadió (están en el resumen y no estaban antes), salvo
+  //      los que se usaron después (veces > 0). Si la ficha se queda vacía es que la
+  //      creó la migración y se quita. Las que la reparación APAGÓ vuelven a
+  //      "siempre". Lo que no se puede saber (si un sitio ya era "siempre" antes)
+  //      se deja como está y se apunta en `dudas`;
+  //   c) nada de Apps maliciosas se toca.
+  //  Bandera propia (no viaja en el traspaso: CLAVES_QUE_NO_SE_IMPORTAN). Guarda
+  //  un INFORME que "📒 Correos" enseña una vez.
+  // ==========================================================================
+  var CLAVE_RESTAURACION = "correos_categorias_restauradas";
+  var CLAVE_MIGRACION_REGISTRO_V1 = "correos_del_registro_migrados";
+  // Tiendas de fábrica de Apps maliciosas (con buzones en la SEMILLA).
+  var SITIOS_DE_APPS_DE_FABRICA = ["aptoide.com", "apkpure.com", "filehippo.com", "apkcombo.com"];
+
+  function lista_de_array(v) { return Array.isArray(v) ? v : []; }
+  function ficha_viva(mem, k) {
+    return (propia(mem, k) && mem[k] && typeof mem[k] === "object" && !mem[k].oculto) ? mem[k] : null;
+  }
+  function es_denuncia_de_apps(d) { return !!d && typeof d === "object" && es_red_por_sitio(d.plataforma); }
+
+  // Sitios que son de Apps maliciosas: las tiendas de fábrica, los enlaces de sus
+  // denuncias y los sitios a los que se movió la antigua "red:apps maliciosas".
+  function sitios_de_apps(lista, avisos) {
+    var s = Object.create(null);
+    SITIOS_DE_APPS_DE_FABRICA.forEach(function (k) { s[k] = 1; });
+    lista_de_array(lista).forEach(function (d) { if (es_denuncia_de_apps(d)) sitios_de_denuncia(d).forEach(function (x) { s[x] = 1; }); });
+    lista_de_array(avisos).forEach(function (a) { if (a && a.de === PREFIJO_RED + "apps maliciosas" && a.a) s[a.a] = 1; });
+    return s;
+  }
+
+  // Le QUITA a una ficha de sitio el "siempre" que le puso la migración y, con él,
+  // los correos de la SEMILLA que sumar_semilla le copió (veces 0, sin fecha).
+  // Quitar esas copias es INVISIBLE: una ficha que no es "siempre" vuelve a mostrar
+  // su semilla al leerla (leer() la mezcla), así que no se pierde nada.
+  function devolver_siempre_de_sitio(f, sitio) {
+    delete f.siempre;
+    if (!propia(SEMILLA, sitio) || !Array.isArray(f.correos)) return;
+    var de_fabrica = SEMILLA[sitio].correos.map(function (c) { return c.toLowerCase(); });
+    f.correos = f.correos.filter(function (o) {
+      var c = texto(o && o.correo).toLowerCase();
+      return !(de_fabrica.indexOf(c) >= 0 && !((o && o.veces) > 0) && !texto(o && o.ultima));
+    });
+  }
+  // ¿Tiene la ficha un nombre o una nota que escribió el USUARIO? (no el dominio
+  // ni los de fábrica). Una ficha así no se quita aunque se quede sin correos.
+  function ficha_con_texto_del_usuario(f, sitio) {
+    var nombre = texto(f && f.nombre).trim(), nota = texto(f && f.nota).trim();
+    var sem = propia(SEMILLA, sitio) ? SEMILLA[sitio] : null;
+    var nombre_propio = nombre && nombre.toLowerCase() !== sitio && !(sem && nombre === sem.nombre);
+    var nota_propia = nota && !(sem && nota === sem.nota);
+    return !!(nombre_propio || nota_propia);
+  }
+
+  // Función PURA (modifica `mem`). datos = { avisos, resumen_v2, resumen_v1,
+  // denuncias, hubo_v1 }. Devuelve el informe.
+  function restaurar_categorias(mem, datos) {
+    var inf = { recreadas: [], reencendidas: [], siempre_devuelto: [], quitados: [], fichas_quitadas: [], dudas: [] };
+    if (!mem || typeof mem !== "object") return inf;
+    datos = datos || {};
+    var avisos = lista_de_array(datos.avisos), lista = lista_de_array(datos.denuncias);
+    var apps = sitios_de_apps(lista, avisos);
+
+    // a) Fichas "red:<categoría>" que la v1.2.103 movió o apagó.
+    avisos.forEach(function (a) {
+      if (!a || typeof a.de !== "string" || a.de.indexOf(PREFIJO_RED) !== 0) return;
+      var cat = a.de.slice(PREFIJO_RED.length);
+      if (!propia(CATEGORIAS_DEVUELTAS_A_RED, cat)) return;
+      var dirs = lista_de_array(a.correos).map(correo_unico).filter(Boolean);
+      var f = ficha_viva(mem, a.de);
+      if (!f) {
+        if (!dirs.length) { inf.dudas.push(a.de + ": el aviso no trae sus correos; no se pudo volver a crear."); return; }
+        f = { nombre: CATEGORIAS_DEVUELTAS_A_RED[cat], nota: "", correos: [] };
+        mem[a.de] = f;
+        inf.recreadas.push({ clave: a.de, correos: dirs });
+      } else if (f.siempre !== true) {
+        inf.reencendidas.push(a.de);
+      }
+      fusionar_correos(f, dirs.map(function (c) { return { correo: c, veces: 0, ultima: "" }; }));
+      f.siempre = true;
+      // "encendida": la migración le puso "siempre" al sitio, que antes NO lo tenía.
+      if (a.razon === "encendida" && a.a && !apps[a.a]) {
+        var fs = ficha_viva(mem, a.a);
+        if (fs && fs.siempre === true) { devolver_siempre_de_sitio(fs, a.a); inf.siempre_devuelto.push(a.a); }
+      }
+      if (a.a && ["encendida", "ya_encendida", "apagada", "red_con_dominio", "ajenos"].indexOf(a.razon) >= 0) {
+        inf.dudas.push(a.de + ": sus correos se quedan también en " + a.a + " como sugerencia (no se sabe si ya estaban ahí).");
+      }
+    });
+
+    // b) Lo que hizo la migración del Registro (v2 y la v1 de pruebas) en sitios
+    //    que NO son de Apps maliciosas.
+    var otros = Object.create(null);
+    lista.forEach(function (d) {
+      if (!d || typeof d !== "object" || es_denuncia_de_apps(d) || dominio_de_red(d.plataforma)) return;
+      sitios_de_denuncia(d).forEach(function (s) { otros[s] = 1; });
+    });
+    [datos.resumen_v2, datos.resumen_v1].forEach(function (r) {
+      if (!r || typeof r !== "object") return;
+      lista_de_array(r.reparadas).forEach(function (x) {
+        if (!x || apps[x.sitio]) return;
+        var f = ficha_viva(mem, x.sitio);
+        // La reparación solo apaga fichas que eran "siempre": se les devuelve.
+        if (f && f.siempre === false) { f.siempre = true; inf.siempre_devuelto.push(x.sitio); }
+      });
+      lista_de_array(r.guardados).forEach(function (g) {
+        if (!g || !otros[g.sitio]) return;
+        if (apps[g.sitio]) { inf.dudas.push(g.sitio + ": tiene denuncias de Apps maliciosas y de otra categoría; no se toca."); return; }
+        var f = ficha_viva(mem, g.sitio);
+        if (!f || !Array.isArray(f.correos)) return;
+        var quitar = lista_de_array(g.correos).map(function (c) { return texto(c).toLowerCase(); });
+        var fuera = [];
+        f.correos = f.correos.filter(function (o) {
+          var c = texto(o && o.correo).toLowerCase();
+          // Solo lo que añadió la migración y no se ha usado desde entonces.
+          if (quitar.indexOf(c) >= 0 && !((o && o.veces) > 0)) { fuera.push(o.correo); return false; }
+          return true;
+        });
+        if (fuera.length) inf.quitados.push({ sitio: g.sitio, correos: fuera });
+        // "siempre" de la ficha del SITIO. El resumen dice que la migración la dejó
+        // "siempre" (g.siempre), pero no si ya lo era: en la v1.2.101 una ficha de
+        // sitio solo se encendía con el botón «📌 Siempre» de "📒 Correos", y además
+        // ahí NO tenía ningún efecto (correos_para_siempre solo leía la ficha de la
+        // RED). Por eso se le QUITA: el comportamiento vuelve a ser exactamente el de
+        // la v1.2.101 —y en Apps maliciosas ese sitio deja de ponerse solo, que es lo
+        // que la v1.2.101 hacía—, y se apunta en `dudas` por si el usuario la había
+        // marcado a mano. Nunca en una red con dominio propio (facebook.com…): esa
+        // ficha SÍ se usa por red y la migración nunca se la enciende.
+        if (g.siempre === true && f.siempre === true && !es_dominio_de_red(g.sitio)) {
+          devolver_siempre_de_sitio(f, g.sitio);
+          inf.siempre_devuelto.push(g.sitio);
+          if (f.correos.length || propia(SEMILLA, g.sitio)) inf.dudas.push(g.sitio + ": se le quitó «siempre» (lo puso la migración). Si lo habías marcado tú, vuelve a pulsar 📌 Siempre.");
+        }
+        if (!f.correos.length && !propia(SEMILLA, g.sitio) && !ficha_con_texto_del_usuario(f, g.sitio)) {
+          // Solo tenía lo que puso la migración: la ficha la creó ella.
+          delete mem[g.sitio];
+          inf.fichas_quitadas.push(g.sitio);
+          // Si estaba recién apuntada como "siempre devuelto", sobra: ya no existe.
+          inf.siempre_devuelto = inf.siempre_devuelto.filter(function (k) { return k !== g.sitio; });
+        }
+      });
+    });
+    if (datos.hubo_v1) {
+      inf.dudas.push("La versión de pruebas anterior (v1) pudo mover o apagar fichas red:delisting / red:ofertas falsas de trabajo / " +
+        "red:sitios maliciosos banguat sin dejar rastro: si alguna falta o está apagada, revísala aquí.");
+    }
+    return inf;
+  }
+
+  function informe_con_algo(i) {
+    return !!i && ["recreadas", "reencendidas", "siempre_devuelto", "quitados", "fichas_quitadas", "dudas"]
+      .some(function (k) { return lista_de_array(i[k]).length > 0; });
+  }
+
+  function restaurar_categorias_una_vez(cb) {
+    var claves = [CLAVE_RESTAURACION, CLAVE_AVISOS, CLAVE_MIGRACION_REGISTRO, CLAVE_MIGRACION_REGISTRO_V1, "denuncias_registro"];
+    chrome.storage.local.get(claves, function (x) {
+      x = x || {};
+      if (x[CLAVE_RESTAURACION]) { if (cb) cb(null); return; }
+      var av = x[CLAVE_AVISOS], v2 = x[CLAVE_MIGRACION_REGISTRO], v1 = x[CLAVE_MIGRACION_REGISTRO_V1];
+      var datos = {
+        avisos: av && typeof av === "object" ? av.avisos : [],
+        resumen_v2: v2 && typeof v2 === "object" ? v2.resumen : null,
+        resumen_v1: v1 && typeof v1 === "object" ? v1.resumen : null,
+        denuncias: x.denuncias_registro,
+        hubo_v1: !!v1
+      };
+      leer_memoria(function (mem) {
+        var inf = restaurar_categorias(mem, datos);
+        var set = {};
+        set[CLAVE_MEMORIA] = mem;
+        set[CLAVE_RESTAURACION] = { fecha: new Date().toISOString(), visto: !informe_con_algo(inf), informe: inf };
+        chrome.storage.local.set(set, function () { if (cb) cb(inf); });
+      });
+    });
+  }
+
+  function informe_restauracion_pendiente(cb) {
+    chrome.storage.local.get([CLAVE_RESTAURACION], function (x) {
+      var m = x && x[CLAVE_RESTAURACION];
+      cb(m && typeof m === "object" && m.visto === false && m.informe ? m.informe : null);
+    });
+  }
+  function marcar_restauracion_vista(cb) {
+    chrome.storage.local.get([CLAVE_RESTAURACION], function (x) {
+      var m = x && x[CLAVE_RESTAURACION];
+      if (!m || typeof m !== "object") { if (cb) cb(); return; }
+      m.visto = true;
+      var set = {}; set[CLAVE_RESTAURACION] = m;
+      chrome.storage.local.set(set, function () { if (cb) cb(); });
+    });
+  }
+
+  // Antes que nada, la RESTAURACIÓN de una vez de lo que la v1.2.103 cambió en
+  // Delisting / Ofertas falsas / Banguat (restaurar_categorias_una_vez).
   function migrar_correos_del_registro(cb) {
-    chrome.storage.local.get([CLAVE_MIGRACION_REGISTRO, "denuncias_registro"], function (x) {
+    restaurar_categorias_una_vez(function () { migrar_correos_del_registro_sin_restaurar(cb); });
+  }
+  function migrar_correos_del_registro_sin_restaurar(cb) {
+    chrome.storage.local.get([CLAVE_MIGRACION_REGISTRO, "denuncias_registro", CLAVE_AVISOS], function (x) {
       if (x && x[CLAVE_MIGRACION_REGISTRO]) { if (cb) cb(null); return; }
       leer_memoria(function (mem) {
         // La reparación va PRIMERO: así el resumen no puede decir que una ficha quedó
-        // "siempre" (guardados) y a la vez que se apagó (reparadas).
-        var reparadas = reparar_fichas_siempre(mem);
+        // "siempre" (guardados) y a la vez que se apagó (reparadas). Y solo sobre
+        // sitios de Apps maliciosas.
+        var av = x && x[CLAVE_AVISOS];
+        var reparadas = reparar_fichas_siempre(mem, sitios_de_apps(x && x.denuncias_registro, av && av.avisos));
         var resumen = aplicar_registro_a_memoria(x && x.denuncias_registro, mem, reparadas);
         resumen.reparadas = reparadas;
         // Otra pasada a la vez (service worker + página) pudo dejar ya SU resumen:
@@ -903,6 +1123,11 @@
     marcar_resumen_migracion_visto: marcar_resumen_migracion_visto,
     avisos_pendientes: avisos_pendientes,
     marcar_avisos_vistos: marcar_avisos_vistos,
+    CLAVE_RESTAURACION: CLAVE_RESTAURACION,
+    restaurar_categorias: restaurar_categorias,
+    restaurar_categorias_una_vez: restaurar_categorias_una_vez,
+    informe_restauracion_pendiente: informe_restauracion_pendiente,
+    marcar_restauracion_vista: marcar_restauracion_vista,
     CLAVE_MEMORIA: CLAVE_MEMORIA,
     FIJOS_POR_RED: FIJOS_POR_RED,
     SEMILLA: SEMILLA,
