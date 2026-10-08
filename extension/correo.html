@@ -32,6 +32,7 @@
   .nota { margin-top: 12px; font-size: 12px; color: #6b7280; }
   /* --- Memoria de correos (destinatarios ya usados para este mismo sitio) --- */
   /* Correos guardados "para siempre" de esta red: a la vista, nunca escondidos al final del "Para" */
+  .selector_sitio_para_siempre { border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 10px; font-size: 13px; font-family: inherit; background: #fff; color: #111827; }
   .linea_correos_para_siempre { margin: 6px 0 0; padding: 6px 10px; border-radius: 7px; background: #ecfdf5; border-left: 4px solid #059669; color: #065f46; font-size: 12px; overflow-wrap: anywhere; }
   .caja_memoria_correos { margin-top: 10px; border: 1px solid #bfdbfe; background: #eff6ff; border-radius: 9px; padding: 10px 12px; }
   .caja_memoria_correos .titulo_memoria { font-size: 12px; font-weight: 700; color: #1e40af; margin-bottom: 6px; }
@@ -80,8 +81,11 @@
     <button class="boton gm" id="gmail">Abrir en Gmail (inglés)</button>
     <button class="boton sec" id="copiar_para">📋 Copiar correos</button>
     <!-- Guarda la lista ACTUAL del "Para" para todos los reportes futuros de esta red.
-         El texto (con el nombre de la red) lo pone correo.js. -->
+         El texto (con el nombre de la red) lo pone correo.js. En una red que es una
+         CATEGORÍA (Apps maliciosas, Delisting…) se guarda para el SITIO denunciado;
+         con enlaces de varios sitios, el selector deja elegir de cuál son. -->
     <button type="button" class="boton sec" id="guardar_correos_para_siempre">💾 Guardar estos correos para futuros reportes</button>
+    <select id="sitio_para_siempre" class="selector_sitio_para_siempre" style="display:none;" aria-label="Sitio al que pertenecen estos correos"></select>
     <span id="aviso"></span>
   </div>
   <p class="nota" id="de_info" style="display:none;color:#065f46;font-weight:600;"></p>

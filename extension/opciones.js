@@ -1027,6 +1027,10 @@ const CLAVES_QUE_NO_SE_IMPORTAN = [
   "urls_denuncia", "urls_manuales", "pestanas_de_denuncia",
   "modo_prueba_denuncias", "diagnostico_menu_contextual",
   "plantillas_migradas", "traspasos_importados",
+  // La bandera (y el resumen) de la migración "correos del Registro -> ficha del
+  // sitio" (v1 y v2): si viajara, la otra PC se saltaría su propia migración. Y los
+  // avisos de esas migraciones, que son de lo que pasó en ESTA computadora.
+  "correos_del_registro_migrados", "correos_del_registro_migrados_v2", "avisos_memoria_correos",
   // El candado de "importación en curso" de la otra PC: si viajara, dejaría esta
   // computadora sin poder importar hasta que caducara.
   "importacion_en_curso"
