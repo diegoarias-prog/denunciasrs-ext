@@ -971,6 +971,10 @@ cargar_marcas();
 //    • marcas_usuario ........ se añaden solo los nombres que no existan.
 //    • plataformas_usuario ... se añaden solo las que no existan (identidad
 //                              natural = red + tipo, igual que en popup.js).
+//    • apps_maliciosas_usuario  se añaden solo las apps cuyo NOMBRE no exista
+//                              aquí (las tiendas que el usuario creó en el popup).
+//    • enlaces_formularios_apps se añade el enlace de un formulario solo si aquí
+//                              no hay ya uno guardado para ese mismo formulario.
 //    • plantillas ............ se añaden solo las que no existan (tema+nombre).
 //    • memoria_correos ....... se fusiona por sitio+correo y se SUMAN los
 //                              contadores de uso de las dos PCs. La marca
@@ -1045,8 +1049,29 @@ const CLAVE_RESPALDO_POSPUESTO = "respaldo_pospuesto_hasta";
 // Claves con fusión propia (las demás son "solo si aquí no existe").
 const CLAVES_CON_FUSION_PROPIA = [
   "denuncias_registro", "marcas_usuario", "plataformas_usuario",
-  "plantillas", "memoria_correos"
+  "plantillas", "memoria_correos",
+  // Apps maliciosas (popup): tiendas creadas por el usuario y enlaces guardados.
+  // Son diccionarios: con la regla general («solo si aquí no existe la CLAVE»), una PC
+  // que ya tuviera UNA app guardada no recibiría NINGUNA de la otra.
+  "apps_maliciosas_usuario", "enlaces_formularios_apps"
 ];
+
+// Identidad de una app maliciosa del usuario: su NOMBRE (sin mayúsculas ni acentos).
+// La clave interna "app_u_..." no sirve: dos PCs pueden haberle dado claves distintas.
+function identidad_de_app_maliciosa(app) {
+  return texto_plano(app && app.nombre).trim().toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ");
+}
+
+// Enlace de formulario aceptable: solo https. Un «javascript:» o un «data:» que
+// viniera en el archivo acabaría abriéndose en una pestaña desde el popup, y un
+// http:// no lo cubre optional_host_permissions (manifest).
+function enlace_de_formulario_de_traspaso(valor) {
+  const t = texto_plano(valor).trim();
+  if (!t) return "";
+  try { const u = new URL(t); return (u.protocol === "https:" && u.hostname) ? u.href : ""; }
+  catch (e) { return ""; }
+}
 
 // Historial de archivos ya importados en ESTA PC (para no sumar dos veces los
 // contadores de la memoria de correos). Se guarda solo el identificador y la
@@ -1284,6 +1309,8 @@ function resumen_de_traspaso(datos) {
     imagenes_de_respuesta: respuestas,
     marcas: Object.keys(diccionario_de(d.marcas_usuario)).length,
     plataformas: Object.keys(diccionario_de(d.plataformas_usuario)).length,
+    apps_maliciosas: Object.keys(diccionario_de(d.apps_maliciosas_usuario)).length,
+    enlaces_de_apps: Object.keys(diccionario_de(d.enlaces_formularios_apps)).length,
     plantillas: lista_de(d.plantillas).length,
     fichas_de_correo: Object.keys(memoria).length,
     correos_recordados: correos,
@@ -1499,12 +1526,13 @@ function planificar_importacion(archivo, datos_actuales, ya_se_importo, opciones
     plantillas_nuevas: 0, plantillas_respetadas: 0,
     fichas_de_correo_nuevas: 0, fichas_de_correo_respetadas: 0,
     correos_nuevos: 0, correos_sumados: 0,
+    apps_nuevas: 0, apps_respetadas: 0, enlaces_de_apps_nuevos: 0, enlaces_de_apps_respetados: 0,
     otras_claves_nuevas: [], claves_no_importadas: []
   };
   // Para que la vista previa pueda enseñar QUÉ entra, no solo cuántos: los
   // correos nuevos y el destino completo de cada plataforma deciden a dónde van
   // a parar las denuncias del usuario, así que tiene que poder verlos antes.
-  const nombres_nuevos = { marcas: [], plataformas: [], correos: [], borradas_aqui: [], siempre: [] };
+  const nombres_nuevos = { marcas: [], plataformas: [], correos: [], borradas_aqui: [], siempre: [], apps: [] };
   const coincidencias_de_consecutivo = [];
 
   // CONTADORES DE USO SIN CONTAR DOS VECES: de cada computadora de origen se
@@ -1628,6 +1656,60 @@ function planificar_importacion(archivo, datos_actuales, ya_se_importo, opciones
       resumen.plataformas_nuevas++;
     });
     if (resumen.plataformas_nuevas) cambios.plataformas_usuario = plataformas;
+  }
+
+  // ---- apps_maliciosas_usuario: identidad = nombre de la app ----
+  // Si la clave del archivo ya la usa OTRA app aquí, entra con una clave libre, y su
+  // enlace guardado (si lo trae) la sigue a esa clave nueva.
+  const apps_fuera = diccionario_de(deFuera.apps_maliciosas_usuario);
+  const apps_renombradas = Object.create(null);   // clave del archivo -> clave aquí
+  if (Object.keys(apps_fuera).length) {
+    const apps_aqui = diccionario_de(aqui.apps_maliciosas_usuario);
+    const apps = Object.assign(Object.create(null), apps_aqui);
+    const vistas = Object.create(null);
+    Object.keys(apps_aqui).forEach((k) => { vistas[identidad_de_app_maliciosa(apps_aqui[k])] = 1; });
+    Object.keys(apps_fuera).forEach((clave) => {
+      if (clave_peligrosa(clave) || clave.indexOf("app_u_") !== 0) return;
+      const a = apps_fuera[clave];
+      if (!a || typeof a !== "object" || Array.isArray(a)) return;
+      const identidad = identidad_de_app_maliciosa(a);
+      const url = enlace_de_formulario_de_traspaso(a.url);
+      if (!identidad || !url) return;                      // sin nombre o con un enlace que no es web
+      if (vistas[identidad]) { resumen.apps_respetadas++; return; }
+      vistas[identidad] = 1;
+      const libre = clave_libre_de_plataforma(clave, apps);
+      apps[libre] = { nombre: texto_plano(a.nombre).trim().slice(0, 60), url: url };
+      apps_renombradas[clave] = libre;
+      // Con su ENLACE: es la página que se abrirá y se autorrellenará con los datos de
+      // la marca, así que tiene que verse ANTES de aceptar.
+      nombres_nuevos.apps.push(texto_plano(a.nombre).trim() + " (app) → " + url);
+      resumen.apps_nuevas++;
+    });
+    if (resumen.apps_nuevas) cambios.apps_maliciosas_usuario = apps;
+  }
+
+  // ---- enlaces_formularios_apps: por formulario, gana SIEMPRE el que ya hay aquí ----
+  const enlaces_fuera = diccionario_de(deFuera.enlaces_formularios_apps);
+  if (Object.keys(enlaces_fuera).length) {
+    const enlaces_aqui = diccionario_de(aqui.enlaces_formularios_apps);
+    const enlaces = Object.assign(Object.create(null), enlaces_aqui);
+    Object.keys(enlaces_fuera).forEach((clave) => {
+      if (clave_peligrosa(clave)) return;
+      const url = enlace_de_formulario_de_traspaso(enlaces_fuera[clave]);
+      if (!url) return;
+      // El enlace de una app DEL USUARIO solo entra con su app (y bajo su clave de aquí):
+      // si la app no entró (ya existía aquí), manda lo de aquí.
+      let destino = clave;
+      if (clave.indexOf("app_u_") === 0) {
+        if (!apps_renombradas[clave]) return;
+        destino = apps_renombradas[clave];
+      }
+      if (Object.prototype.hasOwnProperty.call(enlaces, destino)) { resumen.enlaces_de_apps_respetados++; return; }
+      enlaces[destino] = url;
+      nombres_nuevos.apps.push("enlace del formulario «" + destino + "» → " + url);
+      resumen.enlaces_de_apps_nuevos++;
+    });
+    if (resumen.enlaces_de_apps_nuevos) cambios.enlaces_formularios_apps = enlaces;
   }
 
   // ---- plantillas: identidad = tema + nombre ----
@@ -1955,6 +2037,25 @@ function lo_que_falta_tras_importar(antes, plan, despues) {
     }
   }
 
+  const apps = diccionario_de(esperado.apps_maliciosas_usuario || antes.apps_maliciosas_usuario);
+  const apps_despues = Object.create(null);
+  const dic_apps_despues = diccionario_de(despues.apps_maliciosas_usuario);
+  Object.keys(dic_apps_despues).forEach((k) => { apps_despues[identidad_de_app_maliciosa(dic_apps_despues[k])] = 1; });
+  const claves_apps = Object.keys(apps);
+  for (let i = 0; i < claves_apps.length; i++) {
+    if (!apps_despues[identidad_de_app_maliciosa(apps[claves_apps[i]])]) {
+      return "falta la app " + (texto_plano(apps[claves_apps[i]].nombre) || claves_apps[i]);
+    }
+  }
+  const enlaces = diccionario_de(esperado.enlaces_formularios_apps || antes.enlaces_formularios_apps);
+  const enlaces_despues = diccionario_de(despues.enlaces_formularios_apps);
+  const claves_enlaces = Object.keys(enlaces);
+  for (let i = 0; i < claves_enlaces.length; i++) {
+    if (!Object.prototype.hasOwnProperty.call(enlaces_despues, claves_enlaces[i])) {
+      return "falta el enlace del formulario " + claves_enlaces[i];
+    }
+  }
+
   const plantillas = lista_de(esperado.plantillas || antes.plantillas);
   const hay_plantillas = Object.create(null);
   lista_de(despues.plantillas).forEach((p) => { hay_plantillas[identidad_de_plantilla(p)] = 1; });
@@ -2061,6 +2162,8 @@ function lineas_del_resumen(resumen) {
     plural_de(resumen.imagenes_de_respuesta, "imagen de respuesta", "imágenes de respuesta"),
     plural_de(resumen.marcas, "marca guardada", "marcas guardadas"),
     plural_de(resumen.plataformas, "plataforma propia", "plataformas propias"),
+    plural_de(resumen.apps_maliciosas || 0, "app maliciosa propia", "apps maliciosas propias") + " y " +
+      plural_de(resumen.enlaces_de_apps || 0, "enlace de formulario guardado", "enlaces de formulario guardados"),
     plural_de(resumen.plantillas, "plantilla", "plantillas"),
     plural_de(resumen.fichas_de_correo, "sitio en la memoria de correos", "sitios en la memoria de correos") +
       " (" + plural_de(resumen.correos_recordados, "correo", "correos") + ")"
@@ -2281,7 +2384,13 @@ function pintar_vista_previa_de_importacion(plan, fichero) {
     plural_de(r.plantillas_nuevas, "plantilla nueva", "plantillas nuevas"),
     plural_de(r.fichas_de_correo_nuevas, "sitio nuevo en la memoria de correos", "sitios nuevos en la memoria de correos") +
       " y " + plural_de(r.correos_nuevos, "correo nuevo", "correos nuevos")
-  ], "bloque_anadir"));
+  ].concat((r.apps_nuevas || r.enlaces_de_apps_nuevos) ? [
+    // Apps maliciosas: con el ENLACE de cada formulario (es la página que se abrirá y
+    // se autorrellenará con los datos de la marca).
+    plural_de(r.apps_nuevas || 0, "app maliciosa nueva", "apps maliciosas nuevas") + " y " +
+      plural_de(r.enlaces_de_apps_nuevos || 0, "enlace de formulario", "enlaces de formulario") +
+      (plan.nombres_nuevos.apps && plan.nombres_nuevos.apps.length ? ": " + plan.nombres_nuevos.apps.join(", ") : "")
+  ] : []), "bloque_anadir"));
 
   // A DÓNDE VAN A IR LAS DENUNCIAS. La memoria de correos decide el "Para" de
   // los reportes por correo (se ordena por veces de uso y correo.html rellena el
@@ -2418,7 +2527,10 @@ function pintar_resultado_de_importacion(plan) {
     plural_de(r.plantillas_nuevas, "plantilla", "plantillas"),
     plural_de(r.correos_nuevos, "correo nuevo", "correos nuevos") + " en la memoria de correos" +
       (r.correos_sumados ? " y " + plural_de(r.correos_sumados, "contador sumado", "contadores sumados") : "")
-  ], "bloque_anadir"));
+  ].concat((r.apps_nuevas || r.enlaces_de_apps_nuevos) ? [
+    plural_de(r.apps_nuevas || 0, "app maliciosa", "apps maliciosas") + " y " +
+      plural_de(r.enlaces_de_apps_nuevos || 0, "enlace de formulario", "enlaces de formulario")
+  ] : []), "bloque_anadir"));
   caja.appendChild(crear_lista_de_lineas("Se respetó por ya existir aquí:", [
     plural_de(r.denuncias_respetadas, "denuncia", "denuncias"),
     plural_de(r.marcas_respetadas, "marca", "marcas"),

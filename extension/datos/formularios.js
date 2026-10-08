@@ -677,6 +677,210 @@
     return { url: this.url, manual: this.manual, pasos: pasos };
   }
 
+  // ==========================================================================
+  //  APPS MALICIOSAS — FORMULARIOS de las tiendas de apps NO oficiales
+  //  (Aptoide, APKPure, FileHippo, APKCombo y las que cree el usuario).
+  //
+  //  El texto es el MISMO del reporte por correo `apps_maliciosas` (la marca no
+  //  autoriza la app, sus apps oficiales solo están en Google Play / App Store,
+  //  pide la retirada y lista los enlaces denunciados), pero en INGLÉS (estas
+  //  tiendas solo tienen el formulario en inglés) y citando las políticas de ESA
+  //  tienda con su enlace (skill citar-politica-violada; viven en
+  //  POLITICAS_GENERALES[<tienda>]).
+  //
+  //  EL ENLACE DE CADA FORMULARIO SE PUEDE CAMBIAR Y SE GUARDA. Las tiendas cambian
+  //  de formulario sin avisar, y FileHippo y APKCombo ni siquiera publican uno (a
+  //  2026-10-08 solo aceptan la denuncia por correo). Por eso estas entradas llevan
+  //  `urlEditable` y su `url` real la decide APLICAR_APPS_MALICIOSAS_DE_USUARIO (más
+  //  abajo) con lo guardado en chrome.storage.local -> enlaces_formularios_apps; sin
+  //  nada guardado vale `urlFabrica` (que puede ser "" = todavía sin formulario).
+  // ==========================================================================
+  var URL_APTOIDE_DMCA = "https://aptoide.zendesk.com/hc/en-us/requests/new?tf_24177375=sto_dev_dmca";
+  var URL_APKPURE_RETIRADA = "https://apkpure.com/submit-a-takedown-notice";
+
+  // ¿Esta URL es (host + ruta) la del formulario de fábrica? Decide si se usa el plan
+  // hecho a medida para ESE formulario o el plan genérico por rótulo: si el usuario
+  // pone otro enlace, los `name` del de fábrica ya no sirven.
+  function esElFormularioDeFabrica(url, urlFabrica) {
+    if (!url || !urlFabrica) return false;
+    try {
+      var a = new URL(url), b = new URL(urlFabrica);
+      return a.host.replace(/^www\./, "") === b.host.replace(/^www\./, "") &&
+             a.pathname.replace(/\/+$/, "").toLowerCase() === b.pathname.replace(/\/+$/, "").toLowerCase();
+    } catch (e) { return false; }
+  }
+
+  // ¿La pestaña `urlPestana` ES el formulario `urlFormulario`? Regla de RUTA EXACTA de
+  // las entradas con `exigeRutaExacta` (Apps maliciosas). UNA SOLA función para el popup
+  // (rellenar: «¿ya estoy en el formulario?») y el clic derecho (ctxDetectarForm): si
+  // cada uno decidiera a su manera, uno podría escribir donde el otro no.
+  //  · HOST: el MISMO host del formulario o un subdominio SUYO (m.apkpure.com). Nunca la
+  //    «raíz de 2 niveles»: la de Aptoide es zendesk.com, que comparten miles de empresas
+  //    (otra-empresa.zendesk.com NO es Aptoide), y con co.uk / com.mx valdría medio país.
+  //  · RUTA: la misma o una subruta por segmentos completos. Un formulario en la RAÍZ
+  //    del sitio (ruta vacía) solo vale en la raíz exacta: si no, casaría con cualquier
+  //    página del sitio, incluida la ficha de la app falsa que se denuncia.
+  window.PESTANA_ES_EL_FORMULARIO_EXACTO = function (urlPestana, urlFormulario) {
+    try {
+      var a = new URL(urlPestana), b = new URL(urlFormulario);
+      if (a.protocol !== b.protocol) return false;
+      var ha = a.host.replace(/^www\./, "").toLowerCase(), hb = b.host.replace(/^www\./, "").toLowerCase();
+      if (!(ha === hb || ha.endsWith("." + hb))) return false;
+      var pa = a.pathname.toLowerCase().replace(/\/+$/, ""), pb = b.pathname.toLowerCase().replace(/\/+$/, "");
+      if (!pb) return pa === "";
+      return pa === pb || pa.indexOf(pb + "/") === 0;
+    } catch (e) { return false; }
+  };
+
+  // Asunto y descripción (en inglés) de la denuncia de una app no oficial ante la
+  // tienda `tienda`. Devuelve también las URL denunciadas, que algunos formularios
+  // piden en su propia caja.
+  function textoDeAppNoOficial(ctx, tienda) {
+    var marca = ctx.marca, d = ctx.datos || {};
+    var repres = /seguridadmaxima\.net/i.test(d.correo || "");
+    var pais = d.pais ? " (" + d.pais + ")" : "";
+    var play = String(d.play || "").trim(), appstore = String(d.appstore || "").trim();
+    // Las tiendas oficiales que la marca TIENE guardadas. Si no tiene ninguna, la frase
+    // se dice sin enlaces: no se deja un «[ Pega aquí… ]» a la vista de la tienda.
+    var oficiales = [];
+    if (play) oficiales.push("- Google Play Store: " + play);
+    if (appstore) oficiales.push("- Apple App Store: " + appstore);
+    var urls = (ctx && Array.isArray(ctx.urls)) ? ctx.urls.filter(Boolean) : [];
+    var pols = (window.POLITICAS_GENERALES && window.POLITICAS_GENERALES[tienda]) || [];
+    var bloquePol = pols.length
+      ? tienda + " policies being violated (please review):\n" +
+        pols.map(function (p) { return "- " + (p.te || p.t) + ": " + p.u; }).join("\n")
+      // Tienda creada por el usuario: no sabemos cuál es su política, así que se le pide
+      // que la pegue (la regla del proyecto es citarla SIEMPRE con su enlace).
+      : tienda + " policy being violated: [ Paste here the link to " + tienda + "'s terms of use / copyright (DMCA) policy ]";
+    var asunto = "DMCA / trademark: unauthorized app impersonating " + marca + " - removal request";
+    var descripcion =
+      "Hello,\n\n" +
+      (repres ? "We are Security Maximum in Computer Networks, on behalf of " + marca + "." : "We are " + marca + ".") + "\n\n" +
+      marca + " informs you that the application(s) published on " + tienda + " and listed below are NOT authorized or approved by the brand. " +
+      "They use the name, logo and trademarks of " + marca + " without permission.\n\n" +
+      (oficiales.length
+        ? "The only official applications of " + marca + " are available exclusively on the official stores:\n" + oficiales.join("\n")
+        : "The only official applications of " + marca + " are those published by " + marca + " itself on the official stores (Google Play Store and Apple App Store).") + "\n\n" +
+      marca + " requests the immediate removal of the application(s), as they pose security risks to users, infringe " + marca +
+      "'s intellectual property and trademark rights, and undermine user confidence.\n\n" +
+      "Please remove all information related to " + marca + pais + ".\n\n" +
+      "Reported link(s) (unauthorized app):\n" + (urls.length ? urls.join("\n") : "[ Paste here the link(s) of the app on " + tienda + " ]") + "\n\n" +
+      bloquePol + "\n\n" +
+      "Sincerely,\n" + (repres ? "Security Maximum in Computer Networks" : marca) + (d.correo ? "\nContact: " + d.correo : "");
+    return { asunto: asunto, descripcion: descripcion, urls: urls, oficiales: oficiales };
+  }
+
+  // País del formulario: las tiendas lo listan en INGLÉS y la marca lo guarda en
+  // español. Se manda el nombre tal cual + su versión inglesa (el motor admite
+  // alternativas con "|"); los que se escriben igual en los dos idiomas no hacen falta.
+  var PAIS_EN_INGLES = {
+    "brasil": "Brazil", "mexico": "Mexico", "panama": "Panama", "peru": "Peru",
+    "republica dominicana": "Dominican Republic", "estados unidos": "United States",
+    "espana": "Spain", "belice": "Belize", "haiti": "Haiti", "puerto rico": "Puerto Rico"
+  };
+  function paisParaFormularioEnIngles(pais) {
+    var p = String(pais || "").trim();
+    var clave = p.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+    return PAIS_EN_INGLES[clave] ? p + "|" + PAIS_EN_INGLES[clave] : p;
+  }
+
+  // Plan GENÉRICO para una tienda de apps: el formulario es desconocido (FileHippo,
+  // APKCombo, uno que pegó el usuario), así que todo va por RÓTULO y todo es OPCIONAL,
+  // igual que las plataformas que crea el usuario (planGenericoDeUsuario), pero con el
+  // texto de la app no oficial y las políticas de esa tienda.
+  function planGenericoDeApp(ctx, url, manual, tienda) {
+    var d = ctx.datos || {}, marca = ctx.marca;
+    var repres = /seguridadmaxima\.net/i.test(d.correo || "");
+    var quien = repres ? "Security Maximum in Computer Networks" : marca;
+    var persona = personaDeCorreo(d.correo);
+    var tx = textoDeAppNoOficial(ctx, tienda);
+    var R = ROTULOS_GENERICOS;
+    return { url: url, manual: manual, pasos: [
+      { tipo: "fillLabel", label: R.nombre,   valor: persona.completo || quien, opcional: true, reintentos: 4 },
+      { tipo: "fillLabel", label: R.correo,   valor: d.correo || "", opcional: true },
+      { tipo: "fillLabel", label: R.telefono, valor: d.telefono || "", opcional: true },
+      { tipo: "fillLabel", label: R.empresa,  valor: quien,          opcional: true },
+      { tipo: "fillLabel", label: R.marca,    valor: marca,          opcional: true },
+      { tipo: "fillLabel", label: R.sitio,    valor: d.sitio || "",  opcional: true },
+      { tipo: "fillLabel", label: "asunto|subject|title|titulo|título", valor: tx.asunto, opcional: true },
+      { tipo: "selectPais", label: "pais|país|country", valor: d.pais || "", opcional: true },
+      { tipo: "fillLabel", label: R.descripcion, valor: tx.descripcion, opcional: true },
+      // Si la tienda usa un editor de texto enriquecido (Zendesk) en vez de un <textarea>.
+      { tipo: "fillEditorRico", valor: tx.descripcion, opcional: true },
+      { tipo: "fillUrlsUnaCaja", label: R.enlaces, urls: tx.urls, separador: "\n", opcional: true },
+      { tipo: "fillLabel", label: R.firma,    valor: persona.completo || quien, opcional: true }
+    ] };
+  }
+
+  // Manual común a las tiendas: lo que la extensión NO hace por su cuenta.
+  var APPS_MANUAL_FIN = " Revisa la página entera antes de enviar: el botón de enviar lo pulsas TÚ.";
+
+  // Una entrada de fábrica de Apps maliciosas. `urlFabrica` puede ir vacía (la tienda
+  // no publica formulario): entonces el popup pide el enlace y lo guarda.
+  function formularioDeApp(tienda, urlFabrica, manual, planAMedida) {
+    return {
+      red: "Apps maliciosas", nombre: tienda + " (formulario)", cat: "apps_maliciosas",
+      tienda: tienda, url: urlFabrica, urlFabrica: urlFabrica, urlEditable: true,
+      // Se rellena solo si la pestaña es EXACTAMENTE este formulario (host y ruta): el
+      // usuario suele estar EN la tienda que denuncia y «Rellenar ESTA página» no puede
+      // confundir la ficha de la app falsa con el formulario (ver ctxDetectarForm).
+      exigeRutaExacta: true,
+      manual: manual,
+      construirPlan: function (ctx) {
+        if (planAMedida && esElFormularioDeFabrica(this.url, this.urlFabrica)) return planAMedida.call(this, ctx);
+        return planGenericoDeApp(ctx, this.url, this.manual, this.tienda);
+      }
+    };
+  }
+
+  // ---- Aptoide: formulario de soporte de Zendesk, categoría DMCA ----
+  // Volcado REAL (Playwright headless, 2026-10-08): correo, asunto, descripción en un
+  // CKEditor 5 (el <textarea name="request[description]"> está OCULTO y lo alimenta el
+  // editor), la categoría ya viene en «DMCA» por el parámetro de la URL, adjuntos
+  // opcionales y el botón Submit. Copia fiel en pruebas/aptoide_dmca_real.html.
+  function planAptoide(ctx) {
+    var d = ctx.datos || {};
+    var tx = textoDeAppNoOficial(ctx, "Aptoide");
+    return { url: this.url, manual: this.manual, pasos: [
+      // Con sesión iniciada en Zendesk esta caja no sale (ya saben quién eres): opcional.
+      { tipo: "fillName", name: "request[anonymous_requester_email]", valor: d.correo || "", opcional: true },
+      { tipo: "fillName", name: "request[subject]", valor: tx.asunto },
+      { tipo: "fillEditorRico", css: ".ck-editor__editable[contenteditable=true]",
+        respaldo: 'textarea[name="request[description]"]', valor: tx.descripcion, reintentos: 4 },
+      // La categoría NO se toca (la pone la URL): solo se comprueba que sigue en DMCA.
+      { tipo: "comprobarValor", css: 'input[name="request[custom_fields][24177375]"]', valor: "sto_dev_dmca",
+        aviso: "Category = DMCA" }
+    ] };
+  }
+
+  // ---- APKPure: formulario propio «Submit a Takedown Notice» ----
+  // Encontrado el 2026-10-08 desde su Copyright Policy («the takedown notices ONLY can be
+  // accepted here»). Campos con `name` fijo (volcado con descarga directa). El código de
+  // verificación del correo, el adjunto y las 3 declaraciones juradas los hace el usuario.
+  function planApkpure(ctx) {
+    var d = ctx.datos || {}, marca = ctx.marca;
+    var repres = /seguridadmaxima\.net/i.test(d.correo || "");
+    var persona = personaDeCorreo(d.correo);
+    var tx = textoDeAppNoOficial(ctx, "APKPure");
+    // «Where can we see an authorized example of the work?»: dónde está lo ORIGINAL (las
+    // apps oficiales y la web), seguido de la explicación con las políticas citadas.
+    var obra = (tx.oficiales.length ? "Official apps of " + marca + ":\n" + tx.oficiales.join("\n") + "\n" : "") +
+      (d.sitio ? "Official website: " + d.sitio + "\n" : "") + "\n" + tx.descripcion;
+    return { url: this.url, manual: this.manual, pasos: [
+      { tipo: "selectPais", name: "country", valor: paisParaFormularioEnIngles(d.pais) },
+      // Nombre legal y firma: la PERSONA que denuncia (deben coincidir, lo exige APKPure).
+      // Si el correo no dice quién es, se dejan vacíos para el usuario: nunca la marca.
+      { tipo: "fillName", name: "fullLegalName", valor: persona.completo },
+      { tipo: "fillName", name: "companyName", valor: repres ? "Security Maximum in Computer Networks" : marca },
+      { tipo: "fillName", name: "fullLegalNameOfCopyrightHolder", valor: marca },
+      { tipo: "fillName", name: "emailAddress", valor: d.correo || "" },
+      { tipo: "fillName", name: "copyrightedWork", valor: obra },
+      { tipo: "fillName", name: "allegedlyInfringingContent", valor: tx.urls.join("\n") },
+      { tipo: "fillName", name: "signature", valor: persona.completo }
+    ] };
+  }
+
   window.FORMULARIOS = {
     // ----------------------------------------------------------------------
     li_copy: {
@@ -1569,6 +1773,26 @@
         return bilingue(en, es);
       }
     },
+    // ===== Apps maliciosas: FORMULARIOS de las tiendas no oficiales (ver formularioDeApp) =====
+    // El enlace de cada uno se puede cambiar desde el popup y se guarda; los que hoy no
+    // tienen formulario conocido (FileHippo, APKCombo) piden el enlace antes de rellenar.
+    app_aptoide: formularioDeApp("Aptoide", URL_APTOIDE_DMCA,
+      "Se rellenan el correo, el asunto y la descripción (en inglés, con las políticas de Aptoide). " +
+      "La categoría ya viene en «DMCA»: compruébala. Adjunta la captura de la app si la tienes." + APPS_MANUAL_FIN,
+      planAptoide),
+    app_apkpure: formularioDeApp("APKPure", URL_APKPURE_RETIRADA,
+      "Se rellenan país, nombre legal, empresa, titular, correo, la obra original y los enlaces. TE TOCA: pedir y " +
+      "escribir el código de verificación del correo («Get code»), adjuntar la carta de autorización si actúas como " +
+      "agente, marcar las 3 declaraciones juradas y revisar la firma (debe ser igual al nombre legal)." + APPS_MANUAL_FIN,
+      planApkpure),
+    app_filehippo: formularioDeApp("FileHippo", "",
+      "FileHippo (de Softonic) no publica formulario: a 2026-10-08 recibe las denuncias por correo en " +
+      "dmca.filehippo@delevitagent.com (usa «Por correo» ▸ Apps maliciosas). Si consigues el enlace de un formulario, " +
+      "guárdalo y la extensión lo rellenará por el rótulo de cada campo." + APPS_MANUAL_FIN),
+    app_apkcombo: formularioDeApp("APKCombo", "",
+      "APKCombo no publica formulario: a 2026-10-08 recibe las denuncias DMCA por correo en support@apkcombo.com " +
+      "(usa «Por correo» ▸ Apps maliciosas). Si consigues el enlace de un formulario, guárdalo y la extensión lo " +
+      "rellenará por el rótulo de cada campo." + APPS_MANUAL_FIN),
     // ======================================================================
     //  CLOUDFLARE — formulario WEB de denuncia por derechos de autor (DMCA)
     //  https://abuse.cloudflare.com/dmca
@@ -2070,6 +2294,78 @@
       if (Object.prototype.hasOwnProperty.call(window.FORMULARIOS, clave)) return; // de fábrica manda
       var f = window.CREAR_FORMULARIO_DE_USUARIO(guardadas[clave]);
       if (f) { window.FORMULARIOS[clave] = f; n++; }
+    });
+    return n;
+  };
+
+  // ==========================================================================
+  //  APPS MALICIOSAS DEL USUARIO + ENLACES GUARDADOS DE CADA TIENDA
+  //
+  //  Dos claves de chrome.storage.local (las leen igual el popup y el menú del clic
+  //  derecho, y viajan en el traspaso de datos de ⚙ opciones):
+  //   · apps_maliciosas_usuario  { "app_u_<nombre>": { nombre, url } }
+  //       Tiendas que el usuario da de alta con «➕ Nueva app / sitio…». Van dentro
+  //       de la red «Apps maliciosas» (NO son plataformas aparte: por eso no se
+  //       guardan en plataformas_usuario, cuya identidad es una red por tipo).
+  //   · enlaces_formularios_apps { "<clave del formulario>": "https://…" }
+  //       El enlace que el usuario guardó para un formulario con `urlEditable`
+  //       (Aptoide si cambia, FileHippo/APKCombo cuando tengan uno, o el de una app
+  //       suya). Sin entrada, vale el de fábrica (`urlFabrica`, que puede ser "").
+  //
+  //  Se puede llamar TODAS las veces que haga falta y deja FORMULARIOS igual que lo
+  //  guardado: quita las apps del usuario que ya no están (si no, una app quitada en
+  //  el popup seguiría en el menú del clic derecho hasta reiniciar el navegador) y
+  //  vuelve al enlace de fábrica cuando se borra el guardado. Las de fábrica NUNCA se
+  //  quitan ni se pisan. Devuelve cuántas apps del usuario quedaron.
+  // ==========================================================================
+  function claveSegura(k) { return !(k === "__proto__" || k === "constructor" || k === "prototype"); }
+  function diccionario(v) { return (v && typeof v === "object" && !Array.isArray(v)) ? v : {}; }
+  // Solo https: un «javascript:» o un «data:» guardado acabaría abriéndose en una pestaña, y
+  // un http:// no lo cubre optional_host_permissions (manifest): no se podría rellenar.
+  function enlaceSeguro(v) {
+    var t = String(v == null ? "" : v).trim();
+    if (!t) return "";
+    try { var u = new URL(t); return (u.protocol === "https:" && u.hostname) ? u.href : ""; }
+    catch (e) { return ""; }
+  }
+
+  window.CLAVE_APPS_MALICIOSAS_USUARIO = "apps_maliciosas_usuario";
+  window.CLAVE_ENLACES_FORMULARIOS_APPS = "enlaces_formularios_apps";
+
+  window.CREAR_FORMULARIO_DE_APP_DE_USUARIO = function (a) {
+    var nombre = String((a && a.nombre) || "").replace(/\s+/g, " ").trim().slice(0, 60);
+    if (!nombre) return null;
+    var url = enlaceSeguro(a.url);
+    var f = formularioDeApp(nombre, url,
+      "App / sitio creado por ti: la extensión rellena por el RÓTULO de cada campo lo que reconoce (nombre, correo, " +
+      "país, asunto, descripción en inglés y enlaces). Pega en la descripción el enlace de la política de " + nombre +
+      " que se infringe (la extensión no la conoce)." + APPS_MANUAL_FIN);
+    f.app_de_usuario = true;
+    return f;
+  };
+
+  window.APLICAR_APPS_MALICIOSAS_DE_USUARIO = function (enlaces, propias) {
+    var F = window.FORMULARIOS;
+    enlaces = diccionario(enlaces); propias = diccionario(propias);
+    var tiene = function (o, k) { return Object.prototype.hasOwnProperty.call(o, k); };
+    // 1) Fuera las apps del usuario que ya no están guardadas.
+    Object.keys(F).forEach(function (k) {
+      if (F[k] && F[k].app_de_usuario && !tiene(propias, k)) delete F[k];
+    });
+    // 2) Las que sí están (se rehacen: el nombre o el enlace pueden haber cambiado).
+    var n = 0;
+    Object.keys(propias).forEach(function (k) {
+      if (!claveSegura(k) || k.indexOf("app_u_") !== 0) return;
+      if (tiene(F, k) && !F[k].app_de_usuario) return;          // de fábrica manda
+      var f = window.CREAR_FORMULARIO_DE_APP_DE_USUARIO(propias[k]);
+      if (f) { F[k] = f; n++; }
+    });
+    // 3) El enlace de cada formulario editable: el guardado o, si no hay, el de fábrica.
+    Object.keys(F).forEach(function (k) {
+      var f = F[k];
+      if (!f || !f.urlEditable) return;
+      var guardado = (claveSegura(k) && tiene(enlaces, k)) ? enlaceSeguro(enlaces[k]) : "";
+      f.url = guardado || f.urlFabrica || "";
     });
     return n;
   };
