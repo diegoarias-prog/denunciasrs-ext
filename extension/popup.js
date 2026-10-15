@@ -14,14 +14,51 @@ const CLAVE_MODO_PRUEBA = "modo_prueba_denuncias";
 // Clave del Registro de denuncias (la misma que usan registro.js y background.js).
 const CLAVE_REGISTRO_POPUP = "denuncias_registro";
 
+// ¿Esta página es el PANEL LATERAL (chrome.sidePanel) o el popup de siempre?
+// Es el mismo popup.html en los dos sitios. El popup se cierra en cuanto el usuario cambia
+// de pestaña (lo hace Chrome, no se puede evitar) y se perdía lo que estaba escribiendo;
+// el panel lateral se queda abierto. Si el navegador no tiene panel lateral, background.js
+// deja el popup y todo sigue como antes. getViews({type:"popup"}) solo lista los popups:
+// si esta ventana no está ahí, es el panel. Si la API no responde, se trata como popup
+// (lo prudente: es el diseño de siempre).
+const ES_PANEL_LATERAL = (function () {
+  try {
+    const popups = chrome.extension.getViews({ type: "popup" });
+    return Array.isArray(popups) && popups.indexOf(window) < 0;
+  } catch (e) { return false; }
+})();
+// En el panel el ancho lo pone Chrome (y el usuario lo arrastra): popup.html estira el
+// cuerpo con esta clase en vez de dejarlo en los 320px del popup.
+if (ES_PANEL_LATERAL) document.documentElement.classList.add("vista_panel_lateral");
+
 // El botón flotante "📸 Capturar comprobante" NO debe salir mientras uno simplemente
 // navega por la red social: solo cuando se ACTIVA la extensión. Abrir este popup en una
 // pestaña es justo eso, así que se lo avisamos al content script de esa pestaña.
+function activar_boton_captura_en_pestana(tabId) {
+  try {
+    if (tabId) chrome.tabs.sendMessage(tabId, { accion: "activarBotonCaptura" }, () => void chrome.runtime.lastError);
+  } catch (e) { /* la página no admite content scripts: nada que activar */ }
+}
 (async function activar_boton_captura_en_pestana_actual() {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (tab && tab.id) chrome.tabs.sendMessage(tab.id, { accion: "activarBotonCaptura" }, () => void chrome.runtime.lastError);
-  } catch (e) { /* la página no admite content scripts: nada que activar */ }
+    if (tab && tab.id) activar_boton_captura_en_pestana(tab.id);
+  } catch (e) { /* sin pestaña activa: nada que activar */ }
+})();
+// Con el PANEL abierto, ir a otra pestaña de ESTA ventana es como haber abierto el popup
+// en ella: la extensión sigue activa y a la vista, así que el botón 📸 también sale ahí.
+// Solo al CAMBIAR de pestaña, no al navegar dentro de una (ahí se oculta a propósito,
+// ver captura_flotante.js). En el popup este aviso no llega nunca: cambiar de pestaña lo
+// cierra. Las acciones (Rellenar, Capturar) no dependen de esto: cada una busca la pestaña
+// activa EN EL MOMENTO del clic.
+(async function seguir_la_pestana_activa_con_el_panel() {
+  if (!ES_PANEL_LATERAL) return;
+  try {
+    const ventana = await chrome.windows.getCurrent();
+    chrome.tabs.onActivated.addListener((info) => {
+      if (info && ventana && info.windowId === ventana.id) activar_boton_captura_en_pestana(info.tabId);
+    });
+  } catch (e) { /* sin ventanas ni pestañas que seguir */ }
 })();
 
 // El icono puede llevar un "!" porque la última denuncia se quedó a medias, no se rellenó
@@ -494,6 +531,61 @@ async function inicializar() {
   // Recordatorio de respaldo: lo ultimo, para que no retrase nada de lo de arriba.
   await pintar_cintillo_de_respaldo();
 }
+
+// ---------------------------------------------------------------------------
+//  PANEL LATERAL: lo que antes se leía UNA vez al abrir el popup
+// ---------------------------------------------------------------------------
+// El popup se volvía a abrir en cada uso, así que leer las marcas y el Excel al abrir
+// bastaba. El panel lateral se queda abierto horas: si el usuario edita una marca en
+// ⚙ Marcas (p. ej. le pone el código postal) o el clic derecho agota el Excel, el panel
+// rellenaría con datos viejos o contaría URLs que ya no existen. Por eso se escuchan
+// esos cambios y se repinta SIN tocar lo que el usuario está escribiendo: la marca y el
+// correo elegidos se conservan, y las cajas de URL a mano no se tocan (solo se vacían al
+// ABRIR, ver más abajo).
+async function al_cambiar_las_marcas_guardadas() {
+  const marca_antes = $("sel_marca").value;
+  const correo_antes = $("sel_correo_marca") ? $("sel_correo_marca").value : "";
+  MARCAS = await obtener_marcas();
+  llenar_select($("sel_marca"), Object.keys(MARCAS).sort().map((m) => ({ value: m, texto: m })));
+  const sigue = Object.prototype.hasOwnProperty.call(MARCAS, marca_antes);
+  if (sigue) $("sel_marca").value = marca_antes;
+  refrescar_correos_de_marca();
+  const correos = ((MARCAS[$("sel_marca").value] || {}).correos) || [];
+  if (correo_antes && correos.indexOf(correo_antes) >= 0) $("sel_correo_marca").value = correo_antes;
+  // La marca elegida ya no existe (se borró en ⚙ Marcas): queda puesta otra, y eso es
+  // un CAMBIO DE MARCA con todas sus reglas (entre ellas, quitar el Excel de la anterior).
+  if (marca_antes && !sigue) $("sel_marca").dispatchEvent(new Event("change"));
+}
+try {
+  chrome.storage.onChanged.addListener((cambios, area) => {
+    if (area !== "local") return;
+    if (cambios.marcas_usuario || cambios.marcas_eliminadas) {
+      al_cambiar_las_marcas_guardadas().catch(() => { /* se repinta en el siguiente cambio */ });
+    }
+    // La lista del Excel la puede agotar otra parte (el clic derecho, el correo): el
+    // conteo y su explicación se repintan para no prometer URLs que ya no están.
+    if (cambios[CLAVE_URLS]) {
+      const n = cambios[CLAVE_URLS].newValue;
+      pintar_estado_urls(Array.isArray(n) ? n.length : 0);
+    }
+    if (cambios[CLAVE_AVISO_EXCEL]) {
+      const m = cambios[CLAVE_AVISO_EXCEL].newValue;
+      AVISO_DEL_EXCEL = typeof m === "string" ? m : "";
+      pintar_estado_de_enlaces();
+    }
+    // Aviso de una denuncia que se quedó a medias: en el popup se enseñaba al abrirlo; con
+    // el panel abierto y a la vista se enseña en cuanto llega (y se quita el "!" del
+    // icono, igual que al abrir). Solo si el panel se está viendo de verdad.
+    if (ES_PANEL_LATERAL && cambios.aviso_denuncia && document.visibilityState === "visible") {
+      const a = cambios.aviso_denuncia.newValue;
+      if (a && a.texto) {
+        mostrar_estado("error", escapar_html(String(a.texto)));
+        try { chrome.runtime.sendMessage({ accion: "limpiarAvisoDenuncia" }, () => void chrome.runtime.lastError); }
+        catch (e) { /* el service worker ya lo limpiará en el siguiente Rellenar */ }
+      }
+    }
+  });
+} catch (e) { /* sin storage no hay nada que seguir */ }
 
 // Repuebla las redes con las del tipo elegido. Si la red que estaba puesta también
 // existe en el otro tipo (p. ej. Facebook, que tiene formularios Y correo), se

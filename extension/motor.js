@@ -1573,6 +1573,204 @@ async function APLICAR(pasos, opciones) {
         // f) Resultado.
         if (puestasU > 0 || puestasM > 0) ok++;
         if (urls.length > urlInputs.length) faltan.push("difam_urls:" + puestasU + "/" + urls.length);
+      } else if (p.tipo === "telefonoConPais") {
+        // ==========================================================================
+        //  TELÉFONO CON SELECTOR DE PAÍS (los 3 formularios de WhatsApp).
+        //  Paso: { name, codigo:"51", numero:"987654321", pais:"Perú|Peru" }. El plan ya
+        //  trae el número separado (datos/prefijos_telefonicos.js): aquí no se adivina nada.
+        //
+        //  DOM REAL, medido el 2026-10-15 con Chrome sin ventana sobre
+        //  whatsapp.com/contact/forms/5071674689613749 (copia fiel: pruebas/whatsapp_real.html):
+        //    <div id="u_0_n_..">
+        //      <button data-testid="SUISearchableSelector/button" aria-haspopup="true">
+        //        ...<div class="_4gt9">+93</div>...</button>          <- país (Afganistán de fábrica)
+        //      <label class="phoneInput"><input class="_4b7k"></label>  <- número (SIN name ni id)
+        //      <input hidden readonly name="ip_whatsapp_number">        <- lo que se envía: "+51987654321"
+        //  Al pulsar el botón, React añade al final del <body> una capa con un buscador
+        //  (input role=combobox, "Buscar nombre o código de país") y las 239 opciones, TODAS
+        //  en el DOM: <div role="menuitem"><span>+51</span><span>Perú</span></div>.
+        //  MEDIDO: escribir en el buscador con el setter + `input` NO filtra la lista (solo
+        //  filtra el tecleo de verdad), pero no hace falta: la opción ya está ahí y un clic
+        //  sintético sobre ella SÍ la elige (el botón pasa a "+51" y el oculto se recalcula).
+        //  Por eso el buscador es solo el RESPALDO por si un día la lista llega recortada.
+        //
+        //  TRES TRAMPAS:
+        //   - Hay OTRO selector idéntico en la misma página (teléfono del admin de un grupo,
+        //     name="admin_group"). Se ancla SIEMPRE por el `name` del oculto, nunca por "el
+        //     primer botón de país que aparezca".
+        //   - El +1, +7, +44... los comparten varios países: se elige por el "+NN" (que no
+        //     depende del idioma de la página) y el nombre solo desempata, empezando por la
+        //     coincidencia EXACTA ("Estados Unidos" y no "Islas Vírgenes de los Estados Unidos").
+        //   - Que el botón se haya pulsado no prueba nada: el paso solo cuenta como hecho si
+        //     el botón ACABA mostrando el prefijo pedido y el oculto lleva "+código+número".
+        //     Si sigue en "+93" (o en otro), va a `faltan` y se reintenta.
+        // ==========================================================================
+        const codigoT = String(p.codigo || "").replace(/\D/g, "");
+        const numeroT = String(p.numero || "").replace(/\D/g, "");
+        const paisesCrudos = String(p.pais || "").split("|").map((s) => s.trim()).filter(Boolean);
+        const paisesT = paisesCrudos.map((s) => norm(s).replace(/\s+/g, " ").trim());
+        const prefijoDe = (t) => { const m = String(t || "").match(/\+\s*(\d{1,4})(?!\d)/); return m ? m[1] : ""; };
+        const soloDigitos = (t) => String(t || "").replace(/\D/g, "");
+        const seVe = (e) => { if (!e) return false; const r = e.getBoundingClientRect(); return r.width > 1 && r.height > 1; };
+        const MARCA_TEL = "data-rs-telefono-puesto";   // lo que dejamos puesto la última vez
+        const esCajaDeTexto = (e, ancla) => e !== ancla && e.tagName === "INPUT" && !e.hidden &&
+          ["text", "tel", "number"].indexOf((e.type || "").toLowerCase()) >= 0;
+        // Las piezas del campo, buscadas DE NUEVO cada vez (React reemplaza nodos).
+        const piezas = () => {
+          const ancla = document.querySelector('[name="' + (p.name + "").replace(/"/g, '\\"') + '"]');
+          if (!ancla) return null;
+          let caja = ancla.parentElement, k = 0;
+          while (caja && k < 5) {
+            const sel = caja.querySelector("select");
+            const btn = caja.querySelector('button[aria-haspopup],[role="combobox"]');
+            const num = Array.prototype.slice.call(caja.querySelectorAll("input")).find((e) => esCajaDeTexto(e, ancla)) || null;
+            if (sel || btn || num) return { ancla: ancla, caja: caja, sel: sel, btn: btn, num: num };
+            caja = caja.parentElement; k++;
+          }
+          return { ancla: ancla, caja: null, sel: null, btn: null, num: null };
+        };
+        const prefijoPuesto = () => {
+          const a = piezas();
+          if (!a) return "";
+          if (a.sel) { const o = a.sel.options[a.sel.selectedIndex]; return o ? prefijoDe(o.text) : ""; }
+          if (a.btn) return prefijoDe(a.btn.textContent);
+          return "";
+        };
+        // La mejor opción entre las que tienen ESE prefijo: exacta -> empieza por -> contiene
+        // -> la primera con el prefijo (el número enviado es el mismo dentro de un prefijo).
+        const mejorOpcion = (lista, textoDe) => {
+          const conCodigo = lista.filter((o) => prefijoDe(textoDe(o)) === codigoT);
+          if (!conCodigo.length) return null;
+          const nombreDe = (o) => norm(textoDe(o)).replace(/\+\s*\d+/, " ").replace(/\(\s*\)/g, " ").replace(/\s+/g, " ").trim();
+          for (const pt of paisesT) {
+            let o = conCodigo.find((x) => nombreDe(x) === pt);
+            if (!o) o = conCodigo.find((x) => nombreDe(x).indexOf(pt) === 0);
+            if (!o) o = conCodigo.find((x) => nombreDe(x).indexOf(pt) >= 0);
+            if (o) return o;
+          }
+          return conCodigo[0];
+        };
+        const pulsar = (el) => ["mouseover", "mousedown", "mouseup", "click"].forEach(function (t) {
+          try { el.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true, view: window })); } catch (e) {}
+        });
+        const escribirEnBuscador = (caja, texto) => {
+          let bus = document.querySelector('input[role="combobox"][aria-expanded="true"]');
+          const act = document.activeElement;
+          if (!bus && act && act.tagName === "INPUT" && !(caja && caja.contains(act))) bus = act;
+          if (!bus) return false;
+          Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(bus, texto);
+          bus.dispatchEvent(new Event("input", { bubbles: true }));
+          try { bus.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, key: texto.slice(-1) })); } catch (e) {}
+          return true;
+        };
+        // Selector de país de Meta (botón + capa con buscador): abrir, elegir, comprobar.
+        const elegirEnSelectorDeMeta = async () => {
+          for (let intento = 0; intento < 2; intento++) {
+            const a = piezas();
+            if (!a || !a.btn) return false;
+            try { a.btn.click(); } catch (e) {}
+            const opcionesDeLaCapa = () => Array.prototype.slice.call(document.querySelectorAll('[role="menuitem"],[role="option"]'))
+              .filter((o) => !(a.caja && a.caja.contains(o)) && seVe(o) && prefijoDe(o.textContent));
+            let elegida = null;
+            for (let it = 0; it < 10 && !elegida; it++) {
+              await dur(150);
+              elegida = mejorOpcion(opcionesDeLaCapa(), (o) => o.textContent);
+            }
+            // RESPALDO: lista recortada -> buscar por el nombre del país y, si no, por el código.
+            for (const termino of paisesCrudos.concat([codigoT])) {
+              if (elegida) break;
+              if (!escribirEnBuscador(a.caja, termino)) break;
+              for (let it = 0; it < 4 && !elegida; it++) { await dur(200); elegida = mejorOpcion(opcionesDeLaCapa(), (o) => o.textContent); }
+            }
+            if (elegida) {
+              const textoElegido = (elegida.textContent || "").replace(/\s+/g, " ").trim();
+              pulsar(elegida);
+              for (let it = 0; it < 6 && prefijoPuesto() !== codigoT; it++) await dur(150);
+              if (prefijoPuesto() === codigoT) { anotar("eligio", piezas().btn, textoElegido.slice(0, 60)); return true; }
+            }
+            // No se pudo: se cierra la capa (Escape) para no dejarla tapando el formulario.
+            try {
+              const bus = document.querySelector('input[role="combobox"][aria-expanded="true"]') || document.activeElement;
+              if (bus) bus.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Escape", keyCode: 27 }));
+            } catch (e) {}
+            await dur(200);
+          }
+          return false;
+        };
+
+        if (!codigoT || !numeroT) faltan.push("telefono: sin numero que escribir");
+        else {
+          // Espera corta a que el campo SE VEA: aparece al marcar "Private Message Chat" ->
+          // "Phone Number" (antes está en el DOM pero dentro de una fila oculta).
+          let pz = piezas();
+          for (let it = 0; it < 6 && !(pz && pz.caja && seVe(pz.btn || pz.sel || pz.num)); it++) { await dur(300); pz = piezas(); }
+          const deseado = codigoT + numeroT;
+          if (!pz) faltan.push("telefono: no existe el campo «" + p.name + "»");
+          else if (!pz.caja || !seVe(pz.btn || pz.sel || pz.num)) {
+            // ÚLTIMO RECURSO: el `name` es una caja de teléfono visible sin selector de país.
+            // Se escribe el número internacional completo.
+            if (seVe(pz.ancla) && esCajaDeTexto(pz.ancla, null)) {
+              if (soloDigitos(pz.ancla.value) !== deseado) setNative(pz.ancla, "+" + codigoT + " " + numeroT);
+              ok++;
+            } else faltan.push("telefono: el campo de telefono todavia no se ve");
+          } else {
+            const anclaOculta = (pz.ancla.type || "").toLowerCase() === "hidden" || pz.ancla.hidden;
+            const puestoAntes = soloDigitos(pz.ancla.getAttribute(MARCA_TEL));
+            const ahora = anclaOculta ? soloDigitos(pz.ancla.value) : "";
+            if (anclaOculta && puestoAntes && ahora && ahora !== puestoAntes) {
+              // LO CAMBIÓ EL USUARIO después de que lo pusiéramos: manda él (el bucle del
+              // service worker repite el relleno durante minutos y no puede deshacérselo).
+              anotar("respetada la eleccion del usuario", pz.num || pz.ancla, "telefono +" + ahora);
+              ok++;
+            } else if (anclaOculta && ahora === deseado && prefijoPuesto() === codigoT) {
+              ok++;   // ya está tal cual: ni se toca ni se anota
+            } else {
+              // 1) EL PAÍS
+              let paisOk = prefijoPuesto() === codigoT;
+              if (!paisOk && pz.sel) {
+                // <select> nativo con opciones tipo "Perú (+51)".
+                const op = mejorOpcion(Array.prototype.slice.call(pz.sel.options), (o) => o.text);
+                if (op) {
+                  pz.sel.selectedIndex = op.index;
+                  pz.sel.dispatchEvent(new Event("input", { bubbles: true }));
+                  pz.sel.dispatchEvent(new Event("change", { bubbles: true }));
+                  anotar("eligio", pz.sel, (op.text || "").trim().slice(0, 60));
+                }
+                paisOk = prefijoPuesto() === codigoT;
+              } else if (!paisOk && pz.btn) {
+                paisOk = await elegirEnSelectorDeMeta();
+              }
+              // 2) EL NÚMERO, sin el prefijo
+              const pn = piezas();
+              if (!paisOk && !(pn && !pn.sel && !pn.btn)) {
+                faltan.push("telefono: el selector de pais sigue en +" + (prefijoPuesto() || "?") + " (se queria +" + codigoT + ")");
+              } else if (!pn || !pn.num) {
+                faltan.push("telefono: no encuentro la caja del numero");
+              } else {
+                // Sin selector (solo una caja): el número va completo con su prefijo.
+                const valorNum = (pn.sel || pn.btn) ? numeroT : "+" + codigoT + " " + numeroT;
+                const esperadoEnCaja = (pn.sel || pn.btn) ? numeroT : deseado;
+                if (soloDigitos(pn.num.value) !== esperadoEnCaja) setNative(pn.num, valorNum);
+                // 3) COMPROBACIÓN: lo que se ENVÍA es el oculto ("+51987654321").
+                let bien = false;
+                for (let it = 0; it < 6 && !bien; it++) {
+                  const pc = piezas();
+                  bien = !!pc && (anclaOculta ? soloDigitos(pc.ancla.value) === deseado
+                                              : soloDigitos(pc.num && pc.num.value) === esperadoEnCaja) &&
+                         (!(pc.sel || pc.btn) || prefijoPuesto() === codigoT);
+                  if (!bien) await dur(150);
+                }
+                if (bien) {
+                  try { piezas().ancla.setAttribute(MARCA_TEL, "+" + deseado); } catch (e) {}
+                  ok++;
+                } else {
+                  const pc = piezas();
+                  faltan.push("telefono: el formulario no tomo +" + deseado + " (tiene «" + ((pc && pc.ancla.value) || "") + "»)");
+                }
+              }
+            }
+          }
+        }
       }
     } catch (e) { faltan.push((p.name || p.css || "?") + ": " + e.message); }
       // ==========================================================================

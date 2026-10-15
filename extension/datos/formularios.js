@@ -13,6 +13,18 @@
 //  ESTADO: LinkedIn (difamación, marca, derechos de autor) completo y validado
 //  en vivo. FB/IG y los progresivos (TikTok/WhatsApp/X) se agregan después.
 // ============================================================================
+
+// PREFIJOS TELEFÓNICOS (datos/prefijos_telefonicos.js): los usa planWhatsApp para sacar
+// el país y el número de lo que el usuario pegó. En las PÁGINAS (popup.html) se carga con
+// su <script> antes que este archivo. En el SERVICE WORKER (background.js, que arma el plan
+// del menú del clic derecho) este archivo llega por importScripts, y ahí se trae también el
+// de prefijos si todavía no está: así el clic derecho rellena el teléfono igual que el popup.
+// importScripts solo vale durante la carga inicial del worker, que es justo cuando corre
+// esta línea. Si falla, planWhatsApp simplemente no rellena el teléfono (aviso `manual`).
+if (typeof importScripts === "function" && typeof window.TELEFONO_DE_URLS !== "function") {
+  try { importScripts("datos/prefijos_telefonicos.js"); } catch (e) { /* sin prefijos: teléfono a mano */ }
+}
+
 (function () {
   // Nombre/Apellidos en LinkedIn: si el correo es el de la persona -> Diego/Arias;
   // si no, se parte el nombre de la marca (1.ª palabra = Nombre, el resto = Apellidos).
@@ -353,8 +365,53 @@
     return bilingue(en, es);
   }
 
+  // ==========================================================================
+  //  CÓDIGO / DIRECCIÓN POSTAL DE LA MARCA
+  //  Cada marca tiene UN solo espacio `postal` (⚙ Marcas → «📮 Código / dirección
+  //  postal») que acepta un código ("01001") o una dirección completa ("5a Avenida
+  //  5-55 zona 14, Guatemala"). Si está vacío se usa, como siempre, el código postal
+  //  del PAÍS (JUSTIF.POSTAL). Hay tres sabores según lo que pida el campo:
+  //    - postalDeMarca: campos de «Dirección postal» (Meta, WhatsApp): sirve lo que
+  //      haya escrito el usuario, sea código o dirección.
+  //    - codigoPostalDeMarca: campos que piden SOLO un código (X `@postal-code`).
+  //    - direccionPostalDeMarca: campos de dirección (X `@address`); vacío si lo que
+  //      hay guardado es solo un código.
+  // ==========================================================================
+  // Código postal del país (la tabla de siempre). Vacío si el país no está.
   function postalDe(pais) {
     try { return window.JUSTIF.POSTAL[window.JUSTIF.norm(pais)] || ""; } catch (e) { return ""; }
+  }
+  function postalPropioDe(d) {
+    return String((d && d.postal != null) ? d.postal : "").trim();
+  }
+  // Un código postal es corto, de letras/números/espacio/guion, y lleva AL MENOS un
+  // dígito: sin esa condición "Guatemala" (9 letras) pasaría por código.
+  function pareceCodigoPostal(texto) {
+    return /^(?=.*\d)[A-Za-z0-9 -]{3,10}$/.test(String(texto || "").trim());
+  }
+  function postalDeMarca(d) {
+    return postalPropioDe(d) || postalDe(d && d.pais);
+  }
+  // Para un campo de CÓDIGO: si la marca guardó un código, ése; si guardó una dirección,
+  // se intenta sacar el código de dentro (rotulado "C.P. 01010" / "código postal 01010" /
+  // "ZIP 01010", o un número suelto de 5-6 cifras como en "…, Guatemala 01010"); si no hay,
+  // el del país. NO se mete la dirección entera: X la rechazaría o quedaría un código falso.
+  // Los números sueltos de 4 cifras o con guion ("5-55") no se toman: suelen ser el número
+  // de la casa, no el código.
+  function codigoPostalDeMarca(d) {
+    var propio = postalPropioDe(d);
+    if (propio) {
+      if (pareceCodigoPostal(propio)) return propio;
+      var rotulado = propio.match(/\b(?:c\.?\s?p\.?|c[oó]digo\s+postal|zip(?:\s*code)?|postal\s*code)\s*[:#.]?\s*([A-Za-z0-9-]{3,10})/i);
+      if (rotulado && /\d/.test(rotulado[1])) return rotulado[1];
+      var suelto = propio.match(/(?:^|[\s,])(\d{5,6})(?=$|[\s,.;])/);
+      if (suelto) return suelto[1];
+    }
+    return postalDe(d && d.pais);
+  }
+  function direccionPostalDeMarca(d) {
+    var propio = postalPropioDe(d);
+    return (propio && !pareceCodigoPostal(propio)) ? propio : "";
   }
   // EL MISMO TEXTO EN UNA SOLA LÍNEA, para los campos de META que rechazan más de dos
   // ("Please include no more than 2 lines of text", reportado con captura el 2026-09-10).
@@ -471,7 +528,7 @@
       // Meta cuenta las líneas de este campo y admite 2: va en UNA (ver enUnaLinea).
       { tipo: "fillName", siHay: C, name: "why_reporting_other", valor: enUnaLinea(ctx.justif) },
       // Dirección postal: en derechos de autor va oculta salvo en algunos países.
-      { tipo: "fillName", siHay: C, name: "Address", valor: postalDe(d.pais), opcional: true },
+      { tipo: "fillName", siHay: C, name: "Address", valor: postalDeMarca(d), opcional: true },
       { tipo: "fillName", siHay: C, name: "Electronic_sig", valor: marca },
       // El PAÍS va al final a propósito: en el formulario clásico, elegirlo es lo que a
       // veces te manda al portal nuevo; así el resto ya quedó escrito antes del salto.
@@ -519,7 +576,7 @@
       // que de verdad usa Meta; basta con que una case.
       { tipo: "fillLabel", siNoHay: C, label: "confirmar direccion|confirma tu direccion|confirmar tu direccion|confirmar correo|confirma tu correo|confirm email|confirm your email",
         valor: d.correo, reintentos: 6 },
-      { tipo: "fillLabel", siNoHay: C, label: "direccion postal|mailing address", valor: postalDe(d.pais), opcional: true },
+      { tipo: "fillLabel", siNoHay: C, label: "direccion postal|mailing address", valor: postalDeMarca(d), opcional: true },
       // Casillas de la "Declaración" (buena fe / bajo pena de perjurio / autorización).
       { tipo: "checkVarios", siNoHay: C, etiquetas: "buena fe|perjurio|good faith|penalty of perjury|autorizacion para actuar|authorized to act",
         max: 4, opcional: true, reintentos: 3 },
@@ -634,7 +691,7 @@
       { tipo: "fillName", name: "your_name", valor: marca },
       { tipo: "fillName", name: "organization", valor: marca },
       { tipo: "fillName", name: "client_name", valor: marca },
-      { tipo: "fillName", name: "Address", valor: postalDe(d.pais) },
+      { tipo: "fillName", name: "Address", valor: postalDeMarca(d) },
       { tipo: "fillName", name: "email", valor: d.correo },
       { tipo: "fillDifamUrls", urls: (ctx.urls || []), motivo: ctx.justif },
       { tipo: "fillName", name: "Yes_submit", valor: marca },
@@ -650,7 +707,7 @@
     pasos.push({ tipo: "radio", name: "srt_report_type", texto: this.tipoTexto, esperaMs: 700 });
     pasos.push({ tipo: "radio", name: this.relName, texto: "rights owner", esperaMs: 900 });
     pasos.push({ tipo: "fillName", name: "your_name", valor: marca });
-    pasos.push({ tipo: "fillName", name: "Address", valor: postalDe(d.pais) });
+    pasos.push({ tipo: "fillName", name: "Address", valor: postalDeMarca(d) });
     pasos.push({ tipo: "fillName", name: "email", valor: d.correo });
     pasos.push({ tipo: "fillName", name: "confirm_email", valor: d.correo });
     pasos.push({ tipo: "fillName", name: "reporter_name", valor: marca });
@@ -667,6 +724,19 @@
     }
     pasos.push({ tipo: "radio", name: "srt_content_type", texto: "Private Message", esperaMs: 1200 });
     pasos.push({ tipo: "radio", name: "content_type_private_message", texto: "Phone Number", esperaMs: 800 });
+    // N.º DE TELÉFONO de la cuenta denunciada, sacado de lo que el usuario pegó en el popup
+    // (https://wa.me/51987654321, api.whatsapp.com/send?phone=..., o "+51 987 654 321"):
+    // datos/prefijos_telefonicos.js lo separa en prefijo (+51), país (Perú) y número, y el
+    // paso `telefonoConPais` (motor.js) elige el país en el selector por su "+NN" y escribe
+    // el número SIN el prefijo. Va DESPUÉS de "Phone Number" (antes el campo no se ve) y
+    // antes de los re-marcados finales, que no lo deshacen (medido en el formulario real).
+    // Sin un número reconocible NO se añade el paso: no se inventa un país ni un número, y
+    // el aviso `manual` le dice al usuario que lo escriba él.
+    var tel = (typeof window.TELEFONO_DE_URLS === "function") ? window.TELEFONO_DE_URLS(ctx.urls || []) : null;
+    if (tel) {
+      pasos.push({ tipo: "telefonoConPais", name: "ip_whatsapp_number", codigo: tel.codigo, numero: tel.numero,
+                   pais: tel.pais + "|" + tel.pais_en, valor: "+" + tel.codigo + " " + tel.numero });
+    }
     pasos.push({ tipo: "fillName", name: "describe_how", valor: ctx.justif });
     pasos.push({ tipo: "fillName", name: "signature", valor: marca });
     // re-marcar los radios al final (React los revierte al rellenar lo demás)
@@ -999,9 +1069,9 @@
     fb_difam:     { red: "Facebook",  nombre: "Difamación",        cat: "difam", url: "https://www.facebook.com/help/contact/430253071144967", manual: "Selecciona cuántas URL y pega cada enlace con su motivo. Revisa antes de enviar.", construirPlan: planDifam },
     ig_difam:     { red: "Instagram", nombre: "Difamación",        cat: "difam", url: "https://help.instagram.com/contact/653100351788502",        manual: "Selecciona cuántas URL y pega cada enlace con su motivo. Revisa antes de enviar.", construirPlan: planDifam },
     // ================= WhatsApp (formulario único) =================
-    wa_copy:  { red: "WhatsApp", nombre: "Derechos de autor", cat: "autor", url: WA_URL, tipoTexto: "Copyright",  relName: "relationship_copyright",              esCopy: true,  manual: "Escribe el N.º de teléfono de la cuenta a denunciar (obligatorio). Revisa antes de enviar.", construirPlan: planWhatsApp },
-    wa_marca: { red: "WhatsApp", nombre: "Marca comercial",  cat: "marca", url: WA_URL, tipoTexto: "Trademark",   relName: "relationship_trademark_counterfeit", esCopy: false, manual: "Escribe el N.º de teléfono de la cuenta a denunciar (obligatorio). Revisa antes de enviar.", construirPlan: planWhatsApp },
-    wa_fals:  { red: "WhatsApp", nombre: "Falsificación",    cat: "fals",  url: WA_URL, tipoTexto: "Counterfeit", relName: "relationship_trademark_counterfeit", esCopy: false, manual: "Escribe el N.º de teléfono de la cuenta a denunciar (obligatorio). Revisa antes de enviar.", construirPlan: planWhatsApp },
+    wa_copy:  { red: "WhatsApp", nombre: "Derechos de autor", cat: "autor", url: WA_URL, tipoTexto: "Copyright",  relName: "relationship_copyright",              esCopy: true,  manual: "El N.º de teléfono (país + número) se rellena solo si pegaste el número a denunciar en «URL(s) a denunciar» (https://wa.me/51987654321, api.whatsapp.com/send?phone=… o +51 987 654 321). Si no, escríbelo a mano (obligatorio). Revisa antes de enviar.", construirPlan: planWhatsApp },
+    wa_marca: { red: "WhatsApp", nombre: "Marca comercial",  cat: "marca", url: WA_URL, tipoTexto: "Trademark",   relName: "relationship_trademark_counterfeit", esCopy: false, manual: "El N.º de teléfono (país + número) se rellena solo si pegaste el número a denunciar en «URL(s) a denunciar» (https://wa.me/51987654321, api.whatsapp.com/send?phone=… o +51 987 654 321). Si no, escríbelo a mano (obligatorio). Revisa antes de enviar.", construirPlan: planWhatsApp },
+    wa_fals:  { red: "WhatsApp", nombre: "Falsificación",    cat: "fals",  url: WA_URL, tipoTexto: "Counterfeit", relName: "relationship_trademark_counterfeit", esCopy: false, manual: "El N.º de teléfono (país + número) se rellena solo si pegaste el número a denunciar en «URL(s) a denunciar» (https://wa.me/51987654321, api.whatsapp.com/send?phone=… o +51 987 654 321). Si no, escríbelo a mano (obligatorio). Revisa antes de enviar.", construirPlan: planWhatsApp },
     // ================= X (Twitter) =================
     // OJO: X usa nombres dinamicos (suf:true => coincidencia por sufijo). Los
     // formularios estan tras Cloudflare/SPA; PROBAR en el navegador real.
@@ -1165,11 +1235,15 @@
         // Quien FIRMA es la persona del correo, no la marca (mismo criterio que Cloudflare
         // y que la suplantación de Meta): X pide "Tu nombre completo" y debajo "Tu empresa".
         var persona = personaDeCorreo(d.correo).completo;
-        var postal = postalDe(d.pais);
+        // `@postal-code` es un CÓDIGO: si la marca guardó una dirección, se saca el código
+        // de dentro o se usa el del país (ver codigoPostalDeMarca). La dirección va aparte.
+        var postal = codigoPostalDeMarca(d);
+        var direccion = direccionPostalDeMarca(d);
         var avisos = [];
         if (!persona) avisos.push("No sé con qué <b>nombre de persona</b> rellenar «Tu nombre completo»: " +
           "el correo «" + textoSeguro(d.correo || "") + "» no está en la lista de personas. Escríbelo a mano o añádelo en <b>⚙ Marcas</b>.");
-        if (!postal) avisos.push("No tengo <b>código postal</b> para «" + textoSeguro(d.pais || "") + "»: escríbelo a mano.");
+        if (!postal) avisos.push("No tengo <b>código postal</b> para «" + textoSeguro(marca || "") + "» (" + textoSeguro(d.pais || "") + "): " +
+          "escríbelo a mano o guárdalo en <b>⚙ Marcas</b> → «📮 Código / dirección postal».");
         avisos.push("«¿Trabajas directamente para la empresa…?» se deja SIN marcar a propósito " +
           "(somos representantes autorizados, no empleados). <b>Elígela tú</b> antes de enviar.");
         // Los `name` de X llevan un PREFIJO DINÁMICO que cambia en cada carga
@@ -1196,9 +1270,10 @@
           { tipo: "fillName", suf: true, name: "@your-company", valor: marca },
           // Cargo: lo que somos de verdad. No se pone un cargo dentro de la marca.
           { tipo: "fillName", suf: true, name: "@job-title", valor: "Representante de protección de marca" },
-          // Dirección: el país de la marca, igual que en TikTok y en los demás formularios
-          // (no guardamos la dirección postal completa de cada marca).
-          { tipo: "fillName", suf: true, name: "@address", valor: d.pais },
+          // Dirección: la dirección postal de la marca si se guardó una en ⚙ Marcas
+          // («📮 Código / dirección postal»); si no hay (vacío o solo un código), el país,
+          // como hasta ahora e igual que en TikTok.
+          { tipo: "fillName", suf: true, name: "@address", valor: direccion || d.pais },
           { tipo: "fillName", suf: true, name: "@postal-code", valor: postal },
           { tipo: "fillName", suf: true, name: "@website", valor: d.sitio || "" },
           { tipo: "fillName", suf: true, name: "@userDesc", valor: ctx.justif },
@@ -1258,7 +1333,9 @@
           { tipo: "fillName", suf: true, name: "Form_Email__c", valor: d.correo },
           { tipo: "fillName", suf: true, name: "DescriptionText", valor: ctx.justif },
           { tipo: "fillName", suf: true, name: "Content_Owner_Name__c", valor: marca },
-          { tipo: "fillName", suf: true, name: "trademark-holder-address", valor: d.pais },
+          // «Dirección del propietario»: la dirección postal guardada en ⚙ Marcas si la hay
+          // (un código suelto no es una dirección); si no, el país, como antes.
+          { tipo: "fillName", suf: true, name: "trademark-holder-address", valor: direccionPostalDeMarca(d) || d.pais },
           // «Sitio web del propietario de la marca»: el SITIO de la marca, no su perfil de X.
           // Antes iba `d.x || d.sitio`, o sea que con perfil de X guardado se escribía
           // «https://x.com/…» en la casilla del sitio web. Ahora el @ de X tiene su propio
@@ -1316,7 +1393,9 @@
           // El teléfono va ANTES que la dirección: así ese campo nunca queda vacío y el paso de
           // dirección (valor=país) no se "derrama" sobre el campo del teléfono al repetirse.
           { tipo: "fillLabel", label: "tu numero de telefono|numero de telefono|phone number|telephone number|tu telefono", valor: d.telefono },
-          { tipo: "fillLabel", label: "tu direccion fisica|direccion fisica|physical address", valor: d.pais },
+          // Dirección física: la dirección postal de la marca si se guardó una en ⚙ Marcas
+          // («📮 Código / dirección postal»); si no (vacío o solo un código), el país, como antes.
+          { tipo: "fillLabel", label: "tu direccion fisica|direccion fisica|physical address", valor: direccionPostalDeMarca(d) || d.pais },
           { tipo: "fillLabel", label: "tu direccion de correo electronico|direccion de correo|your email address|email address", valor: d.correo },
           // La extensión MARCA por texto visible (TikTok ya no usa 'name'): "Tipo de obra"
           // = Logotipo (al marcarlo aparece la Descripción) y "Origen de la obra con copyright"
@@ -1413,7 +1492,9 @@
           // El teléfono va ANTES que la dirección (mismo motivo que en tk_copy): evita que el
           // país se derrame sobre el campo del teléfono al repetirse el autorrelleno.
           { tipo: "fillLabel", label: "tu numero de telefono|numero de telefono|phone number|telephone number|tu telefono", valor: d.telefono },
-          { tipo: "fillLabel", label: "tu direccion fisica|direccion fisica|physical address", valor: d.pais },
+          // Dirección física: la dirección postal de la marca si se guardó una en ⚙ Marcas
+          // («📮 Código / dirección postal»); si no (vacío o solo un código), el país, como antes.
+          { tipo: "fillLabel", label: "tu direccion fisica|direccion fisica|physical address", valor: direccionPostalDeMarca(d) || d.pais },
           { tipo: "fillLabel", label: "tu direccion de correo electronico|direccion de correo electronico|direccion de correo|your email address|email address", valor: d.correo },
           // "Jurisdicción del registro" y "Número de registro" son DOS campos distintos que
           // comparten la palabra "registro": cada uno se ancla con su rótulo COMPLETO, nunca

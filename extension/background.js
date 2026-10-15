@@ -2417,3 +2417,28 @@ chrome.runtime.onInstalled.addListener(() => {
   pintarAvisoDelIcono();
   comprobarActualizacion("instalacion/actualizacion");
 });
+
+// ============================================================================
+//  PANEL LATERAL en vez de popup (el popup se cerraba al cambiar de pestaña)
+//  El popup de Chrome se cierra SOLO en cuanto el usuario va a otra pestaña (a
+//  verificar el correo, a copiar un enlace…) y con él se perdía lo que estaba
+//  escribiendo. El panel lateral (chrome.sidePanel) se queda abierto al cambiar de
+//  pestaña. Es el MISMO popup.html (manifest: side_panel.default_path).
+//  Para que el clic en el icono abra el panel hay que quitar el popup: si no, el
+//  popup gana. El manifest SIGUE declarando action.default_popup como respaldo: en
+//  un navegador sin chrome.sidePanel no se toca nada y el icono abre el popup de
+//  siempre. setPopup no sobrevive a un reinicio del navegador, por eso se repite al
+//  instalar, al arrancar y cada vez que despierta el service worker.
+// ============================================================================
+function usarPanelLateral() {
+  if (!chrome.sidePanel || typeof chrome.sidePanel.setPanelBehavior !== "function") return; // sin panel: sigue el popup
+  try {
+    chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })
+      .then(() => chrome.action.setPopup({ popup: "" }))
+      // Si el panel no se dejó configurar, el popup se QUEDA: mejor el popup que un icono mudo.
+      .catch(() => {});
+  } catch (e) { /* navegador sin panel lateral utilizable: sigue el popup */ }
+}
+chrome.runtime.onInstalled.addListener(usarPanelLateral);
+chrome.runtime.onStartup.addListener(usarPanelLateral);
+usarPanelLateral();

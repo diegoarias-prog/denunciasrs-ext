@@ -6,6 +6,12 @@
   /* El popup tiene que caber de un vistazo: espaciado apretado a propósito, pero
      sin bajar de 12px en los controles para que se siga leyendo bien. */
   body { font-family: "Segoe UI", Arial, sans-serif; width: 320px; margin: 0; padding: 12px 14px; color: #1f2937; }
+  /* PANEL LATERAL (chrome.sidePanel): el mismo popup.html, pero el ancho lo pone Chrome y
+     el usuario lo puede arrastrar. El cuerpo se estira con el panel en vez de quedarse en
+     320px (hueco a la derecha) o salirse por el lado (panel estrecho). La clase la pone
+     popup.js. Los select pasan a border-box para que su relleno no los saque del borde. */
+  html.vista_panel_lateral body { width: auto; min-width: 240px; }
+  html.vista_panel_lateral select { box-sizing: border-box; }
   h1 { font-size: 14px; margin: 0 0 5px; }
   label { display: block; font-size: 12px; font-weight: 600; margin: 5px 0 2px; }
   select { width: 100%; padding: 5px 6px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px; background: #fff; }
@@ -311,6 +317,7 @@
   <script src="datos/justificaciones.js"></script>
   <script src="datos/politicas_generales.js"></script>
   <script src="datos/correos_denuncia.js"></script>
+  <script src="datos/prefijos_telefonicos.js"></script>
   <script src="datos/formularios.js"></script>
   <script src="motor.js"></script>
   <script src="popup.js"></script>
