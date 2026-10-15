@@ -92,6 +92,10 @@ const SECCIONES_DE_MARCA = [
   { titulo: "📇 Contacto", campos: [
     { clave: "pais",      etiqueta: "🌎 País",          placeholder: "Ej. Guatemala" },
     { clave: "telefono",  etiqueta: "☎️ Teléfono",       placeholder: "Sin código de país" },
+    // Un solo espacio para el código postal O la dirección completa: formularios.js
+    // decide qué hacer con cada cosa (postalDeMarca / codigoPostalDeMarca). Vacío = el
+    // código postal del país, como antes.
+    { clave: "postal",    etiqueta: "📮 Código / dirección postal", placeholder: "Ej. 01001 o 5a Avenida 5-55 zona 14, Guatemala" },
   ]},
   { titulo: "✉️ Correos del remitente", campos: [
     { clave: "correos",   etiqueta: "✉️ Correos desde los que se denuncia", tipo: "lista_de_correos" },
