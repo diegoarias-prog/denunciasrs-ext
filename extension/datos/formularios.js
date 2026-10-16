@@ -85,6 +85,57 @@ if (typeof importScripts === "function" && typeof window.TELEFONO_DE_URLS !== "f
     return usuario;
   }
 
+  // ==========================================================================
+  //  @USUARIO DE X A PARTIR DE SU URL
+  //  «Contenido privado» pide el nombre de usuario de la cuenta denunciada (con @), no
+  //  el enlace. Se saca del primer tramo de la ruta de cualquier enlace de X/Twitter
+  //  (perfil, publicación, /photo/1, con ?s=20&t=..., #, barra final, mobile./www.) y
+  //  se admite también "@Usuario" o "Usuario" sueltos. Devuelve "@Usuario", o "" si no
+  //  hay un usuario que sacar —dominio que no es de X ("fakex.com", "x.com.evil.com"),
+  //  rutas de la propia red (/i/web/status/..., /home, /search...) o más de 15
+  //  caracteres— para que quien llama OMITA el paso en vez de escribir un dato falso.
+  // ==========================================================================
+  var RUTAS_DE_X_QUE_NO_SON_PERFIL = /^(i|home|search|explore|hashtag|settings|messages|notifications|intent|share|compose|login|logout|signup|tos|privacy|about|help|account|download|jobs|lists|bookmarks|communities|premium|verified|rules|status|oauth|en|es|pt|fr|de|it|ja|ko|ar|ru|tr|nl)$/i;
+  function usuarioDeX(url) {
+    var u = String(url || "").trim();
+    if (!u) return "";
+    var usuario = "";
+    var suelto = u.match(/^@?([A-Za-z0-9_]{1,15})$/);
+    if (suelto) {
+      usuario = suelto[1];
+    } else {
+      // Anclado al principio y con el dominio EXACTO: tras ".com" solo puede venir el
+      // puerto, la ruta, la consulta, el ancla o el final (así "x.com.evil.com" y
+      // "x.com@evil.com" no pasan, y "fakex.com" tampoco por el ancla del principio).
+      var m = u.match(/^(?:https?:\/\/)?(?:(?:www|mobile|m)\.)?(?:x|twitter)\.com(?::\d+)?(\/[^?#]*)?(\?[^#]*)?(#.*)?$/i);
+      if (!m) return "";
+      var ruta = m[1] || "";
+      // Enlaces antiguos de Twitter: twitter.com/#!/usuario
+      if (!/[^\/]/.test(ruta) && /^#!\//.test(m[3] || "")) ruta = m[3].slice(2);
+      var tramo = (ruta.split("/").filter(Boolean)[0] || "").replace(/^@/, "");
+      if (!/^[A-Za-z0-9_]{1,15}$/.test(tramo)) return "";
+      usuario = tramo;
+    }
+    if (RUTAS_DE_X_QUE_NO_SON_PERFIL.test(usuario)) return "";
+    return "@" + usuario;
+  }
+
+  // Primer @usuario válido de las URLs a denunciar (en su orden); "" si ninguna lo trae.
+  function usuarioDeXEnUrls(urls) {
+    var lista = urls || [];
+    for (var i = 0; i < lista.length; i++) {
+      var usuario = usuarioDeX(lista[i]);
+      if (usuario) return usuario;
+    }
+    return "";
+  }
+
+  function avisoSinUsuarioDeX() {
+    return "No pude sacar el <b>@usuario</b> de la cuenta a denunciar de ninguna URL cargada " +
+      "(hace falta un enlace de X del tipo x.com/usuario/status/…): escríbelo tú en «<b>Nombre de usuario " +
+      "de la cuenta que quieres denunciar</b>».";
+  }
+
   // Navegador y sistema, para los formularios que preguntan el "User agent" (Cloudflare
   // lo pide para saber dónde se vio el abuso). Se lee del navegador REAL, no se inventa.
   function navegadorYSistema() {
@@ -1114,10 +1165,14 @@ if (typeof importScripts === "function" && typeof window.TELEFONO_DE_URLS !== "f
     x_privado: {
       red: "X", nombre: "Contenido privado", cat: "x_privado",
       url: "https://help.x.com/es/forms/safety-and-sensitive-content/violent-threats",
-      manual: "Con UN clic basta: la extensión elige sola «Se publica información privada» y «El contenido que estoy denunciando está dirigido a: Otra persona» —que es lo que hace aparecer el resto del formulario— y después rellena tu correo, la descripción, la firma y las casillas. Completa TÚ la @cuenta y los enlaces a denunciar (X no los deduce de la marca) y resuelve el captcha antes de Enviar.",
+      manual: "Con UN clic basta: la extensión elige sola «Se publica información privada» y «El contenido que estoy denunciando está dirigido a: Otra persona» —que es lo que hace aparecer el resto del formulario— y después rellena tu correo, la descripción, la firma y las casillas. La @cuenta a denunciar (con su @) se saca sola de la URL que cargaste (p. ej. x.com/Usuario/status/… → @Usuario) y va con el primer enlace; solo si ninguna URL trae un usuario te avisa y la escribes TÚ. Resuelve el captcha antes de Enviar.",
       construirPlan: function (ctx) {
         var d = ctx.datos, marca = ctx.marca;
-        return { url: this.url, manual: this.manual, pasos: [
+        // «Nombre de usuario de la cuenta que quieres denunciar»: el @ sale de la URL a
+        // denunciar (ver usuarioDeX). Sin usuario, el paso se omite y se avisa.
+        var usuarioDenunciado = usuarioDeXEnUrls(ctx.urls);
+        var avisos = usuarioDenunciado ? [] : [avisoSinUsuarioDeX()];
+        return { url: this.url, manual: this.manual, avisos: avisos, pasos: [
           // Mismos DOS menús que en x_acoso (es el MISMO formulario: lo que cambia es la
           // opción del primero). Sin responderlos, la página no tiene ni un campo: ver
           // el aviso largo en x_acoso y `elegirEnMenuPorRotulo` en motor.js.
@@ -1150,6 +1205,10 @@ if (typeof importScripts === "function" && typeof window.TELEFONO_DE_URLS !== "f
           { tipo: "fillName", name: "DescriptionText", valor: ctx.justif },
           { tipo: "fillName", name: "signature", valor: marca },
           { tipo: "fillName", name: "reported-content[0].value", valor: ((ctx.urls || [])[0] || "") },
+          // Con «@» delante, como pide el placeholder. `suf` por robustez: hoy este `name`
+          // va sin prefijo, pero en otros formularios de X el prefijo cambia en cada carga.
+          // Valor vacío (ninguna URL trae usuario) -> el motor omite el paso.
+          { tipo: "fillName", suf: true, name: "Reported_Screen_Name__c", valor: usuarioDenunciado },
           { tipo: "check", name: "Communicate_Reported_Content__c" },
           { tipo: "check", name: "i-am-authorized" },
           { tipo: "check", name: "information-is-accurate" },
@@ -1177,13 +1236,17 @@ if (typeof importScripts === "function" && typeof window.TELEFONO_DE_URLS !== "f
     x_privado_rep: {
       red: "X", nombre: "Contenido privado (representante)", cat: "x_privado",
       url: "https://help.x.com/es/forms/safety-and-sensitive-content/private-information/auth-to-rep",
-      manual: "Esta dirección de X ya viene con «Se publica información privada» y «La información pertenece a: A alguien a quien estoy autorizado a representar» puestos, y la extensión los respeta. Rellena tu relación con la marca, el correo, la firma, la descripción, el primer enlace a denunciar y las casillas. Completa TÚ la @cuenta a denunciar (X pide el @, no el enlace) y resuelve el captcha antes de enviar.",
+      manual: "Esta dirección de X ya viene con «Se publica información privada» y «La información pertenece a: A alguien a quien estoy autorizado a representar» puestos, y la extensión los respeta. Rellena tu relación con la marca, el correo, la firma, la descripción, el primer enlace a denunciar y las casillas. La @cuenta a denunciar (X pide el @, no el enlace) se saca sola de la URL que cargaste (p. ej. x.com/Usuario/status/… → @Usuario); solo si ninguna URL trae un usuario te avisa y la escribes TÚ. Resuelve el captcha antes de enviar.",
       construirPlan: function (ctx) {
         var d = ctx.datos, marca = ctx.marca;
         // Volcado real: Comprobantes/diag_x_privado_rep.json (2026-09-09). AQUÍ los `name`
         // NO llevan el prefijo dinámico que sí llevan Suplantación y Falsificación, así que
         // van por `name` tal cual (comprobado en el volcado, no supuesto).
-        return { url: this.url, manual: this.manual, pasos: [
+        // «Nombre de usuario de la cuenta que quieres denunciar»: el @ sale de la URL a
+        // denunciar (ver usuarioDeX). Sin usuario, el paso se omite y se avisa.
+        var usuarioDenunciado = usuarioDeXEnUrls(ctx.urls);
+        var avisos = usuarioDenunciado ? [] : [avisoSinUsuarioDeX()];
+        return { url: this.url, manual: this.manual, avisos: avisos, pasos: [
           // Los dos menús ya vienen puestos por la URL; el paso lo comprueba y NO los toca
           // (no dispara `change`, que en X repinta la sección y borraría lo escrito). Va
           // igualmente por si algún día X deja de preseleccionarlos.
@@ -1202,6 +1265,10 @@ if (typeof importScripts === "function" && typeof window.TELEFONO_DE_URLS !== "f
           // «Ejemplo 1»: la primera URL a denunciar (X añade las demás con «Añade otro
           // enlace», que aquí no se pulsa). Si no hay URLs cargadas, el paso se omite solo.
           { tipo: "fillName", name: "reported-content[0].value", valor: ((ctx.urls || [])[0] || "") },
+          // Con «@» delante, como pide el placeholder. `suf` por robustez: hoy este `name`
+          // va sin prefijo, pero en otros formularios de X el prefijo cambia en cada carga.
+          // Valor vacío (ninguna URL trae usuario) -> el motor omite el paso.
+          { tipo: "fillName", suf: true, name: "Reported_Screen_Name__c", valor: usuarioDenunciado },
           { tipo: "check", name: "Communicate_Reported_Content__c" },
           { tipo: "check", name: "i-am-authorized" },
           { tipo: "check", name: "information-is-accurate" },
