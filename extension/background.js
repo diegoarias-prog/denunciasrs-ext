@@ -2355,6 +2355,21 @@ async function versionEnDisco() {
   } catch (e) { return ""; }
 }
 
+// ¿Hay un panel lateral o un popup de la extensión abierto? (chrome.runtime.getContexts,
+// Chrome 116+). Si la API no existe o falla, se va a lo seguro: si la petición vino del
+// propio popup/panel ("popup") o de cerrar una vista, NO se recarga; si vino de la
+// alarma o del arranque, se recarga como siempre.
+async function hayVistaDenunciasAbierta(motivo) {
+  try {
+    if (chrome.runtime.getContexts) {
+      const vistas = await chrome.runtime.getContexts({ contextTypes: ["SIDE_PANEL", "POPUP"] });
+      return !!(vistas && vistas.length);
+    }
+  } catch (e) { /* tipo de contexto desconocido en este navegador: se usa el respaldo */ }
+  // Al cerrarse una vista tampoco se recarga: sin la API no se sabe si queda otra abierta.
+  return motivo === "popup" || motivo === "vista cerrada";
+}
+
 async function comprobarActualizacion(motivo) {
   const propia = chrome.runtime.getManifest().version;
   let publicada = "";
@@ -2380,6 +2395,15 @@ async function comprobarActualizacion(motivo) {
 
   if (!hayNueva && !listaEnDisco) return;
   if (ocupadaRellenando()) return; // se aplicará en la siguiente ronda
+  // Con el panel lateral (o el popup) ABIERTO no se recarga: la recarga lo cierra/vacía
+  // y el usuario pierde lo que estaba escribiendo. Se aplaza SIN gastar los reintentos
+  // y se aplica en cuanto se cierre la vista (ver "vista_denuncias" más abajo).
+  if (await hayVistaDenunciasAbierta(motivo)) {
+    const est = (await chrome.storage.local.get("estado_version")).estado_version || {};
+    est.aplazadaPorVista = true;
+    await chrome.storage.local.set({ estado_version: est });
+    return;
+  }
 
   // Con la versión nueva YA en el disco, recargar la aplica al instante.
   // Si aún no está (el .bat no ha corrido), se prueba igualmente una vez por hora:
@@ -2417,6 +2441,23 @@ chrome.runtime.onInstalled.addListener(() => {
   pintarAvisoDelIcono();
   comprobarActualizacion("instalacion/actualizacion");
 });
+// El popup/panel abre un puerto "vista_denuncias" mientras está abierto. Al cerrarse,
+// se aplica la actualización que se aplazó por tenerlo abierto (comprobarActualizacion
+// vuelve a mirar getContexts, por si queda otra vista abierta). Se espera un instante
+// para que Chrome termine de quitar la vista cerrada de su lista de contextos.
+if (chrome.runtime.onConnect) {
+  chrome.runtime.onConnect.addListener((puerto) => {
+    if (!puerto || puerto.name !== "vista_denuncias") return;
+    // Solo cuentan las vistas PROPIAS (popup.html como popup o panel), nunca un content
+    // script de una página ni otra extensión.
+    const remitente = puerto.sender || {};
+    if (remitente.id !== chrome.runtime.id || remitente.tab ||
+        !String(remitente.url || "").startsWith(chrome.runtime.getURL("popup.html"))) return;
+    puerto.onDisconnect.addListener(() => {
+      setTimeout(() => comprobarActualizacion("vista cerrada"), 1000);
+    });
+  });
+}
 
 // ============================================================================
 //  PANEL LATERAL en vez de popup (el popup se cerraba al cambiar de pestaña)
