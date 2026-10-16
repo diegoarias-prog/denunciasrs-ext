@@ -200,20 +200,20 @@ function llenar_selects_de_temas(arr, temas) {
   sel.innerHTML = html_sel;
   if (sel.value !== sel_prev) sel.value = ""; // el tema previo ya no existe → modo nuevo
 
-  // Select de filtro: "Todos los temas" (value="") + temas + "Sin tema" si aplica.
+  // Select de filtro: "Todas las marcas" (value="") + temas + "Sin tema" si aplica.
   const fil = $("filtro_tema");
   const fil_prev = fil.value;
-  let html_fil = opcion("", "Todos los temas", fil_prev === "");
+  let html_fil = opcion("", "Todas las marcas", fil_prev === "");
   temas.forEach((t) => { html_fil += opcion(t, t, fil_prev === t); });
   if (hay_sin_tema) html_fil += opcion(SIN_TEMA, SIN_TEMA, fil_prev === SIN_TEMA);
   fil.innerHTML = html_fil;
-  // Si el tema filtrado ya no existe, vuelve a "Todos los temas".
+  // Si el tema filtrado ya no existe, vuelve a "Todas las marcas".
   if (fil.value !== fil_prev) fil.value = "";
 }
 
-// Temas cuyo acordeón está desplegado (se preserva entre re-pintados).
-const temas_expandidos = new Set();
-
+// Lista PLANA: todas las plantillas a la vista, ordenadas por marca (tema) y
+// luego por nombre, con "Sin tema" al final. Cada una lleva una insignia con
+// su marca. El filtro de arriba solo reduce esta lista; no hay nada plegado.
 async function pintar() {
   const arr = await leer();
   const marcas = await obtener_marcas();
@@ -223,55 +223,52 @@ async function pintar() {
   // sincroniza la visibilidad de la caja de texto de tema nuevo.
   actualizar_visibilidad_tema_nuevo();
   const lista = $("lista");
-  if (!arr.length) { lista.innerHTML = '<p class="vacio">Aún no hay plantillas guardadas.</p>'; return; }
+  const contador = $("contador_plantillas");
+  if (!arr.length) {
+    contador.textContent = "";
+    lista.innerHTML = '<p class="vacio">Aún no hay plantillas guardadas.</p>';
+    return;
+  }
 
-  const filtro = $("filtro_tema").value; // "" = todos; SIN_TEMA = sin tema; otro = ese tema
+  const filtro = $("filtro_tema").value; // "" = todas; SIN_TEMA = sin tema; otro = esa marca
 
-  // Agrupar por tema conservando SIEMPRE el índice real dentro de arr (idx),
-  // que es el que se usa en los data-attributes para copiar/editar/eliminar.
-  const grupos = new Map();
+  // Conserva SIEMPRE el índice real dentro de arr (idx), que es el que se usa
+  // en los data-attributes para copiar/editar/eliminar.
+  const visibles = [];
   arr.forEach((p, idx) => {
     const tema = (p.tema && String(p.tema).trim()) ? String(p.tema).trim() : SIN_TEMA;
-    if (filtro && tema !== filtro) return; // aplica filtro por tema
-    if (!grupos.has(tema)) grupos.set(tema, []);
-    grupos.get(tema).push({ p, idx });
+    if (filtro && tema !== filtro) return;
+    visibles.push({ p, idx, tema });
   });
 
-  if (!grupos.size) { lista.innerHTML = '<p class="vacio">No hay plantillas para el tema seleccionado.</p>'; return; }
+  contador.textContent = filtro
+    ? "Mostrando " + visibles.length + " de " + arr.length + " plantillas"
+    : arr.length + (arr.length === 1 ? " plantilla" : " plantillas");
 
-  // Orden de grupos alfabético, dejando "Sin tema" al final.
-  const temas_ordenados = [...grupos.keys()].sort((a, b) => {
-    if (a === SIN_TEMA) return 1;
-    if (b === SIN_TEMA) return -1;
-    return a.localeCompare(b, "es");
+  if (!visibles.length) { lista.innerHTML = '<p class="vacio">No hay plantillas para la marca seleccionada.</p>'; return; }
+
+  visibles.sort((x, y) => {
+    if (x.tema !== y.tema) {
+      if (x.tema === SIN_TEMA) return 1;
+      if (y.tema === SIN_TEMA) return -1;
+      return x.tema.localeCompare(y.tema, "es");
+    }
+    return String(x.p.nombre || "").localeCompare(String(y.p.nombre || ""), "es");
   });
 
-  // Acordeón: encabezado clicable por tema + cuerpo colapsable. Se expande si
-  // está en el Set de expandidos o si el filtro apunta a ese tema concreto.
   let html = "";
-  temas_ordenados.forEach((tema) => {
-    const items = grupos.get(tema);
-    const abierto = temas_expandidos.has(tema) || (filtro && tema === filtro);
-    const flecha = abierto ? "▾" : "▸";
+  visibles.forEach(({ p, idx, tema }) => {
+    const chip = p.etiqueta ? '<span class="chip_etiqueta">' + esc(p.etiqueta) + "</span>" : "";
+    const clase_insignia = "insignia_marca_plantilla" + (tema === SIN_TEMA ? " sin_marca_plantilla" : "");
     html +=
-      '<button type="button" class="grupo_tema" data-toggle-tema="' + esc(tema) + '">' +
-      '<span class="flecha">' + flecha + "</span>" +
-      "<span>" + esc(tema) + "</span>" +
-      '<span class="conteo">(' + items.length + ")</span></button>";
-
-    let cuerpo = "";
-    items.forEach(({ p, idx }) => {
-      const chip = p.etiqueta ? '<span class="chip_etiqueta">' + esc(p.etiqueta) + "</span>" : "";
-      cuerpo +=
-        '<div class="item">' +
-        '<div class="tit">' + esc(p.nombre || "(sin nombre)") + chip + "</div>" +
-        '<div class="txt">' + plantilla_a_html(p) + "</div>" +
-        '<div class="acc"><button class="boton mini" data-copiar="' + idx + '">Copiar</button>' +
-        '<button class="boton mini sec" data-editar="' + idx + '">Editar</button>' +
-        '<button class="boton del mini" data-eliminar="' + idx + '">Eliminar</button></div>' +
-        "</div>";
-    });
-    html += '<div class="grupo_cuerpo"' + (abierto ? "" : ' style="display:none;"') + ">" + cuerpo + "</div>";
+      '<div class="item" data-marca-plantilla="' + esc(tema) + '">' +
+      '<div class="tit"><span class="nombre_plantilla_lista">' + esc(p.nombre || "(sin nombre)") + "</span>" +
+      '<span class="' + clase_insignia + '" title="Marca de la plantilla">' + esc(tema) + "</span>" + chip + "</div>" +
+      '<div class="txt">' + plantilla_a_html(p) + "</div>" +
+      '<div class="acc"><button class="boton mini" data-copiar="' + idx + '">Copiar</button>' +
+      '<button class="boton mini sec" data-editar="' + idx + '">Editar</button>' +
+      '<button class="boton del mini" data-eliminar="' + idx + '">Eliminar</button></div>' +
+      "</div>";
   });
   lista.innerHTML = html;
 }
@@ -324,15 +321,6 @@ $("limpiar").addEventListener("click", () => {
 $("filtro_tema").addEventListener("change", pintar);
 
 $("lista").addEventListener("click", async (e) => {
-  // Toggle del acordeón: el clic puede caer en un <span> hijo del encabezado.
-  const cab = e.target.closest("[data-toggle-tema]");
-  if (cab) {
-    const tema = cab.getAttribute("data-toggle-tema");
-    if (temas_expandidos.has(tema)) temas_expandidos.delete(tema);
-    else temas_expandidos.add(tema);
-    pintar();
-    return;
-  }
   const arr = await leer();
   const c = e.target.getAttribute("data-copiar");
   const ed = e.target.getAttribute("data-editar");

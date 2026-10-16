@@ -937,7 +937,11 @@ function pintar_version(est) {
   if (!e) return;
   const propia = chrome.runtime.getManifest().version;
   if (!est || !est.publicada) { e.textContent = "v" + propia; e.title = "Versión instalada en este navegador"; return; }
-  if (est.hayNueva) {
+  if (est.hayNueva && est.aplazadaPorVista) {
+    e.textContent = "v" + propia + " → v" + est.publicada + " (se aplica al cerrar el panel)";
+    e.title = "Hay una versión más nueva publicada. Para no borrar lo que estás escribiendo, " +
+      "la extensión se actualiza sola en cuanto cierres este panel.";
+  } else if (est.hayNueva) {
     e.textContent = "v" + propia + " → v" + est.publicada + " (actualizando…)";
     e.title = "Hay una versión más nueva publicada. La extensión se actualiza sola: " +
       "se aplica en cuanto el actualizador la deje en la carpeta (como mucho, al reiniciar el navegador).";
@@ -947,6 +951,19 @@ function pintar_version(est) {
   }
 }
 chrome.storage.local.get("estado_version", (g) => pintar_version(g.estado_version)); // lo último que se sepa
+// Puerto abierto mientras esta vista (popup o panel lateral) siga abierta: al cerrarla,
+// background.js aplica la actualización que aplazó para no vaciar el panel. Si el
+// service worker se duerme y corta el puerto, se vuelve a abrir (eso lo despierta).
+function conectar_vista_denuncias() {
+  try {
+    const puerto = chrome.runtime.connect({ name: "vista_denuncias" });
+    puerto.onDisconnect.addListener(() => {
+      void chrome.runtime.lastError;
+      setTimeout(conectar_vista_denuncias, 1000);
+    });
+  } catch (e) { /* la extensión se recargó: esta vista ya no sirve */ }
+}
+conectar_vista_denuncias();
 try {
   chrome.runtime.sendMessage({ accion: "comprobarActualizacion" }, (est) => {
     if (chrome.runtime.lastError) return; // el service worker estaba dormido: queda lo pintado
