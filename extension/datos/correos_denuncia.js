@@ -58,6 +58,8 @@
   // ---- 1) Destinos fijos por red (clave = nombre de la red en minúsculas) ----
   var FIJOS_POR_RED = {
     "tiktok": ["copyright@tiktok.com", "ip-reports@tiktok.com", "ip_reports@tiktok.com"],
+    // WhatsApp: los tres buzones van en TODO correo a WhatsApp (pedido del usuario 2026-10-21).
+    "whatsapp": ["ip@whatsapp.com", "support@whatsapp.com", "bd@whatsapp.com"],
     // Cloudflare: abuso general, respuestas de abuso y abuso del registrador.
     "cloudflare": ["abuse@cloudflare.com", "abusereply@cloudflare.com", "registrar-abuse@cloudflare.com"]
   };
@@ -88,7 +90,7 @@
     "softonic.com":  { nombre: "Softonic",  correos: ["dmca.softonic@delevitagent.com"], nota: "DMCA / apps no oficiales que suplantan a la marca" },
     "facebook.com":  { nombre: "Facebook",  correos: ["ip@fb.com"], nota: "Propiedad intelectual" },
     "instagram.com": { nombre: "Instagram", correos: ["ip@instagram.com"], nota: "Propiedad intelectual" },
-    "whatsapp.com":  { nombre: "WhatsApp",  correos: ["ip@whatsapp.com"], nota: "Propiedad intelectual" },
+    "whatsapp.com":  { nombre: "WhatsApp",  correos: ["ip@whatsapp.com", "support@whatsapp.com", "bd@whatsapp.com"], nota: "Propiedad intelectual / hackeo / difamación (van los tres siempre)" },
     "studocu.com":   { nombre: "Studocu",   correos: ["privacy@studocu.com", "support@studocu.com"], nota: "Eliminación de información" },
     "scribd.com":    { nombre: "Scribd",    correos: ["copyright@scribd.com", "support@scribd.com"], nota: "Información confidencial / derechos de autor" },
     "cloudflare.com": { nombre: "Cloudflare", correos: ["abuse@cloudflare.com", "abusereply@cloudflare.com", "registrar-abuse@cloudflare.com"], nota: "Sitios fraudulentos / phishing alojados o registrados en Cloudflare (van los tres siempre)" },

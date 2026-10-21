@@ -750,6 +750,120 @@ if (typeof importScripts === "function" && typeof window.TELEFONO_DE_URLS !== "f
     ] };
   }
 
+  // ==========================================================================
+  //  WHATSAPP — HACKEO DE NÚMERO (correo y formulario, mismo texto)
+  //  Plantilla dada por el usuario (2026-10-21). Sus huecos se rellenan así:
+  //   [YOUR COMPANY NAME] -> la empresa del DOMINIO del correo elegido en «Denunciar
+  //                          desde» (EMPRESA_POR_DOMINIO); dominio desconocido -> la marca.
+  //   [CLIENT NAME]       -> la marca elegida.
+  //   [FAKE NUMBER]       -> lo pegado en «Enlaces a denunciar» (número o enlace wa.me).
+  //   [ORIGINAL NUMBER]   -> el teléfono de la marca en ⚙ Marcas con el código de su país.
+  //   [SIGNER'S NAME]     -> la persona del correo (personaDeCorreo).
+  //  Lo que no se sabe se deja MARCADO con [ ... ] para completarlo a mano: nunca se inventa.
+  // ==========================================================================
+  var EMPRESA_POR_DOMINIO = {
+    "seguridadmaxima.net":       { en: "Security Maximum in Computer Networks", es: "Seguridad Máxima en Redes Informáticas" },
+    "securesoft-antifraude.com": { en: "SecureSoft", es: "SecureSoft" },
+    "credix.com":                { en: "Credix", es: "Credix" }
+  };
+  var WA_TERMINOS = "https://www.whatsapp.com/legal/terms-of-service";
+
+  function empresaQueDenuncia(correo, marca, lang) {
+    var dom = String(correo || "").trim().toLowerCase().split("@")[1] || "";
+    var e = EMPRESA_POR_DOMINIO[dom];
+    return e ? (lang === "es" ? e.es : e.en) : marca;
+  }
+
+  // «Número falso»: cada dato pegado tal cual; si de él se saca un teléfono, se
+  // escribe como +código número (y si era un enlace, el enlace va detrás entre paréntesis).
+  function numeroFalsoDeUrls(ctx, lang) {
+    var u = (ctx && Array.isArray(ctx.urls)) ? ctx.urls.map(function (x) { return String(x || "").trim(); }).filter(Boolean) : [];
+    if (!u.length) return lang === "es" ? "[ Pega aquí el número o enlace de WhatsApp a denunciar ]" : "[ Paste here the WhatsApp number or link you are reporting ]";
+    return u.map(function (x) {
+      var t = (typeof window.TELEFONO_DE_TEXTO === "function") ? window.TELEFONO_DE_TEXTO(x) : null;
+      if (!t) return x;
+      var n = "+" + t.codigo + " " + t.numero;
+      return /^(https?:|wa\.me|api\.whatsapp)/i.test(x) ? n + " (" + x + ")" : n;
+    }).join(", ");
+  }
+
+  function numeroOriginalDeMarca(d, lang) {
+    var tel = String((d || {}).telefono || "").trim();
+    if (!tel) return lang === "es" ? "[ número original de la cuenta ]" : "[ original number of the account ]";
+    var cod = "";
+    try { cod = (window.JUSTIF && window.JUSTIF.CODIGO[window.JUSTIF.norm(d.pais || "")]) || ""; } catch (e) {}
+    return (cod ? cod + " " : "") + tel;
+  }
+
+  // Cuerpo de la denuncia de hackeo. conFirma=true (correo) añade saludo y firma;
+  // el formulario lleva solo el cuerpo, como pidió el usuario.
+  function textoHackeoWhatsApp(ctx, lang, conFirma) {
+    var marca = ctx.marca, d = ctx.datos || {};
+    var empresa = empresaQueDenuncia(d.correo, marca, lang);
+    var falso = numeroFalsoDeUrls(ctx, lang), original = numeroOriginalDeMarca(d, lang);
+    // Solo personas CONOCIDAS: deducir el nombre de un buzón genérico (protecciondemarca@)
+    // firmaría "Protecciondemarca". Sin persona, el hueco queda marcado.
+    var cLower = String(d.correo || "").trim().toLowerCase();
+    var persona = Object.prototype.hasOwnProperty.call(window.PERSONAS_POR_CORREO || {}, cLower) ? personaDeCorreo(cLower).completo : "";
+    var t;
+    if (lang === "es") {
+      t = (empresa === marca ? "Somos " + marca + "." : "Somos " + empresa + ", representantes de " + marca + ".") +
+        " Les escribimos para denunciar que el número de WhatsApp " + falso + " presuntamente se está usando para suplantar identidades y defraudar a los contactos de la empresa.\n\n" +
+        "Solicitamos que investiguen este asunto y tomen las medidas correspondientes para suspender la cuenta y evitar más actividad fraudulenta.\n\n" +
+        "Hechos:\n\n" +
+        "La cuenta de WhatsApp de " + marca + " fue hackeada por un tercero sin autorización.\n" +
+        "Posteriormente, el número " + falso + " se apoderó del número " + original + ", que pertenece a " + marca + ".\n" +
+        "Desde ese número se están enviando mensajes a los contactos de la empresa, suplantando a " + marca + ".\n" +
+        marca + " no tiene ninguna relación con ese número y no ha autorizado su uso.\n\n" +
+        "Políticas que infringe este número, según las Condiciones del servicio de WhatsApp (" + WA_TERMINOS + "):\n\n" +
+        "Sección «Uso legal y aceptable». Establece que los usuarios «deben acceder a nuestros Servicios y usarlos solo con fines legales, autorizados y aceptables», y prohíbe usarlos de formas que:\n" +
+        "«(d) suplanten a alguien», que es exactamente lo que hace este número al usar la identidad de " + marca + ";\n" +
+        "«(c) impliquen publicar falsedades, tergiversaciones o declaraciones engañosas», como los mensajes engañosos que se envían a los contactos de la empresa;\n" +
+        "«(b) sean ilegales…», ya que el fraude y la suplantación de identidad son delitos.\n" +
+        "Sección «Nuestras condiciones y políticas». Establece que, en caso de infracción, WhatsApp «puede tomar medidas con respecto a tu cuenta, incluida la inhabilitación o suspensión de tu cuenta».\n" +
+        "Sección «Protección, seguridad e integridad». Establece que WhatsApp tomará «las medidas adecuadas, incluida la eliminación de dichas personas o actividades o el contacto con las autoridades».\n\n" +
+        "Solicitamos:\n\n" +
+        "La inhabilitación permanente de la cuenta asociada al número " + falso + ".\n" +
+        "Asistencia a " + marca + " para recuperar el acceso a su cuenta original.\n" +
+        "La conservación de la información de esa cuenta, por si la solicitan las autoridades.\n\n" +
+        "Adjuntamos capturas de pantalla de los mensajes enviados desde ese número.";
+      return conFirma
+        ? "Estimado equipo de WhatsApp:\n\n" + t + "\n\nAtentamente,\n" + (persona || "[ Nombre de quien firma ]") + "\n[ Cargo ]\n" + empresa + (d.correo ? "\n" + d.correo : "")
+        : t;
+    }
+    t = (empresa === marca ? "We are " + marca + "." : "We are " + empresa + ", representatives of " + marca + ".") +
+      " We are writing to report that the WhatsApp number " + falso + " is allegedly being used to impersonate identities and defraud the company’s contacts.\n\n" +
+      "We request that you investigate this matter and take the appropriate measures to suspend the account and prevent further fraudulent activity.\n\n" +
+      "Facts:\n\n" +
+      "The WhatsApp account of " + marca + " was hacked by a third party without authorization.\n" +
+      "Subsequently, the number " + falso + " took over the number " + original + ", which belongs to " + marca + ".\n" +
+      "Messages are being sent from that number to the company’s contacts, impersonating " + marca + ".\n" +
+      marca + " has no relationship with that number and has not authorized its use.\n\n" +
+      "Policies violated by this number, according to the WhatsApp Terms of Service (" + WA_TERMINOS + "):\n\n" +
+      "Section “Legal And Acceptable Use”. It states that users “must access and use our Services only for legal, authorized, and acceptable purposes,” and prohibits using them in ways that:\n" +
+      "“(d) impersonate someone”, which is exactly what this number is doing by using the identity of " + marca + ";\n" +
+      "“(c) involve publishing falsehoods, misrepresentations, or misleading statements”, such as the misleading messages being sent to the company’s contacts;\n" +
+      "“(b) are illegal…”, since fraud and identity impersonation are crimes.\n" +
+      "Section “Our Terms And Policies”. It states that, in case of a violation, WhatsApp “may take action with respect to your account, including disabling or suspending your account.”\n" +
+      "Section “Safety, Security, And Integrity”. It states that WhatsApp will take “appropriate action, including by removing such people or activity or contacting law enforcement.”\n\n" +
+      "We request:\n\n" +
+      "The permanent disabling of the account associated with the number " + falso + ".\n" +
+      "Assistance for " + marca + " in recovering access to its original account.\n" +
+      "The preservation of that account’s information, in case it is requested by the authorities.\n\n" +
+      "Attached are screenshots of the messages sent from that number.";
+    return conFirma
+      ? "Dear WhatsApp Team,\n\n" + t + "\n\nSincerely,\n" + (persona || "[ Signer’s name ]") + "\n[ Title ]\n" + empresa + (d.correo ? "\n" + d.correo : "")
+      : t;
+  }
+
+  // Formulario: el MISMO de «Falsificación» (WA_URL, plan planWhatsApp con Counterfeit),
+  // pero la descripción (describe_how) es la denuncia de hackeo, exclusiva de este reporte
+  // (pedido del usuario 2026-10-21). El teléfono a denunciar se rellena igual que en
+  // Falsificación, con lo pegado en «Enlaces a denunciar».
+  function planWhatsAppHackeo(ctx) {
+    return planWhatsApp.call(this, Object.assign({}, ctx, { justif: textoHackeoWhatsApp(ctx, "en", false) }));
+  }
+
   // WhatsApp: formulario único (un solo URL). El tipo (copyright/marca/falsif.) y la
   // relación se eligen con radios; se denuncia por "Private Message Chat / Phone Number".
   var WA_URL = "https://www.whatsapp.com/contact/forms/5071674689613749/";
@@ -1123,6 +1237,7 @@ if (typeof importScripts === "function" && typeof window.TELEFONO_DE_URLS !== "f
     wa_copy:  { red: "WhatsApp", nombre: "Derechos de autor", cat: "autor", url: WA_URL, tipoTexto: "Copyright",  relName: "relationship_copyright",              esCopy: true,  manual: "El N.º de teléfono (país + número) se rellena solo si pegaste el número a denunciar en «URL(s) a denunciar» (https://wa.me/51987654321, api.whatsapp.com/send?phone=… o +51 987 654 321). Si no, escríbelo a mano (obligatorio). Revisa antes de enviar.", construirPlan: planWhatsApp },
     wa_marca: { red: "WhatsApp", nombre: "Marca comercial",  cat: "marca", url: WA_URL, tipoTexto: "Trademark",   relName: "relationship_trademark_counterfeit", esCopy: false, manual: "El N.º de teléfono (país + número) se rellena solo si pegaste el número a denunciar en «URL(s) a denunciar» (https://wa.me/51987654321, api.whatsapp.com/send?phone=… o +51 987 654 321). Si no, escríbelo a mano (obligatorio). Revisa antes de enviar.", construirPlan: planWhatsApp },
     wa_fals:  { red: "WhatsApp", nombre: "Falsificación",    cat: "fals",  url: WA_URL, tipoTexto: "Counterfeit", relName: "relationship_trademark_counterfeit", esCopy: false, manual: "El N.º de teléfono (país + número) se rellena solo si pegaste el número a denunciar en «URL(s) a denunciar» (https://wa.me/51987654321, api.whatsapp.com/send?phone=… o +51 987 654 321). Si no, escríbelo a mano (obligatorio). Revisa antes de enviar.", construirPlan: planWhatsApp },
+    wa_hackeo: { red: "WhatsApp", nombre: "Hackeo número", cat: "hackeo", url: WA_URL, tipoTexto: "Counterfeit", relName: "relationship_trademark_counterfeit", esCopy: false, manual: "Mismo formulario que Falsificación, pero la descripción es la denuncia de hackeo del número. El N.º de teléfono (país + número) se rellena solo si pegaste el número a denunciar en «Enlaces a denunciar» (https://wa.me/51987654321 o +51 987 654 321). Si no, escríbelo a mano (obligatorio). Revisa antes de enviar.", construirPlan: planWhatsAppHackeo },
     // ================= X (Twitter) =================
     // OJO: X usa nombres dinamicos (suf:true => coincidencia por sufijo). Los
     // formularios estan tras Cloudflare/SPA; PROBAR en el navegador real.
@@ -1837,6 +1952,19 @@ if (typeof importScripts === "function" && typeof window.TELEFONO_DE_URLS !== "f
       manual: "Donde dice [ ... ] pega el/los datos o enlace(s) a denunciar, revisa y envía.",
       construirEmail: function (ctx) { return bilingue(emailIP(ctx, "WhatsApp", this.destino, "en"), emailIP(ctx, "WhatsApp", this.destino, "es")); }
     },
+    wa_correo_hackeo: {
+      red: "WhatsApp", nombre: "Por correo (hackeo número)", cat: "hackeo", tipo: "email",
+      destino: "",
+      manual: "El 'Para' ya viene con los tres buzones de WhatsApp (ip@ / support@ / bd@). Revisa los datos marcados con [ ... ] (cargo, y número original si la marca no tiene teléfono en ⚙ Marcas), adjunta las capturas y envía.",
+      construirEmail: function (ctx) {
+        // En el asunto solo cabe un dato razonable: con muchos enlaces se corta (el cuerpo los lleva todos).
+        var corto = function (t) { return t.length > 80 ? t.slice(0, 77) + "..." : t; };
+        var fEn = corto(numeroFalsoDeUrls(ctx, "en")), fEs = corto(numeroFalsoDeUrls(ctx, "es"));
+        return bilingue(
+          { to: this.destino, asunto: "Hacked WhatsApp account - number " + fEn + " impersonating " + ctx.marca, cuerpo: textoHackeoWhatsApp(ctx, "en", true) },
+          { to: this.destino, asunto: "Cuenta de WhatsApp hackeada - el número " + fEs + " suplanta a " + ctx.marca, cuerpo: textoHackeoWhatsApp(ctx, "es", true) });
+      }
+    },
     tk_correo: {
       red: "TikTok", nombre: "Por correo (propiedad intelectual)", cat: "ip", tipo: "email",
       destino: "copyright@tiktok.com, ip-reports@tiktok.com, ip_reports@tiktok.com",
@@ -1861,7 +1989,7 @@ if (typeof importScripts === "function" && typeof window.TELEFONO_DE_URLS !== "f
     wa_correo_difam: {
       red: "WhatsApp", nombre: "Por correo (difamación)", cat: "difam", tipo: "email",
       destino: "",
-      manual: "El 'Para' va vacío: escribe el correo legal/de contacto correcto (WhatsApp no tiene un buzón público de difamación). Donde dice [ ... ] pega el/los datos o enlace(s) a denunciar, revisa y envía.",
+      manual: "El 'Para' ya viene con los tres buzones de WhatsApp (ip@ / support@ / bd@). Donde dice [ ... ] pega el/los datos o enlace(s) a denunciar, revisa y envía.",
       construirEmail: function (ctx) { return bilingue(emailDifamacion(ctx, "WhatsApp", this.destino, "en"), emailDifamacion(ctx, "WhatsApp", this.destino, "es")); }
     },
     tk_correo_difam: {
@@ -2556,6 +2684,7 @@ if (typeof importScripts === "function" && typeof window.TELEFONO_DE_URLS !== "f
   //  al crear uno nuevo), se aplican aquí de una vez a TODOS los formularios de
   //  tipo "email" de esa red. La lista vive en datos/correos_denuncia.js.
   //  Hoy: TikTok -> copyright@tiktok.com, ip-reports@tiktok.com, ip_reports@tiktok.com.
+  //       WhatsApp -> ip@whatsapp.com, support@whatsapp.com, bd@whatsapp.com.
   // ==========================================================================
   (function aplicar_destinos_fijos_por_red() {
     var CD = window.CORREOS_DENUNCIA;
