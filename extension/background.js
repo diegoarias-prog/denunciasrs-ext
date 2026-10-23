@@ -2135,6 +2135,52 @@ async function ctxCargarPlataformasDeUsuario() {
   } catch (e) { /* sin ellas, el menú sale con las de fábrica */ }
 }
 
+// Agrupa las marcas por su país (datos.pais) para el menú del clic derecho. Las variantes
+// de un mismo país («Perú», «Peru», « perú ») caen en el MISMO grupo: la clave es el
+// nombre sin tildes, en minúsculas y sin espacios sobrantes, y el título visible es la
+// variante con tildes si la hay. Una marca sin país va a «Sin país», que sale la última.
+// Devuelve { paises: [{clave, titulo, id}] ordenados, idDeMarca: {marca: id del país} }.
+const RS_SIN_PAIS = "Sin país";
+function ctxAgruparMarcasPorPais(marcas, MARCAS) {
+  // Solo letras «limpias»: fuera caracteres de control/formato (invisibles como U+200B) y
+  // medios emojis sueltos (un surrogate sin pareja hace que encodeURIComponent lance).
+  const limpio = (s) => Array.from(String(s).replace(/[\p{Cf}\p{Cc}]/gu, ""))
+    .filter((ch) => ch.length > 1 || ch.charCodeAt(0) < 0xD800 || ch.charCodeAt(0) > 0xDFFF)
+    .join("").replace(/\s+/g, " ").trim();
+  const normal = (s) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+  // Map y objeto SIN prototipo: el país lo escribe el usuario (o llega en un archivo de
+  // traspaso), así que «__proto__» o «constructor» no pueden tocar Object.prototype.
+  const titulos = new Map(), deMarca = Object.create(null);
+  const SIN = normal(RS_SIN_PAIS);
+  marcas.forEach((m) => {
+    let clave = SIN, titulo = RS_SIN_PAIS;
+    try {
+      // Solo se acepta TEXTO: un archivo de traspaso podría traer un objeto en `pais`, y
+      // un String() que lanzara dejaba el menú entero vacío. Tope de 60 caracteres
+      // COMPLETOS (Array.from), para no partir un emoji ni inflar el título.
+      const p = MARCAS[m] && MARCAS[m].pais;
+      const bruto = typeof p === "string" ? Array.from(limpio(p.slice(0, 400))).slice(0, 60).join("").trim() : "";
+      // Hace falta al menos una letra o número; si no, «Sin país».
+      if (/[\p{L}\p{N}]/u.test(bruto)) { clave = normal(bruto); titulo = bruto; }
+    } catch (e) { clave = SIN; titulo = RS_SIN_PAIS; }
+    // Se prefiere la variante con tildes («Perú» antes que «Peru»).
+    const previo = titulos.get(clave);
+    if (!previo || (/[^ -~]/.test(titulo) && !/[^ -~]/.test(previo))) titulos.set(clave, titulo);
+    deMarca[m] = clave;
+  });
+  // El id de cada país es su POSICIÓN (rs_pais|0, rs_pais|1…), no su nombre: así no hay
+  // nada que codificar ni que pueda chocar. Chrome cambia «%s» del título por el texto
+  // seleccionado y NO entiende «%%» (está como TODO en menu_manager.cc), así que el «%»
+  // se cambia por el de ancho completo «％» (U+FF05), que no dispara la sustitución.
+  const paises = Array.from(titulos, ([c, t]) => ({ clave: c, titulo: t.replace(/%/g, "％") }))
+    .sort((a, b) => (a.clave === SIN) - (b.clave === SIN) || a.titulo.localeCompare(b.titulo, "es"));
+  const idDeClave = new Map();
+  paises.forEach((pa, i) => { pa.id = "rs_pais|" + i; idDeClave.set(pa.clave, pa.id); });
+  const idDeMarca = Object.create(null);
+  marcas.forEach((m) => { idDeMarca[m] = idDeClave.get(deMarca[m]); });
+  return { paises: paises, idDeMarca: idDeMarca };
+}
+
 async function ctxConstruirMenusUnaVez() {
   await ctxCargarPlataformasDeUsuario();
   rsDiagnosticoMenu = { intentados: 0, creados: 0, fallidos: 0, primerError: "", idsFallidos: [] };
@@ -2161,9 +2207,18 @@ async function ctxConstruirMenusUnaVez() {
     // ---- PASADA 1: lo imprescindible de cada marca, y va PRIMERO. Nada la frena: si un
     // item falla se anota y se sigue con la marca siguiente, nunca se corta el bucle.
     // Al acabar aquí, las 20 marcas ya están en el menú pase lo que pase después.
+    // AGRUPADAS POR PAÍS (pedido del usuario, 2026-10-23). Con 32 marcas en una sola
+    // lista el menú era más alto que la pantalla: Windows lo cortaba con una flechita al
+    // fondo y las últimas del alfabeto (Zigi, Telsur, Supermaxi) no se veían aunque
+    // estaban creadas. Ahora: 🚩 Denuncias RS ▸ País ▸ Marca ▸ … Los ids de las marcas
+    // (rs_m|…) NO cambian, así que onClicked y todo lo que cuelga de ellas sigue igual.
+    const paisDeMarca = ctxAgruparMarcasPorPais(marcas, MARCAS);
+    paisDeMarca.paises.forEach((p) => {
+      ctxCrearItemDeMenu(Object.assign({ id: p.id, parentId: "rs_root", title: p.titulo }, base));
+    });
     marcas.forEach((m) => {
       const pid = "rs_m|" + rsEnc(m);
-      ctxCrearItemDeMenu(Object.assign({ id: pid, parentId: "rs_root", title: m }, base));
+      ctxCrearItemDeMenu(Object.assign({ id: pid, parentId: paisDeMarca.idDeMarca[m], title: m }, base));
       ctxCrearItemDeMenu(Object.assign({ id: "rs_fill|" + rsEnc(m), parentId: pid, title: "✍ Rellenar ESTA página" }, base));
       ctxCrearItemDeMenu(Object.assign({ id: "rs_sep|" + rsEnc(m), parentId: pid, type: "separator" }, base));
     });
