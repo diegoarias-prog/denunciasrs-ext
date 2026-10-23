@@ -136,6 +136,41 @@ if (typeof importScripts === "function" && typeof window.TELEFONO_DE_URLS !== "f
       "de la cuenta que quieres denunciar</b>».";
   }
 
+  // ==========================================================================
+  //  «PROPORCIONA MÁS DETALLES» DE X: MÁXIMO 280 CARACTERES
+  //  Pedido del usuario (2026-10-23) para TODOS los formularios de X. La descripción
+  //  de siempre (ctx.justif) pasa de 400 caracteres y la de perfil malicioso (x_supl,
+  //  x_falsif) son siete párrafos, así que NO se recorta: se escribe una versión corta
+  //  propia que conserva lo obligatorio —la política infringida CON SU ENLACE (skill
+  //  citar-politica-violada) y lo que se pide—. Si una marca de nombre muy largo la
+  //  hiciera pasar de 280, se cae primero la frase explicativa y luego se acorta el
+  //  nombre; la política y su enlace no se tocan nunca.
+  // ==========================================================================
+  var X_MAX_DETALLES = 280;
+  var X_DETALLES = {
+    x_acoso:        ["La cuenta acosa y difama a ", ", haciéndose pasar por la entidad y publicando información falsa."],
+    x_privado:      ["La cuenta publica sin autorización información privada de ", " y se hace pasar por la entidad."],
+    x_suplantacion: ["La cuenta suplanta la identidad de ", " para engañar a sus clientes y facilitar fraudes."],
+    x_falsif:       ["La cuenta usa sin autorización la marca de "," y ofrece productos o servicios falsificados."]
+  };
+  function detallesParaX(clave, marca) {
+    var k = clave === "x_privado_rep" ? "x_privado" : clave;
+    var frase = X_DETALLES[k] || X_DETALLES.x_acoso;
+    var pol = (window.JUSTIF && window.JUSTIF.POLITICAS && window.JUSTIF.POLITICAS[k]) || ["Reglas de X", "https://help.x.com/es/rules-and-policies"];
+    var cola = " Infringe la " + pol[0] + " (" + pol[1] + "). Solicitamos la suspensión de la cuenta.";
+    var nombre = String(marca || "").replace(/\s+/g, " ").trim() || "la entidad";
+    var texto = frase[0] + nombre + frase[1] + cola;
+    if (texto.length > X_MAX_DETALLES) texto = frase[0] + nombre + "." + cola;
+    if (texto.length > X_MAX_DETALLES) {
+      // Por caracteres de verdad (Array.from), no por unidades UTF-16: así un emoji del
+      // nombre no se parte por la mitad. La red de seguridad final es el slice de abajo.
+      var letras = Array.from(nombre);
+      var sobra = texto.length - X_MAX_DETALLES + 1;   // +1 por el «…»
+      texto = frase[0] + letras.slice(0, Math.max(1, letras.length - sobra)).join("").trim() + "…." + cola;
+    }
+    return texto.slice(0, X_MAX_DETALLES);
+  }
+
   // Navegador y sistema, para los formularios que preguntan el "User agent" (Cloudflare
   // lo pide para saber dónde se vio el abuso). Se lee del navegador REAL, no se inventa.
   function navegadorYSistema() {
@@ -1244,10 +1279,14 @@ if (typeof importScripts === "function" && typeof window.TELEFONO_DE_URLS !== "f
     x_acoso: {
       red: "X", nombre: "Acoso", cat: "x_acoso",
       url: "https://help.x.com/es/forms/safety-and-sensitive-content/violent-threats",
-      manual: "Con UN clic basta: la extensión elige sola «Una cuenta me acosa a mí o a otra persona» y «El contenido que estoy denunciando está dirigido a: Otra persona» —que es lo que hace aparecer el resto del formulario— y después rellena tu correo y la descripción. Completa TÚ la @cuenta y los enlaces a denunciar (X no los deduce de la marca) y resuelve el captcha antes de Enviar.",
+      manual: "Con UN clic basta: la extensión elige sola «Una cuenta me acosa a mí o a otra persona» y «El contenido que estoy denunciando está dirigido a: Otra persona» —que es lo que hace aparecer el resto del formulario— y después rellena tu correo, la descripción, la @cuenta a denunciar y el primer enlace. La @cuenta (con su @) se saca sola de la URL que cargaste (p. ej. x.com/Usuario/status/… → @Usuario) y la URL va en «Ejemplo 1»; solo si ninguna URL trae un usuario te avisa y la escribes TÚ. Resuelve el captcha antes de Enviar.",
       construirPlan: function (ctx) {
         var d = ctx.datos;
-        return { url: this.url, manual: this.manual, pasos: [
+        // «Nombre de usuario de la cuenta que quieres denunciar»: el @ sale de la URL a
+        // denunciar (ver usuarioDeX). Sin usuario, el paso se omite y se avisa.
+        var usuarioDenunciado = usuarioDeXEnUrls(ctx.urls);
+        var avisos = usuarioDenunciado ? [] : [avisoSinUsuarioDeX()];
+        return { url: this.url, manual: this.manual, avisos: avisos, pasos: [
           // ------------------------------------------------------------------------
           //  LOS DOS MENÚS VAN PRIMERO Y SON LO QUE ANTES FALTABA. Al cargar, esta
           //  página NO tiene ni una caja de texto: solo dos <select> NATIVOS, sin
@@ -1272,7 +1311,12 @@ if (typeof importScripts === "function" && typeof window.TELEFONO_DE_URLS !== "f
           // pasada aún no están, el propio motor reintenta los pasos pendientes durante
           // unos segundos (ver "VARIAS PASADAS automáticas" en motor.js).
           { tipo: "fillName", name: "Form_Email__c", valor: d.correo },
-          { tipo: "fillName", name: "DescriptionText", valor: ctx.justif },
+          { tipo: "fillName", name: "DescriptionText", valor: detallesParaX("x_acoso", ctx.marca) },
+          // Los mismos dos campos que en Contenido privado (es el MISMO formulario; la rama
+          // de acoso los pinta con los mismos `name`): «Ejemplo 1» = la primera URL a
+          // denunciar y el @ de la cuenta, con «@» delante. Valor vacío -> paso omitido.
+          { tipo: "fillName", name: "reported-content[0].value", valor: ((ctx.urls || [])[0] || "") },
+          { tipo: "fillName", suf: true, name: "Reported_Screen_Name__c", valor: usuarioDenunciado },
           { tipo: "check", name: "Communicate_Reported_Content__c" }
         ] };
       }
@@ -1317,7 +1361,7 @@ if (typeof importScripts === "function" && typeof window.TELEFONO_DE_URLS !== "f
           { tipo: "fillName", name: "relation-to-victim",
             valor: "Actuamos como representantes autorizados de " + marca + " para la protección de su marca e identidad digital. La información privada difundida en la cuenta denunciada pertenece a " + marca + " y se ha publicado sin su autorización." },
           { tipo: "fillName", name: "Form_Email__c", valor: d.correo },
-          { tipo: "fillName", name: "DescriptionText", valor: ctx.justif },
+          { tipo: "fillName", name: "DescriptionText", valor: detallesParaX("x_privado", ctx.marca) },
           { tipo: "fillName", name: "signature", valor: marca },
           { tipo: "fillName", name: "reported-content[0].value", valor: ((ctx.urls || [])[0] || "") },
           // Con «@» delante, como pide el placeholder. `suf` por robustez: hoy este `name`
@@ -1375,7 +1419,7 @@ if (typeof importScripts === "function" && typeof window.TELEFONO_DE_URLS !== "f
           { tipo: "fillName", name: "relation-to-victim",
             valor: "Actuamos como representantes autorizados de " + marca + " para la protección de su marca e identidad digital. La información privada difundida en la cuenta denunciada pertenece a " + marca + " y se ha publicado sin su autorización." },
           { tipo: "fillName", name: "Form_Email__c", valor: d.correo },
-          { tipo: "fillName", name: "DescriptionText", valor: ctx.justif },
+          { tipo: "fillName", name: "DescriptionText", valor: detallesParaX("x_privado_rep", ctx.marca) },
           { tipo: "fillName", name: "signature", valor: marca },
           // «Ejemplo 1»: la primera URL a denunciar (X añade las demás con «Añade otro
           // enlace», que aquí no se pulsa). Si no hay URLs cargadas, el paso se omite solo.
@@ -1411,7 +1455,7 @@ if (typeof importScripts === "function" && typeof window.TELEFONO_DE_URLS !== "f
     x_suplantacion: {
       red: "X", nombre: "Suplantación", cat: "x_supl",
       url: "https://help.x.com/es/forms/authenticity/impersonation/me-or-someone-i-represent/i-am-being-impersonated",
-      manual: "Se denuncia como MARCA: la extensión elige «Mi empresa, marca u organización» en «¿La identidad de quién está siendo suplantada?», y con eso X cambia el formulario entero (desaparece «Relación con la víctima» y aparecen los datos de empresa). Rellena el nombre de la PERSONA que firma, el correo, la empresa, el cargo, la dirección, el código postal, el país, el sitio web y la descripción, y marca «Una cuenta». DOS COSAS LAS HACES TÚ: (1) la VERIFICACIÓN DE IDENTIDAD GUBERNAMENTAL es obligatoria y la tienes que pasar tú con tu documento y una selfie —la extensión no la toca—; y (2) la pregunta «¿Trabajas directamente para la empresa…?» la dejamos SIN marcar a propósito: nosotros somos representantes autorizados, no empleados, y marcar lo contrario sería declarar algo falso en una denuncia. Elige tú la opción que corresponda. Completa también el @ de la cuenta impostora y los enlaces. Resuelve el captcha antes de enviar.",
+      manual: "Se denuncia como MARCA: la extensión elige «Mi empresa, marca u organización» en «¿La identidad de quién está siendo suplantada?», y con eso X cambia el formulario entero (desaparece «Relación con la víctima» y aparecen los datos de empresa). Rellena el nombre de la PERSONA que firma, el correo, la empresa, el cargo, la dirección, el código postal, el país, el sitio web y la descripción, y marca «Una cuenta». DOS COSAS LAS HACES TÚ: (1) la VERIFICACIÓN DE IDENTIDAD GUBERNAMENTAL es obligatoria y la tienes que pasar tú con tu documento y una selfie —la extensión no la toca—; y (2) la pregunta «¿Trabajas directamente para la empresa…?» la dejamos SIN marcar a propósito: nosotros somos representantes autorizados, no empleados, y marcar lo contrario sería declarar algo falso en una denuncia. Elige tú la opción que corresponda. El @ de la cuenta impostora se saca solo de la URL que cargaste (x.com/Usuario/… → @Usuario) y las URLs van en los enlaces a publicaciones; si ninguna URL trae un usuario, te avisa y lo escribes tú. Resuelve el captcha antes de enviar.",
       construirPlan: function (ctx) {
         var d = ctx.datos, marca = ctx.marca;
         // Quien FIRMA es la persona del correo, no la marca (mismo criterio que Cloudflare
@@ -1426,6 +1470,10 @@ if (typeof importScripts === "function" && typeof window.TELEFONO_DE_URLS !== "f
           "el correo «" + textoSeguro(d.correo || "") + "» no está en la lista de personas. Escríbelo a mano o añádelo en <b>⚙ Marcas</b>.");
         if (!postal) avisos.push("No tengo <b>código postal</b> para «" + textoSeguro(marca || "") + "» (" + textoSeguro(d.pais || "") + "): " +
           "escríbelo a mano o guárdalo en <b>⚙ Marcas</b> → «📮 Código / dirección postal».");
+        // @ de la cuenta impostora, sacado de la URL a denunciar (ver usuarioDeX).
+        var usuarioDenunciado = usuarioDeXEnUrls(ctx.urls);
+        if (!usuarioDenunciado) avisos.push(avisoSinUsuarioDeX());
+        var enlaces = (ctx.urls || []).filter(function (u) { return String(u || "").trim(); }).join("\n");
         avisos.push("«¿Trabajas directamente para la empresa…?» se deja SIN marcar a propósito " +
           "(somos representantes autorizados, no empleados). <b>Elígela tú</b> antes de enviar.");
         // Los `name` de X llevan un PREFIJO DINÁMICO que cambia en cada carga
@@ -1458,10 +1506,17 @@ if (typeof importScripts === "function" && typeof window.TELEFONO_DE_URLS !== "f
           { tipo: "fillName", suf: true, name: "@address", valor: direccion || d.pais },
           { tipo: "fillName", suf: true, name: "@postal-code", valor: postal },
           { tipo: "fillName", suf: true, name: "@website", valor: d.sitio || "" },
-          { tipo: "fillName", suf: true, name: "@userDesc", valor: ctx.justif },
+          { tipo: "fillName", suf: true, name: "@userDesc", valor: detallesParaX("x_suplantacion", ctx.marca) },
           // «¿Cómo te están suplantando?» -> «Una cuenta». Es cierto y es lo mismo que ya
           // se marca en Falsificación de marca.
           { tipo: "radio", suf: true, name: "@Impersonation_How__c", texto: "una cuenta", esperaMs: 600 },
+          // La cuenta impostora y sus enlaces. En el volcado de la rama de PERSONA están
+          // («_161025080@Reported_Screen_Name__c» y una caja «Enlaces a publicaciones donde
+          // la cuenta que estás denunciando afirma ser tú», SIN name); en la de MARCA el
+          // volcado se tomó antes de elegir «Una cuenta», así que van como `tardio`: si
+          // aparecen se rellenan y, si no, no bloquean ni salen en `faltan`.
+          { tipo: "fillName", suf: true, name: "Reported_Screen_Name__c", valor: usuarioDenunciado, tardio: true },
+          { tipo: "fillLabel", label: "enlaces a publicaciones", valor: enlaces, tardio: true },
           // OJO, A PROPÓSITO: NO se toca el radio `Type_of_Issue__c` («Trabajo directamente
           // para la empresa cuya identidad está siendo suplantada»). Marcarlo sería declarar
           // algo FALSO —somos representantes autorizados, no empleados— y del volcado solo
@@ -1477,7 +1532,7 @@ if (typeof importScripts === "function" && typeof window.TELEFONO_DE_URLS !== "f
     x_falsif: {
       red: "X", nombre: "Falsificación de marca", cat: "x_falsif",
       url: "https://help.x.com/es/forms/ipi/counterfeit/trademark-holder",
-      manual: "Se denuncia como titular de la marca. La extensión rellena tu nombre y correo, los datos del propietario (nombre, dirección, sitio web, su @ de X), la palabra de marca, el país, la ubicación de la marca, el N.º de registro si lo tienes guardado y la descripción, y marca las 4 declaraciones. Completa TÚ la @cuenta a denunciar y el enlace del contenido. «Clase de bienes o servicios» y «Oficina de registro» solo se rellenan si tienes esos datos guardados en ⚙ Marcas: si no, te avisa y los pones tú. Resuelve el captcha antes de enviar.",
+      manual: "Se denuncia como titular de la marca. La extensión rellena tu nombre y correo, los datos del propietario (nombre, dirección, sitio web, su @ de X), la palabra de marca, el país, la ubicación de la marca, el N.º de registro si lo tienes guardado y la descripción, y marca las 4 declaraciones. La @cuenta a denunciar y el enlace se sacan solos de la URL que cargaste (x.com/Usuario/… → @Usuario) si X muestra esos campos; si no, complétalos tú. «Clase de bienes o servicios» y «Oficina de registro» solo se rellenan si tienes esos datos guardados en ⚙ Marcas: si no, te avisa y los pones tú. Resuelve el captcha antes de enviar.",
       construirPlan: function (ctx) {
         var d = ctx.datos, marca = ctx.marca;
         var avisos = [];
@@ -1506,6 +1561,9 @@ if (typeof importScripts === "function" && typeof window.TELEFONO_DE_URLS !== "f
         // veraz que poner: se avisa en vez de inventarlo.
         avisos.push("«<b>Oficina de registro</b>» (la agencia donde se registró la marca) no la tenemos guardada: " +
           "escríbela tú si la sabes. Referencia del país: " + textoSeguro(baseMarcasDe(d.pais)));
+        // @ de la cuenta a denunciar, sacado de la URL (ver usuarioDeX).
+        var usuarioDenunciado = usuarioDeXEnUrls(ctx.urls);
+        if (!usuarioDenunciado) avisos.push(avisoSinUsuarioDeX());
         if (!d.registro) avisos.push("«<b>Número de registro de marca</b>» está vacío: no hay ninguno guardado para «" +
           textoSeguro(marca) + "». Ponlo a mano o guárdalo en <b>⚙ Marcas</b>.");
         return { url: this.url, manual: this.manual, avisos: avisos, pasos: [
@@ -1513,7 +1571,7 @@ if (typeof importScripts === "function" && typeof window.TELEFONO_DE_URLS !== "f
           { tipo: "radio", suf: true, name: "Where_Displayed__c", texto: "una cuenta de x", esperaMs: 600 },
           { tipo: "fillName", suf: true, name: "Form_Name__c", valor: marca },
           { tipo: "fillName", suf: true, name: "Form_Email__c", valor: d.correo },
-          { tipo: "fillName", suf: true, name: "DescriptionText", valor: ctx.justif },
+          { tipo: "fillName", suf: true, name: "DescriptionText", valor: detallesParaX("x_falsif", ctx.marca) },
           { tipo: "fillName", suf: true, name: "Content_Owner_Name__c", valor: marca },
           // «Dirección del propietario»: la dirección postal guardada en ⚙ Marcas si la hay
           // (un código suelto no es una dirección); si no, el país, como antes.
@@ -1537,6 +1595,11 @@ if (typeof importScripts === "function" && typeof window.TELEFONO_DE_URLS !== "f
           // ir `opcional`, tampoco salía en `faltan`. Fallo silencioso, encontrado al
           // revisar el volcado real. Solo se elige si conocemos el número (ver arriba).
           { tipo: "select", suf: true, name: "trademark-class", texto: claseNiza, opcional: true, tardio: true },
+          // Cuenta a denunciar y su enlace: el volcado de este formulario se tomó antes de
+          // elegir «Una cuenta de X» y no los recoge, así que van por los `name` que X usa
+          // en sus otros formularios y como `tardio` (si no aparecen, no bloquean).
+          { tipo: "fillName", suf: true, name: "Reported_Screen_Name__c", valor: usuarioDenunciado, tardio: true },
+          { tipo: "fillName", suf: true, name: "reported-content[0].value", valor: ((ctx.urls || [])[0] || ""), tardio: true },
           { tipo: "check", name: "confirm-1" },
           { tipo: "check", name: "confirm-2" },
           { tipo: "check", name: "confirm-3" },
